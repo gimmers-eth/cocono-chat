@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0f1115" />
+  <title>cocono-chat</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main>
+    <h1>cocono-chat</h1>
+
+    <section id="view-auth" hidden>
+      <p id="auth-hint">Create an account. Your keys are generated on this device and never leave it.</p>
+      <div id="signup-row">
+        <input id="username" type="text" autocomplete="username" spellcheck="false"
+               placeholder="username (5+ chars: a-z, 0-9, _ -)" maxlength="64" />
+        <button id="btn-signup">Create account</button>
+      </div>
+      <button id="btn-login" hidden>Log in</button>
+      <p id="auth-status" class="status" role="status"></p>
+    </section>
+
+    <section id="view-home" hidden>
+      <p class="status">Signed in as <strong id="home-user"></strong> <span id="home-device" class="dim"></span></p>
+      <p class="dim">Milestone 1: accounts. Messaging arrives in milestone 3.</p>
+      <button id="btn-logout">Log out</button>
+      <button id="btn-forget" class="danger">Forget this device</button>
+    </section>
+
+    <section id="view-blocked" hidden>
+      <p class="status error">cocono-chat is already open in another tab on this device.</p>
+    </section>
+  </main>
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

@@ -45,3 +45,6 @@ Thumbs.db
 .qwen/
 
 .idea/
+
+# Local dev databases (mongodb-memory-server persistent data)
+be/.data/

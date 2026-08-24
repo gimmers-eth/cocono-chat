@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>cocono-chat admin</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f1115;
+      --panel: #171a21;
+      --text: #e6e8ee;
+      --dim: #8b90a0;
+      --accent: #4f8cff;
+      --danger: #d05252;
+      --line: #2a2f3a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 14px;
+    }
+    main { max-width: 64rem; margin: 0 auto; padding: 1.5rem; }
+    h1 { font-size: 1.3rem; margin: 0 0 1rem; }
+    h2 { font-size: 1rem; margin: 2rem 0 0.5rem; color: var(--dim); text-transform: uppercase; letter-spacing: 0.05em; }
+    .panel { background: var(--panel); border-radius: 10px; padding: 1rem; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--dim); font-weight: 500; font-size: 0.8rem; text-transform: uppercase; }
+    tr:last-child td { border-bottom: none; }
+    input, button {
+      font: inherit; padding: 0.4rem 0.7rem; border-radius: 7px; border: 1px solid var(--line);
+    }
+    input { background: var(--bg); color: var(--text); }
+    button { background: var(--accent); border-color: var(--accent); color: #fff; cursor: pointer; }
+    button.danger { background: transparent; border-color: var(--danger); color: var(--danger); }
+    button.tiny { padding: 0.15rem 0.5rem; font-size: 0.8rem; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    .row { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.75rem; }
+    .badge {
+      display: inline-block; padding: 0.05rem 0.45rem; border-radius: 999px;
+      font-size: 0.72rem; background: var(--line); color: var(--text);
+    }
+    .badge.main { background: var(--accent); color: #fff; }
+    .dim { color: var(--dim); }
+    .mono { font-family: ui-monospace, monospace; font-size: 0.82rem; }
+    #status { min-height: 1.2rem; margin: 0.5rem 0; }
+    #status.error { color: var(--danger); }
+    #status.ok { color: #6fbf73; }
+    .device { padding: 0.2rem 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>cocono-chat — internal admin</h1>
+    <div class="panel">
+      <div class="row">
+        <label class="dim" for="token">Admin token</label>
+        <input id="token" type="password" placeholder="ADMIN_TOKEN (blank if not set)" size="36" />
+        <button id="btn-refresh">Refresh</button>
+        <span id="updated" class="dim"></span>
+      </div>
+      <p id="status"></p>
+    </div>
+
+    <h2>Rate limits</h2>
+    <div class="panel">
+      <div class="row">
+        <input id="clear-ip" type="text" placeholder="IP address" size="24" />
+        <button id="btn-clear-ip">Clear limits for IP</button>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Limit</th><th>Scope</th><th>Subject</th><th>Count / limit</th><th>Window</th><th>Resets in</th><th></th></tr>
+        </thead>
+        <tbody id="limits-body"></tbody>
+      </table>
+      <p id="limits-empty" class="dim" hidden>No active rate-limit counters.</p>
+    </div>
+
+    <h2>Users &amp; devices</h2>
+    <div class="panel">
+      <table>
+        <thead>
+          <tr><th>User</th><th>Created</th><th>Devices</th><th></th></tr>
+        </thead>
+        <tbody id="users-body"></tbody>
+      </table>
+      <p id="users-empty" class="dim" hidden>No users yet.</p>
+    </div>
+  </main>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

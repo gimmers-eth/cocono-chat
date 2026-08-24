@@ -1,0 +1,16 @@
+{
+  "name": "cocono-chat",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter @cocono/be dev",
+    "start": "pnpm --filter @cocono/be start",
+    "admin": "pnpm --filter @cocono/be admin",
+    "test": "pnpm --filter @cocono/be test"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "mongodb-memory-server"
+    ]
+  }
+}

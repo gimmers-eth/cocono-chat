@@ -127,17 +127,42 @@ Each user has an account that they can connect to using multiple devices.
   sizes. Message content is never visible to the server.
 
 ### Account creation
-Signup happens via the REST API. The creation data object is:
+Signup happens via the REST API (`POST /api/signup`). The creation data object is:
 
 ```
 {
     u: string // username
-    p: string // public key of user
-    a: string // AES key of user
+    p: string // public key of user (raw Ed25519, base64url)
+    a: string // AES key of user (raw AES-GCM, base64url)
+    d: string // device id (client-generated UUID)
+    s: string // Ed25519 signature over the canonical JSON of { a, d, p, u }
 }
 ```
 
-JSON-encoded and sent to the server.
+JSON-encoded and sent to the server. Keys are base64url-encoded **raw** bytes. The
+signature proves possession of the private key at signup. The first registered device is
+the **main** device. `p`, `a` and usernames are validated server-side; usernames are
+stored case-insensitively for uniqueness.
+
+### Authentication (challenge-response)
+There are no passwords — login proves possession of a registered device's private key.
+Implemented as a challenge-response flow over REST:
+
+1. `POST /api/auth/challenge` with `{ u, d }` — the server returns a one-time nonce `n`
+   (random 32 bytes, base64url), stored in Redis with a TTL (`NONCE_TTL_SEC`, default 5
+   minutes) and keyed to that username + device.
+2. The client signs the nonce with the device's Ed25519 key.
+3. `POST /api/auth/verify` with `{ u, d, n, s }` — the server checks the nonce (must
+   exist, be unexpired, and match the username + device), verifies the signature against
+   the stored public key, then issues a **JWT** (HS256, `JWT_EXPIRES_IN_SEC`, default
+   24h). Nonces are single-use — verification consumes them, so replays are rejected.
+4. The JWT is sent as `Authorization: Bearer <token>` on authenticated REST endpoints.
+
+Rate limiting: challenge is limited per-IP, verify attempts per-account, and signup
+per-IP (see `.env.example`).
+
+The REST API uses JWT auth; the WebSocket layer (later milestone) will validate identity
+supplied at upgrade time.
 
 ### Message envelope
 A message sent to the server from a client looks as follows:
@@ -286,4 +311,9 @@ and groups with offline delivery.
 
 ## Repo
 
-Monorepo.
+Monorepo managed with pnpm workspaces:
+
+- `be/` — Node.js backend (Fastify REST API; also serves the FE as static files).
+  `pnpm dev` runs a persistent mongodb-memory-server (data in `be/.data/`) plus the
+  server with auto-reload; `pnpm test` runs unit + integration tests (node:test).
+- `fe/` — the PWA (plain JS ES modules, no build step).

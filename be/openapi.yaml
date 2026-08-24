@@ -1,0 +1,371 @@
+openapi: 3.0.3
+info:
+  title: cocono-chat backend API
+  version: 0.1.0
+  description: |
+    REST API for cocono-chat accounts (milestone 1).
+
+    ## Encoding conventions
+
+    - All binary material (public keys, AES keys, signatures, nonces) is encoded as
+      **base64url** (RFC 4648 §5, no padding).
+    - Ed25519 public keys are the **raw 32-byte** key (`crypto.subtle.exportKey('raw')`
+      in the browser).
+    - Signatures are computed over the UTF-8 bytes of the **canonical JSON** of the
+      signed object: object keys sorted lexicographically, no whitespace
+      (e.g. `canonical({u,p,a,d})` → `{"a":...,"d":...,"p":...,"u":...}`).
+
+    ## Authentication
+
+    There are no passwords. Login is a challenge-response proof of possession of a
+    registered device's Ed25519 private key:
+
+    1. `POST /api/auth/challenge` → one-time nonce `n` (Redis-backed, TTL, single-use).
+    2. Client signs the nonce string (UTF-8 bytes) with the device key.
+    3. `POST /api/auth/verify` → JWT (HS256) for use as `Authorization: Bearer <token>`.
+
+    Errors are returned as `{ "error": <code>, "message": <human readable> }`.
+    Rate-limited responses (429) additionally carry a `Retry-After` header (seconds).
+servers:
+  - url: http://127.0.0.1:3000
+    description: Local development server (pnpm dev)
+
+tags:
+  - name: accounts
+    description: Account creation
+  - name: auth
+    description: Passwordless challenge-response login and session info
+
+paths:
+  /api/signup:
+    post:
+      tags: [accounts]
+      operationId: signup
+      summary: Create an account with the first device
+      description: |
+        Registers a username together with the first device's Ed25519 public key and
+        AES-GCM transport key. The request must be signed with the new Ed25519 private
+        key to prove ownership. Usernames are at least 5 characters of `[a-zA-Z0-9_-]`,
+        case-insensitively unique, and must not be reserved.
+
+        Rate limited per client IP (default 5/hour).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupRequest'
+            example:
+              u: alice
+              p: k7Sb3QKx9d2mVn4rT8uYw1zAe5fGh0jLpQsXcBvN
+              a: F9r2KjLm8nPqRsT1uVwXyZa3bCdEfGhIjKlMnOpQrS
+              d: 01234567-89ab-cdef-0123-456789abcdef
+              s: zYxWvUtSrQpOnMlKjIhGfEdCbAzYxWvUtSrQpOnMlKjIhGfEdCbAzYxWvUtSrQpOnMlKjIhGfEdCbA
+      responses:
+        '201':
+          description: Account created. The device is registered as the main device.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignupResponse'
+        '400':
+          description: |
+            Validation failure. `error` is one of:
+            `invalid_username`, `reserved_username`, `invalid_device_id`,
+            `invalid_public_key`, `invalid_aes_key`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 'Signature does not verify (`error: invalid_signature`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 'Username already registered (`error: username_taken`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /api/auth/challenge:
+    post:
+      tags: [auth]
+      operationId: authChallenge
+      summary: Request a one-time login nonce
+      description: |
+        Returns a single-use nonce bound to the given username + device id. The nonce is
+        random 32 bytes (base64url), stored in Redis with a TTL (default 300 seconds),
+        and is consumed by the first verify attempt — successful or not.
+
+        Rate limited per client IP (default 30/15min).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChallengeRequest'
+            example:
+              u: alice
+              d: 01234567-89ab-cdef-0123-456789abcdef
+      responses:
+        '200':
+          description: Nonce issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChallengeResponse'
+        '400':
+          description: 'Missing fields (`error: invalid_request`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: |
+            No such account or device registered on it
+            (`error: unknown_account`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /api/auth/verify:
+    post:
+      tags: [auth]
+      operationId: authVerify
+      summary: Verify the signed nonce and receive a JWT
+      description: |
+        Consumes the nonce and verifies the Ed25519 signature over the nonce string
+        (its UTF-8 bytes) against the device's stored public key. On success a JWT
+        (HS256, default expiry 24h) is issued with payload
+        `{ sub, u, d, iat, exp }`.
+
+        Failed attempts consume the nonce too (a new challenge is needed to retry).
+        Rate limited per account (default 20/15min).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyRequest'
+            example:
+              u: alice
+              d: 01234567-89ab-cdef-0123-456789abcdef
+              n: nOq3rT6uYw9zAc2eFg5hJk8mNpQsVx
+              s: aBcDeFgHiJkLmNoPqRsTuVwXyZaBcDeFgHiJkLmNoPqRsTuVwXyZaBcDeFgHiJkLmNoPqRsTuVwXyZaB
+      responses:
+        '200':
+          description: Authentication successful.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerifyResponse'
+        '400':
+          description: 'Missing fields (`error: invalid_request`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: |
+            `error` is one of:
+            `bad_nonce` (unknown, expired, already consumed, or username/device
+            mismatch), `bad_signature` (signature does not verify).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /api/me:
+    get:
+      tags: [auth]
+      operationId: me
+      summary: Current account info
+      description: Returns the authenticated user's display name and device id.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Account info.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+              example:
+                u: alice
+                d: 01234567-89ab-cdef-0123-456789abcdef
+                createdAt: '2026-08-24T15:00:00.000Z'
+        '401':
+          description: 'Missing, malformed or expired token (`error: unauthorized`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 'Account no longer exists (`error: unknown_account`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: HS256 JWT issued by /api/auth/verify.
+
+  responses:
+    RateLimited:
+      description: 'Too many requests (`error: rate_limited`).'
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Username:
+      type: string
+      description: At least 5 characters of `[a-zA-Z0-9_-]`; case-insensitively unique.
+      pattern: '^[a-zA-Z0-9_-]{5,}$'
+      example: alice
+
+    DeviceId:
+      type: string
+      description: |
+        Client-generated device identifier, 8–64 characters of `[a-zA-Z0-9_-]`
+        (clients use `crypto.randomUUID()`).
+      pattern: '^[a-zA-Z0-9_-]{8,64}$'
+      example: 01234567-89ab-cdef-0123-456789abcdef
+
+    PublicKey:
+      type: string
+      description: Raw 32-byte Ed25519 public key, base64url-encoded.
+      example: k7Sb3QKx9d2mVn4rT8uYw1zAe5fGh0jLpQsXcBvN
+
+    AesKey:
+      type: string
+      description: |
+        Raw AES-GCM transport key (16, 24 or 32 bytes; clients use 32),
+        base64url-encoded. Encrypts client <-> server traffic only; message content is
+        additionally end-to-end encrypted with per-conversation keys.
+      example: F9r2KjLm8nPqRsT1uVwXyZa3bCdEfGhIjKlMnOpQrS
+
+    Signature:
+      type: string
+      description: 64-byte Ed25519 signature, base64url-encoded.
+      example: zYxWvUtSrQpOnMlKjIhGfEdCbAzYxWvUtSrQpOnMlKjIhGfEdCbAzYxWvUtSrQpOnMlKjIhGfEdCbA
+
+    Nonce:
+      type: string
+      description: Random 32 bytes, base64url-encoded. Single-use, TTL-limited.
+      example: nOq3rT6uYw9zAc2eFg5hJk8mNpQsVx
+
+    SignupRequest:
+      type: object
+      required: [u, p, a, d, s]
+      properties:
+        u:
+          $ref: '#/components/schemas/Username'
+        p:
+          $ref: '#/components/schemas/PublicKey'
+        a:
+          $ref: '#/components/schemas/AesKey'
+        d:
+          $ref: '#/components/schemas/DeviceId'
+        s:
+          allOf:
+            - $ref: '#/components/schemas/Signature'
+          description: |
+            Ed25519 signature over the UTF-8 bytes of the canonical JSON of
+            `{ a, d, p, u }` (keys sorted, no whitespace).
+
+    SignupResponse:
+      type: object
+      required: [u]
+      properties:
+        u:
+          $ref: '#/components/schemas/Username'
+
+    ChallengeRequest:
+      type: object
+      required: [u, d]
+      properties:
+        u:
+          $ref: '#/components/schemas/Username'
+        d:
+          $ref: '#/components/schemas/DeviceId'
+
+    ChallengeResponse:
+      type: object
+      required: [n]
+      properties:
+        n:
+          $ref: '#/components/schemas/Nonce'
+
+    VerifyRequest:
+      type: object
+      required: [u, d, n, s]
+      properties:
+        u:
+          $ref: '#/components/schemas/Username'
+        d:
+          $ref: '#/components/schemas/DeviceId'
+        n:
+          $ref: '#/components/schemas/Nonce'
+        s:
+          allOf:
+            - $ref: '#/components/schemas/Signature'
+          description: Ed25519 signature over the UTF-8 bytes of the nonce string `n`.
+
+    VerifyResponse:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          description: |
+            HS256 JWT. Payload: `{ sub: <lowercase username>, u: <display username>,
+            d: <device id>, iat, exp }`. Send as `Authorization: Bearer <token>`.
+
+    MeResponse:
+      type: object
+      required: [u, d, createdAt]
+      properties:
+        u:
+          $ref: '#/components/schemas/Username'
+        d:
+          $ref: '#/components/schemas/DeviceId'
+        createdAt:
+          type: string
+          format: date-time
+          description: Account creation time.
+
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          description: Machine-readable error code (documented per endpoint).
+          example: invalid_username
+        message:
+          type: string
+          description: Human-readable description.
+          example: Username must be 5+ chars of [a-zA-Z0-9_-]
