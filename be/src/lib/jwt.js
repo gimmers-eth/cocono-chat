@@ -5,13 +5,20 @@ import { b64uDecode, b64uEncode } from './b64u.js';
 
 const header = b64uEncode(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
 
+// iss/aud pin tokens to this service so they cannot be reused by/against a
+// second consumer if one ever appears.
+const ISSUER = 'cocono-chat';
+const AUDIENCE = 'cocono-chat-api';
+
 function mac(signingInput, secret) {
   return createHmac('sha256', secret).update(signingInput).digest();
 }
 
 export function signJwt(payload, secret, expiresInSeconds) {
   const now = Math.floor(Date.now() / 1000);
-  const body = b64uEncode(JSON.stringify({ ...payload, iat: now, exp: now + expiresInSeconds }));
+  const body = b64uEncode(
+    JSON.stringify({ ...payload, iss: ISSUER, aud: AUDIENCE, iat: now, exp: now + expiresInSeconds }),
+  );
   const signingInput = `${header}.${body}`;
   return `${signingInput}.${b64uEncode(mac(signingInput, secret))}`;
 }
@@ -36,6 +43,7 @@ export function verifyJwt(token, secret) {
   } catch {
     return null;
   }
+  if (payload.iss !== ISSUER || payload.aud !== AUDIENCE) return null;
   if (typeof payload.exp !== 'number' || payload.exp <= Math.floor(Date.now() / 1000)) return null;
   return payload;
 }

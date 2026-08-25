@@ -5,7 +5,16 @@ const LIMIT_META = {
   signup: (config) => ({ limit: config.signupIpLimit, windowSec: config.signupIpWindowSec, scope: 'ip' }),
   challenge: (config) => ({ limit: config.challengeIpLimit, windowSec: config.challengeIpWindowSec, scope: 'ip' }),
   verify: (config) => ({ limit: config.verifyAccountLimit, windowSec: config.verifyAccountWindowSec, scope: 'account' }),
+  verifyip: (config) => ({ limit: config.verifyIpLimit, windowSec: config.verifyIpWindowSec, scope: 'ip' }),
+  denroll: (config) => ({ limit: config.deviceEnrollIpLimit, windowSec: config.deviceEnrollIpWindowSec, scope: 'ip' }),
+  dapprove: (config) => ({ limit: config.deviceApproveAccountLimit, windowSec: config.deviceApproveAccountWindowSec, scope: 'account' }),
+  dpending: (config) => ({ limit: config.deviceApproveAccountLimit, windowSec: config.deviceApproveAccountWindowSec, scope: 'account' }),
+  denrollstatus: (config) => ({ limit: config.enrollStatusIpLimit, windowSec: config.enrollStatusIpWindowSec, scope: 'ip' }),
+  admintoken: () => ({ limit: 10, windowSec: 15 * 60, scope: 'ip' }),
 };
+
+// Every IP-scoped counter cleared by POST /api/admin/rate-limits/clear { ip }.
+const IP_SCOPED = ['signup', 'challenge', 'verifyip', 'denroll', 'denrollstatus', 'admintoken'];
 
 // GET /api/admin/rate-limits, POST /api/admin/rate-limits/clear.
 export default async function rateLimitsRoutes(app, { redis, config }) {
@@ -43,7 +52,7 @@ export default async function rateLimitsRoutes(app, { redis, config }) {
       return { cleared: await redis.del(key) };
     }
     if (typeof ip === 'string' && ip.length > 0) {
-      const cleared = await redis.del(`rl:signup:${ip}`, `rl:challenge:${ip}`);
+      const cleared = await redis.del(...IP_SCOPED.map((name) => `rl:${name}:${ip}`));
       return { cleared };
     }
     return fail(reply, 'invalid_request', 'Provide { ip } or { key }', 400);

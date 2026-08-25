@@ -29,6 +29,8 @@ export async function setupApp(overrides = {}) {
 
 // Simulates a client device: Ed25519 key pair + signing helpers, matching
 // what the browser does with WebCrypto.
+export const nowEpoch = () => Math.floor(Date.now() / 1000);
+
 export function makeClient() {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
   const spki = publicKey.export({ format: 'der', type: 'spki' });
@@ -38,8 +40,9 @@ export function makeClient() {
     signBytes(bytes) {
       return b64uEncode(sign(null, bytes, privateKey));
     },
-    signSignup({ u, a, d }) {
-      return this.signBytes(Buffer.from(canonical({ a, d, p: this.p, u }), 'utf8'));
+    // Signed payload shape for signup AND enroll (M6: includes timestamp t).
+    signSignup({ u, a, d, t = nowEpoch() }) {
+      return this.signBytes(Buffer.from(canonical({ a, d, p: this.p, t, u }), 'utf8'));
     },
   };
 }

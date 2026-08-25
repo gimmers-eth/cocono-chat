@@ -13,7 +13,11 @@ info:
       in the browser).
     - Signatures are computed over the UTF-8 bytes of the **canonical JSON** of the
       signed object: object keys sorted lexicographically, no whitespace
-      (e.g. `canonical({u,p,a,d})` → `{"a":...,"d":...,"p":...,"u":...}`).
+      (e.g. `canonical({u,p,a,d,t})` → `{"a":...,"d":...,"p":...,"t":...,"u":...}`).
+    - Signed payloads (signup, device enrollment) include a client timestamp `t`
+      (epoch seconds) that must be within `SIGNED_PAYLOAD_MAX_AGE_SEC` (default 5
+      minutes); each signature is additionally de-duplicated in Redis, so captured
+      payloads cannot be replayed.
 
     ## Authentication
 
@@ -21,8 +25,15 @@ info:
     registered device's Ed25519 private key:
 
     1. `POST /api/auth/challenge` → one-time nonce `n` (Redis-backed, TTL, single-use).
+       A nonce is issued for ANY username/device pair — unknown pairs get a nonce that
+       simply never verifies, so the endpoint does not reveal which accounts exist.
     2. Client signs the nonce string (UTF-8 bytes) with the device key.
-    3. `POST /api/auth/verify` → JWT (HS256) for use as `Authorization: Bearer <token>`.
+    3. `POST /api/auth/verify` → JWT (HS256, `iss`/`aud` pinned) for use as
+       `Authorization: Bearer <token>`.
+
+    JWTs are re-checked against the live device registry on every authenticated
+    request: a device removed by an admin loses access immediately, without waiting
+    for token expiry.
 
     Errors are returned as `{ "error": <code>, "message": <human readable> }`.
     Rate-limited responses (429) additionally carry a `Retry-After` header (seconds).
@@ -57,8 +68,11 @@ paths:
       description: |
         Registers a username together with the first device's Ed25519 public key and
         AES-GCM transport key. The request must be signed with the new Ed25519 private
-        key to prove ownership. Usernames are at least 5 characters of `[a-zA-Z0-9_-]`,
+        key to prove ownership. Usernames are 5-64 characters of `[a-zA-Z0-9_-]`,
         case-insensitively unique, and must not be reserved.
+
+        The signed payload includes a client timestamp `t` and is protected against
+        replay (see info description).
 
         Rate limited per client IP (default 5/hour).
       requestBody:
@@ -72,6 +86,7 @@ paths:
               p: k7Sb3QKx9d2mVn4rT8uYw1zAe5fGh0jLpQsXcBvN
               a: F9r2KjLm8nPqRsT1uVwXyZa3bCdEfGhIjKlMnOpQrS
               d: 01234567-89ab-cdef-0123-456789abcdef
+              t: 1787600000
               s: zYxWvUtSrQpOnMlKjIhGfEdCbAzYxWvUtSrQpOnMlKjIhGfEdCbAzYxWvUtSrQpOnMlKjIhGfEdCbA
       responses:
         '201':
@@ -84,13 +99,17 @@ paths:
           description: |
             Validation failure. `error` is one of:
             `invalid_username`, `reserved_username`, `invalid_device_id`,
-            `invalid_public_key`, `invalid_aes_key`.
+            `invalid_public_key`, `invalid_aes_key`,
+            `stale_payload` (timestamp missing or outside the freshness window).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '401':
-          description: 'Signature does not verify (`error: invalid_signature`).'
+          description: |
+            `error` is one of:
+            `invalid_signature` (signature does not verify),
+            `replay` (this exact signed payload was already used).
           content:
             application/json:
               schema:
@@ -114,6 +133,10 @@ paths:
         random 32 bytes (base64url), stored in Redis with a TTL (default 300 seconds),
         and is consumed by the first verify attempt — successful or not.
 
+        A nonce is issued for ANY username/device pair: unknown pairs get a nonce that
+        simply never verifies, so this endpoint does not reveal which accounts or
+        devices exist.
+
         Rate limited per client IP (default 30/15min).
       requestBody:
         required: true
@@ -132,15 +155,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ChallengeResponse'
         '400':
-          description: 'Missing fields (`error: invalid_request`).'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: |
-            No such account or device registered on it
-            (`error: unknown_account`).
+          description: 'Missing or malformed fields (`error: invalid_request`).'
           content:
             application/json:
               schema:
@@ -157,10 +172,13 @@ paths:
         Consumes the nonce and verifies the Ed25519 signature over the nonce string
         (its UTF-8 bytes) against the device's stored public key. On success a JWT
         (HS256, default expiry 24h) is issued with payload
-        `{ sub, u, d, iat, exp }`.
+        `{ sub, u, d, iss, aud, iat, exp }`.
+
+        Ordering matters: the nonce is consumed BEFORE the rate limits are counted,
+        so junk requests (no valid nonce) cannot exhaust an account's budget. Valid
+        attempts are limited per account AND per IP (defaults 20/15min each).
 
         Failed attempts consume the nonce too (a new challenge is needed to retry).
-        Rate limited per account (default 20/15min).
       requestBody:
         required: true
         content:
@@ -180,7 +198,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/VerifyResponse'
         '400':
-          description: 'Missing fields (`error: invalid_request`).'
+          description: 'Missing or malformed fields (`error: invalid_request`).'
           content:
             application/json:
               schema:
@@ -242,7 +260,8 @@ paths:
         `GET /api/devices/enroll-status/{enrollId}` until approved.
 
         Enrollment itself is unauthenticated — approval by an existing device is the
-        gate. Rate limited per client IP (default 10/15min).
+        gate. The payload follows the same freshness + replay rules as signup.
+        Rate limited per client IP (default 10/15min).
       requestBody:
         required: true
         content:
@@ -260,13 +279,16 @@ paths:
           description: |
             Validation failure. `error` is one of:
             `invalid_username`, `invalid_device_id`, `invalid_public_key`,
-            `invalid_aes_key`.
+            `invalid_aes_key`, `stale_payload`.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '401':
-          description: 'Signature does not verify (`error: invalid_signature`).'
+          description: |
+            `error` is one of:
+            `invalid_signature` (signature does not verify),
+            `replay` (this exact signed payload was already used).
           content:
             application/json:
               schema:
@@ -324,6 +346,53 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+
+  /api/devices/pending:
+    post:
+      tags: [devices]
+      operationId: devicePending
+      summary: Inspect a pending enrollment before approving it
+      description: |
+        Returns the device id and request time for a pairing code, so the approving
+        user can see WHAT they are about to approve (defense against social-engineered
+        approvals). Does not consume the code.
+
+        Rate limited per account (dedicated bucket, same limits as approve).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveRequest'
+      responses:
+        '200':
+          description: Pending enrollment details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PendingResponse'
+        '400':
+          description: 'Code is not 6 digits (`error: invalid_request`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 'Missing, malformed or expired token (`error: unauthorized`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 'No pending enrollment with that code for this account (`error: unknown_code`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
 
   /api/devices/approve:
     post:
@@ -437,8 +506,8 @@ components:
   schemas:
     Username:
       type: string
-      description: At least 5 characters of `[a-zA-Z0-9_-]`; case-insensitively unique.
-      pattern: '^[a-zA-Z0-9_-]{5,}$'
+      description: 5-64 characters of `[a-zA-Z0-9_-]`; case-insensitively unique.
+      pattern: '^[a-zA-Z0-9_-]{5,64}$'
       example: alice
 
     DeviceId:
@@ -474,7 +543,7 @@ components:
 
     SignupRequest:
       type: object
-      required: [u, p, a, d, s]
+      required: [u, p, a, d, t, s]
       properties:
         u:
           $ref: '#/components/schemas/Username'
@@ -484,12 +553,18 @@ components:
           $ref: '#/components/schemas/AesKey'
         d:
           $ref: '#/components/schemas/DeviceId'
+        t:
+          type: integer
+          description: |
+            Client timestamp (epoch seconds) at signing time. Must be within
+            `SIGNED_PAYLOAD_MAX_AGE_SEC` (default 300s) of server time.
         s:
           allOf:
             - $ref: '#/components/schemas/Signature'
           description: |
             Ed25519 signature over the UTF-8 bytes of the canonical JSON of
-            `{ a, d, p, u }` (keys sorted, no whitespace).
+            `{ a, d, p, t, u }` (keys sorted, no whitespace). Single-use:
+            the server rejects any signature it has seen before.
 
     SignupResponse:
       type: object
@@ -598,6 +673,17 @@ components:
           allOf:
             - $ref: '#/components/schemas/DeviceId'
           description: The device id that was added to the account.
+
+    PendingResponse:
+      type: object
+      required: [d, requestedAt]
+      properties:
+        d:
+          $ref: '#/components/schemas/DeviceId'
+        requestedAt:
+          type: string
+          format: date-time
+          description: When the enrollment was requested.
 
     DeviceInfo:
       type: object

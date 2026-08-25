@@ -3,26 +3,25 @@ import { b64uEncode } from '../../lib/b64u.js';
 import { importRawPublicKey, verifySignature } from '../../lib/ed25519.js';
 import { signJwt } from '../../lib/jwt.js';
 import { rateLimit } from '../../lib/rateLimit.js';
+import { isValidDeviceId, isValidUsername } from '../../lib/username.js';
 import { fail, limited } from '../shared.js';
 
 // POST /api/auth/challenge + POST /api/auth/verify — passwordless login.
 export default async function authRoutes(app, { users, redis, config }) {
+  // L1 fix: always issue a nonce. A 404 here used to confirm which
+  // (username, device) pairs exist; now unknown pairs get a nonce that will
+  // simply never verify, indistinguishable from a real one.
   app.post('/api/auth/challenge', async (request, reply) => {
     const rl = await rateLimit(redis, `rl:challenge:${request.ip}`, config.challengeIpLimit, config.challengeIpWindowSec);
     if (!rl.ok) return limited(reply, rl);
 
     const { u, d } = request.body ?? {};
-    if (typeof u !== 'string' || typeof d !== 'string') {
+    if (!isValidUsername(u) || !isValidDeviceId(d)) {
       return fail(reply, 'invalid_request', 'u and d are required', 400);
     }
 
-    const user = await users.findOne({ ul: u.toLowerCase() });
-    if (!user || !user.devices.some((dev) => dev.id === d)) {
-      return fail(reply, 'unknown_account', 'No such account/device', 404);
-    }
-
     const n = b64uEncode(randomBytes(32));
-    await redis.set(`auth:nonce:${n}`, JSON.stringify({ ul: user.ul, d }), { EX: config.nonceTtlSec });
+    await redis.set(`auth:nonce:${n}`, JSON.stringify({ ul: u.toLowerCase(), d }), { EX: config.nonceTtlSec });
     return { n };
   });
 
@@ -32,11 +31,16 @@ export default async function authRoutes(app, { users, redis, config }) {
     if (typeof u !== 'string' || typeof d !== 'string' || typeof n !== 'string') {
       return fail(reply, 'invalid_request', 'u, d and n are required', 400);
     }
+    // L3 fix: validate before touching Redis, so junk subjects cannot create
+    // unbounded rate-limit keys.
+    if (!isValidUsername(u) || !isValidDeviceId(d)) {
+      return fail(reply, 'invalid_request', 'u and d are malformed', 400);
+    }
 
+    // M1 fix: consume the nonce BEFORE counting against the account's budget.
+    // Otherwise an attacker could exhaust a victim's verify allowance with
+    // junk requests and lock them out of their own account for a full window.
     const ul = u.toLowerCase();
-    const rl = await rateLimit(redis, `rl:verify:${ul}`, config.verifyAccountLimit, config.verifyAccountWindowSec);
-    if (!rl.ok) return limited(reply, rl);
-
     const raw = await redis.getDel(`auth:nonce:${n}`);
     let nonce;
     try {
@@ -47,6 +51,11 @@ export default async function authRoutes(app, { users, redis, config }) {
     if (!nonce || nonce.ul !== ul || nonce.d !== d) {
       return fail(reply, 'bad_nonce', 'Nonce unknown, expired or mismatched', 401);
     }
+
+    const rlAccount = await rateLimit(redis, `rl:verify:${ul}`, config.verifyAccountLimit, config.verifyAccountWindowSec);
+    if (!rlAccount.ok) return limited(reply, rlAccount);
+    const rlIp = await rateLimit(redis, `rl:verifyip:${request.ip}`, config.verifyIpLimit, config.verifyIpWindowSec);
+    if (!rlIp.ok) return limited(reply, rlIp);
 
     const user = await users.findOne({ ul });
     const device = user?.devices.find((dev) => dev.id === d);

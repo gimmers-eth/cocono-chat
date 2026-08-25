@@ -33,9 +33,13 @@ const check = (label, cond, extra = '') => {
   if (!cond) fail++;
 };
 
-const sSignup = b64u(sign(null, Buffer.from(canonical({ a, d, p, u }), 'utf8'), privateKey));
-const su = await post('/api/signup', { u, p, a, d, s: sSignup });
+const t = Math.floor(Date.now() / 1000);
+const sSignup = b64u(sign(null, Buffer.from(canonical({ a, d, p, t, u }), 'utf8'), privateKey));
+const su = await post('/api/signup', { u, p, a, d, t, s: sSignup });
 check('signup returns 201', su.status === 201, `status=${su.status}`);
+
+const home = await fetch(BASE + '/');
+check('security headers present (M4)', (home.headers.get('content-security-policy') ?? '').includes("default-src 'self'"));
 
 const ch = await post('/api/auth/challenge', { u, d });
 check('challenge returns 200 + nonce', ch.status === 200 && !!ch.json.n, `status=${ch.status}`);

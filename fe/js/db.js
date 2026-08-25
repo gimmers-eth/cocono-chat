@@ -25,7 +25,9 @@ async function withStore(mode, fn) {
   });
 }
 
-// record: { username, deviceId, priv, pubRaw, aesRaw, aesEnc, aesMac }
+// record: { username, deviceId, priv, pubRaw, aesEnc, aesMac }
+// (M3 fix: raw AES bytes are deliberately NOT stored — only the
+// non-exportable CryptoKey handles survive the initial import.)
 export function saveIdentity(record) {
   return withStore('readwrite', (store) => store.put(record, KEY));
 }

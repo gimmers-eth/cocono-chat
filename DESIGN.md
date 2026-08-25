@@ -135,7 +135,8 @@ Signup happens via the REST API (`POST /api/signup`). The creation data object i
     p: string // public key of user (raw Ed25519, base64url)
     a: string // AES key of user (raw AES-GCM, base64url)
     d: string // device id (client-generated UUID)
-    s: string // Ed25519 signature over the canonical JSON of { a, d, p, u }
+    t: number // client timestamp, epoch seconds, at signing time
+    s: string // Ed25519 signature over the canonical JSON of { a, d, p, t, u }
 }
 ```
 
@@ -144,22 +145,33 @@ signature proves possession of the private key at signup. The first registered d
 the **main** device. `p`, `a` and usernames are validated server-side; usernames are
 stored case-insensitively for uniqueness.
 
+Freshness and replay protection: `t` must be within `SIGNED_PAYLOAD_MAX_AGE_SEC`
+(default 5 minutes) of server time, and every accepted signature is de-duplicated in
+Redis (`sigseen:<sha256>`), so a captured signup/enroll payload can never be replayed.
+The same pattern applies to device enrollment and should be carried into every future
+signed envelope.
+
 ### Authentication (challenge-response)
 There are no passwords — login proves possession of a registered device's private key.
 Implemented as a challenge-response flow over REST:
 
 1. `POST /api/auth/challenge` with `{ u, d }` — the server returns a one-time nonce `n`
    (random 32 bytes, base64url), stored in Redis with a TTL (`NONCE_TTL_SEC`, default 5
-   minutes) and keyed to that username + device.
+   minutes) and keyed to that username + device. A nonce is issued for **any**
+   username/device pair — unknown pairs get a nonce that simply never verifies, so the
+   endpoint does not reveal which accounts exist.
 2. The client signs the nonce with the device's Ed25519 key.
-3. `POST /api/auth/verify` with `{ u, d, n, s }` — the server checks the nonce (must
-   exist, be unexpired, and match the username + device), verifies the signature against
-   the stored public key, then issues a **JWT** (HS256, `JWT_EXPIRES_IN_SEC`, default
-   24h). Nonces are single-use — verification consumes them, so replays are rejected.
+3. `POST /api/auth/verify` with `{ u, d, n, s }` — the server consumes the nonce FIRST
+   (junk requests without a valid nonce never touch the account's rate-limit budget),
+   verifies the signature against the stored public key, then issues a **JWT** (HS256
+   with pinned `iss`/`aud`, `JWT_EXPIRES_IN_SEC`, default 24h). Nonces are single-use —
+   verification consumes them, so replays are rejected.
 4. The JWT is sent as `Authorization: Bearer <token>` on authenticated REST endpoints.
+   Every authenticated request re-checks that the token's device is still registered —
+   a device removed by an admin loses access immediately, not at token expiry.
 
-Rate limiting: challenge is limited per-IP, verify attempts per-account, and signup
-per-IP (see `.env.example`).
+Rate limiting: challenge and verify are limited per-IP, verify additionally per-account,
+and signup per-IP (see `.env.example`).
 
 The REST API uses JWT auth; the WebSocket layer (later milestone) will validate identity
 supplied at upgrade time.
@@ -194,13 +206,16 @@ A user can add a new public and AES key to their account for a new device. Imple
 over REST (see `be/openapi.yaml`):
 
 1. **Enroll** — the new device generates its own keys and posts the same payload shape
-   as signup to `POST /api/devices/enroll`, signed with its own private key. The server
-   checks the account exists and the device limit is not reached, then generates a
-   **6 digit code** valid for **10 minutes** (`DEVICE_CODE_TTL_SEC`), and returns the
-   code plus an unguessable `enrollId`.
-2. **Approve** — the user enters the code on an existing, already-registered device
-   (`POST /api/devices/approve`, JWT). Codes are scoped per account and single-use; the
-   new device is added atomically subject to the account's device limit.
+   as signup (including the freshness timestamp `t`) to `POST /api/devices/enroll`,
+   signed with its own private key. The server checks the account exists and the device
+   limit is not reached, then generates a **6 digit code** valid for **10 minutes**
+   (`DEVICE_CODE_TTL_SEC`; allocated with SET-NX so concurrent enrollments can never
+   clobber each other), and returns the code plus an unguessable `enrollId`.
+2. **Approve** — the user enters the code on an existing, already-registered device.
+   Before approving, the UI shows WHAT is being approved (`POST /api/devices/pending`
+   returns the requesting device id + time) and asks for explicit confirmation — a bare
+   code entry would be a social-engineering surface. Codes are scoped per account and
+   single-use; the new device is added atomically subject to the account's device limit.
 3. **Poll** — the new device polls `GET /api/devices/enroll-status/:enrollId` (the
    `enrollId` is an unguessable capability; the device has no JWT yet). On approval it
    saves its identity and logs in via the normal challenge-response flow.
@@ -304,6 +319,21 @@ main loop/thread.
 - Logging, alerting and metrics: something simple and low-resource — options to be
   explored.
 - Dev: optionally connect to a local or remote/network dev server.
+
+### Production checklist
+
+1. **TLS everywhere** — the app speaks plaintext HTTP by design (nginx terminates TLS);
+   tokens and signed payloads traverse the wire. Never expose without TLS. Add HSTS at
+   the proxy.
+2. **`JWT_SECRET`** — long random value (`openssl rand -base64 48`). The server refuses
+   to boot with the dev default.
+3. **`ADMIN_TOKEN`** — always set, even on "internal" hosts (mandatory for non-loopback
+   binds). Keep the admin port on loopback where possible.
+4. **MongoDB / Redis** — auth + TLS + bind to private interfaces. Redis additionally
+   holds pending-enrollment AES keys and login nonces.
+5. **`TRUST_PROXY`** — configure before deploying behind nginx so per-IP rate limits see
+   real client IPs; verify nginx forwards `X-Forwarded-For`.
+6. **`pnpm audit` in CI** — dependency advisories should not regress unnoticed.
 
 ## Testing
 

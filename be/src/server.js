@@ -4,6 +4,16 @@ import { connectMongo, connectRedis } from './db.js';
 import { buildApp, defaultFeRoot } from './app.js';
 
 export async function start() {
+  // H2 fix: refuse to serve with the dev default (or a too-short) JWT secret.
+  // Local dev may opt out with ALLOW_DEV_JWT_SECRET=true (set by dev.js).
+  if (config.jwtSecretInsecure && !config.allowDevJwtSecret) {
+    throw new Error(
+      'JWT_SECRET is unset, the dev default, or shorter than 32 characters. ' +
+        'Generate one with: openssl rand -base64 48 — or set ALLOW_DEV_JWT_SECRET=true ' +
+        'to accept the risk in local development.',
+    );
+  }
+
   const mongo = await connectMongo(config.mongoUrl);
   const redis = await connectRedis(config.redisUrl);
   const app = await buildApp({ mongo, redis, config, feRoot: defaultFeRoot });

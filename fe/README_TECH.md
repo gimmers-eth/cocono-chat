@@ -6,17 +6,41 @@ reload.
 
 ## Layout
 
+The UI is split into small components — one module per view plus shared helpers, and
+each view's markup lives in its own HTML fragment. No framework; each component is a
+plain ES module that owns a `<section>` loaded from `views/`.
+
 ```
-index.html            single page: auth view, home view, blocked-tab view
+index.html            thin shell: head + <main><div id="views"></div>, loads js/main.js
+views/                per-view markup fragments (plain <section>s, no scripts)
+  auth.html           #view-auth
+  home.html           #view-home
+  blocked.html        #view-blocked
 style.css             minimal dark styling, no framework
 manifest.webmanifest  PWA manifest (icons/service worker come with milestone 6)
 js/
-  app.js              UI wiring + flows (init, signup, login, logout, forget)
+  main.js             bootstrap: loadViews() then wire components + view state machine
+  views.js            fetches views/*.html and injects them into #views at startup
+  ui.js               $ / show / setStatus / setBusy / fmtAgo helpers
+  session.js          JWT get/set (sessionStorage, per-tab)
   api.js              fetch wrappers for the REST API (+ ApiError)
   crypto.js           WebCrypto helpers: Ed25519, AES-GCM/HMAC, signing
   db.js               IndexedDB identity store
   util.js             base64url, UTF-8, canonical JSON
+  components/
+    auth.js           #view-auth: signup + add-device enroll + login
+    home.js           #view-home: device list + approve + logout + forget
+    blocked.js        #view-blocked: single-tab guard
 ```
+
+View markup is fetched and injected at startup (`views.js`) rather than inlined in
+`index.html`, so each view's HTML stays in its own file as the app grows. Because the
+fragments are injected *after* modules load, `ui.js` looks view elements up lazily (no
+top-level DOM capture). `main.js` wires the components and decides which view is visible;
+each component exposes a small API (`wireAuth`, `wireHome`, `enterHome`, `resetView`,
+`applyIdentity`, `stopPolling`, `startSingleTabGuard`) and calls back into `main.js` on
+transitions (`onLoggedIn`, `onLogout`, `onReset`). No component imports another
+component, so there are no import cycles.
 
 ## Crypto model
 
@@ -30,8 +54,11 @@ js/
     envelope `h` field)
 
   Both come from the same raw bytes, per DESIGN.md's single-AES-key model. The raw bytes
-  are discarded afterwards — the CryptoKey handles are the only copies.
-- **Signing:** signup signs `canonical({ a, d, p, u })`; login signs the nonce string.
+  are discarded afterwards — the CryptoKey handles are the only copies (they are NOT
+  written to IndexedDB).
+- **Signing:** signup/enroll sign `canonical({ a, d, p, t, u })` where `t` is the
+  current epoch-seconds timestamp (freshness + replay protection server-side); login
+  signs the nonce string.
 
 ### Server-contract sync
 
@@ -49,7 +76,6 @@ Database `cocono`, object store `identity`, single key `me`:
   deviceId,      // crypto.randomUUID(), registered with the server
   priv,          // CryptoKey — Ed25519 private key (non-exportable)
   pubRaw,        // base64url raw public key
-  aesRaw,        // base64url raw AES key (kept only for the transfer step; see above)
   aesEnc,        // CryptoKey — AES-GCM, non-exportable
   aesMac,        // CryptoKey — HMAC-SHA256, non-exportable
 }
@@ -69,6 +95,12 @@ site data deletes the identity — account access is lost (by design until backu
 - **logout** — drops the session token only; identity stays on device.
 - **forget device** — deletes the IndexedDB identity (with confirmation); account access
   is gone unless another device holds it.
+- **add device (milestone 2)** — "Add this device to an existing account": generate
+  keys → enroll → show the 6-digit pairing code → poll the status endpoint every 2s →
+  on approval save identity and log in automatically.
+- **approve device** — from the home view: enter the code → the app fetches the pending
+  request's device id + time (`POST /api/devices/pending`) and asks for explicit
+  confirmation before approving.
 
 Tokens live in sessionStorage (per-tab), identities in IndexedDB (per-device).
 

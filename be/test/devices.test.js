@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { setupApp, makeClient, randomAesKey } from './helpers.js';
+import { setupApp, makeClient, randomAesKey, nowEpoch } from './helpers.js';
 
 // Relaxed limits so the happy-path tests don't trip the limiter.
 const LIMITS = {
@@ -13,11 +13,12 @@ const LIMITS = {
 
 async function signupUser(app, client, u, d) {
   const a = randomAesKey();
-  const s = client.signSignup({ u, a, d });
+  const t = nowEpoch();
+  const s = client.signSignup({ u, a, d, t });
   return app.inject({
     method: 'POST',
     url: '/api/signup',
-    payload: { u, p: client.p, a, d, s },
+    payload: { u, p: client.p, a, d, t, s },
   });
 }
 
@@ -32,14 +33,15 @@ async function getToken(app, client, u, d) {
   return token;
 }
 
-// Enrollment is signed exactly like signup: canonical({ a, d, p, u }).
+// Enrollment is signed exactly like signup: canonical({ a, d, p, t, u }).
 async function enroll(app, client, u, d) {
   const a = randomAesKey();
-  const s = client.signSignup({ u, a, d });
+  const t = nowEpoch();
+  const s = client.signSignup({ u, a, d, t });
   return app.inject({
     method: 'POST',
     url: '/api/devices/enroll',
-    payload: { u, p: client.p, a, d, s },
+    payload: { u, p: client.p, a, d, t, s },
   });
 }
 
@@ -126,7 +128,7 @@ test('enroll rejects unknown accounts, bad signatures, duplicates and limits', a
     const badSig = await app.inject({
       method: 'POST',
       url: '/api/devices/enroll',
-      payload: { u, p: makeClient().p, a: randomAesKey(), d: 'device-badsig-01', s: 'A'.repeat(86) },
+      payload: { u, p: makeClient().p, a: randomAesKey(), d: 'device-badsig-01', t: nowEpoch(), s: 'A'.repeat(86) },
     });
     assert.equal(badSig.statusCode, 401);
 
@@ -232,6 +234,143 @@ test('enroll-status rejects malformed and unknown enrollIds', async () => {
 
     const unknown = await app.inject({ method: 'GET', url: '/api/devices/enroll-status/AAAAAAAAAAAAAAAAAAAAAA' });
     assert.equal(unknown.statusCode, 410);
+  } finally {
+    await teardown();
+  }
+});
+
+test('enroll rejects stale or replayed payloads (M6)', async () => {
+  const { app, teardown } = await setupApp(LIMITS);
+  try {
+    const u = 'alice';
+    const main = makeClient();
+    assert.equal((await signupUser(app, main, u, 'main-device-0001')).statusCode, 201);
+
+    // Stale timestamp.
+    const stale = makeClient();
+    const a = randomAesKey();
+    const t = nowEpoch() - 3600;
+    const staleRes = await app.inject({
+      method: 'POST',
+      url: '/api/devices/enroll',
+      payload: { u, p: stale.p, a, d: 'device-stale-0001', t, s: stale.signSignup({ u, a, d: 'device-stale-0001', t }) },
+    });
+    assert.equal(staleRes.statusCode, 400);
+    assert.equal(staleRes.json().error, 'stale_payload');
+
+    // Replay: the exact same signed enrollment cannot be sent twice.
+    const second = makeClient();
+    const a2 = randomAesKey();
+    const t2 = nowEpoch();
+    const d2 = 'second-device-0002';
+    const payload = { u, p: second.p, a: a2, d: d2, t: t2, s: second.signSignup({ u, a: a2, d: d2, t: t2 }) };
+    assert.equal((await app.inject({ method: 'POST', url: '/api/devices/enroll', payload })).statusCode, 201);
+    const replay = await app.inject({ method: 'POST', url: '/api/devices/enroll', payload });
+    assert.equal(replay.statusCode, 401);
+    assert.equal(replay.json().error, 'replay');
+  } finally {
+    await teardown();
+  }
+});
+
+test('pending endpoint shows what would be approved (L6)', async () => {
+  const { app, teardown } = await setupApp(LIMITS);
+  try {
+    const u = 'alice';
+    const main = makeClient();
+    assert.equal((await signupUser(app, main, u, 'main-device-0001')).statusCode, 201);
+    const tokenMain = await getToken(app, main, u, 'main-device-0001');
+
+    const second = makeClient();
+    const dSecond = 'second-device-0002';
+    const { code } = (await enroll(app, second, u, dSecond)).json();
+
+    // Without a token.
+    const noAuth = await app.inject({ method: 'POST', url: '/api/devices/pending', payload: { code } });
+    assert.equal(noAuth.statusCode, 401);
+
+    // With a token: device id + request time.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/devices/pending',
+      headers: { authorization: `Bearer ${tokenMain}` },
+      payload: { code },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().d, dSecond);
+    assert.ok(res.json().requestedAt);
+
+    // Unknown code.
+    const unknown = await app.inject({
+      method: 'POST',
+      url: '/api/devices/pending',
+      headers: { authorization: `Bearer ${tokenMain}` },
+      payload: { code: '000000' },
+    });
+    assert.equal(unknown.statusCode, 404);
+  } finally {
+    await teardown();
+  }
+});
+
+test('admin device removal revokes the device session (H4)', async () => {
+  const { app, mongo, teardown } = await setupApp(LIMITS);
+  try {
+    const u = 'alice';
+    const main = makeClient();
+    assert.equal((await signupUser(app, main, u, 'main-device-0001')).statusCode, 201);
+    const tokenMain = await getToken(app, main, u, 'main-device-0001');
+
+    // Add + log in a second device.
+    const second = makeClient();
+    const dSecond = 'second-device-0002';
+    const { code } = (await enroll(app, second, u, dSecond)).json();
+    assert.equal(
+      (await app.inject({
+        method: 'POST',
+        url: '/api/devices/approve',
+        headers: { authorization: `Bearer ${tokenMain}` },
+        payload: { code },
+      })).statusCode,
+      200,
+    );
+    const tokenSecond = await getToken(app, second, u, dSecond);
+
+    const before = await app.inject({
+      method: 'GET',
+      url: '/api/me',
+      headers: { authorization: `Bearer ${tokenSecond}` },
+    });
+    assert.equal(before.statusCode, 200);
+
+    // Remove the second device the same way the admin route does.
+    await mongo.db.collection('users').updateOne({ ul: u }, { $pull: { devices: { id: dSecond } } });
+
+    const after = await app.inject({
+      method: 'GET',
+      url: '/api/me',
+      headers: { authorization: `Bearer ${tokenSecond}` },
+    });
+    assert.equal(after.statusCode, 401);
+
+    // Crucially, the revoked device can no longer approve further devices.
+    const rogue = makeClient();
+    const rogueEnroll = await enroll(app, rogue, u, 'rogue-device-0001');
+    const rogueApprove = await app.inject({
+      method: 'POST',
+      url: '/api/devices/approve',
+      headers: { authorization: `Bearer ${tokenSecond}` },
+      payload: { code: rogueEnroll.json().code },
+    });
+    assert.equal(rogueApprove.statusCode, 401);
+
+    // The main device still works.
+    const mainStillOk = await app.inject({
+      method: 'GET',
+      url: '/api/me',
+      headers: { authorization: `Bearer ${tokenMain}` },
+    });
+    assert.equal(mainStillOk.statusCode, 200);
   } finally {
     await teardown();
   }

@@ -17,6 +17,10 @@ const redact = (url) => {
 
 let mongod = null;
 
+// Dev-only opt-out for the JWT-secret boot check (server.js): `pnpm dev`
+// binds localhost and a forged JWT there only harms the developer.
+process.env.ALLOW_DEV_JWT_SECRET = process.env.ALLOW_DEV_JWT_SECRET ?? 'true';
+
 if (!process.env.MONGO_URL) {
   const { MongoMemoryServer } = await import('mongodb-memory-server');
   const dbPath = path.resolve(import.meta.dirname, '..', '.data', 'mongo');

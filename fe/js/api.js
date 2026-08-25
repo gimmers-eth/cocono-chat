@@ -42,5 +42,11 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ code }),
     }),
+  pendingEnrollment: (token, code) =>
+    withToken('/api/devices/pending', token, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code }),
+    }),
   devices: (token) => withToken('/api/devices', token),
 };
