@@ -122,8 +122,16 @@ Each user has an account that they can connect to using multiple devices.
 - Message content is **end-to-end encrypted**: every conversation (1:1 or group) has its
   own AES key (WhatsApp-style). Conversation keys are established using the users'
   public/private keys.
+- **Key agreement (milestone 3, decision 1A):** each device ALSO generates an **X25519**
+  key pair at signup/enroll; the public key `x` is registered alongside `p`. The
+  conversation key for a device pair is derived deterministically on BOTH sides via
+  ECDH + HKDF-SHA256 (info string `cocono-conv-v1|` + the sorted `ul:deviceId` pair),
+  so no key-distribution messages and no server-side key storage are needed. Every
+  device pair has its own key, which makes this multi-device-correct without syncing
+  keys between a user's own devices. Group key agreement (milestone 5) needs its own
+  mechanism.
 - Keys are rotated when a group's membership changes and when a new conversation is
-  started.
+  started. (1:1 pairwise keys are deterministic; group key rotation applies to groups.)
 - Server-visible metadata: recipient/group `u`, timestamp `t`, group membership, message
   sizes. Message content is never visible to the server.
 
@@ -134,10 +142,11 @@ Signup happens via the REST API (`POST /api/signup`). The creation data object i
 {
     u: string // username
     p: string // public key of user (raw Ed25519, base64url)
+    x: string // X25519 key-agreement public key (raw, base64url) — milestone 3
     a: string // AES key of user (raw AES-GCM, base64url)
     d: string // device id (client-generated UUID)
     t: number // client timestamp, epoch seconds, at signing time
-    s: string // Ed25519 signature over the canonical JSON of { a, d, p, t, u }
+    s: string // Ed25519 signature over the canonical JSON of { a, d, p, t, u, x }
 }
 ```
 
@@ -183,18 +192,24 @@ A message sent to the server from a client looks as follows:
 ```
 {
     m: {
-        d: string // data/message being sent
-        u: string // user/group this is for or "server" to send to the server
-        t: string // timestamp of the message being sent
-        h: string // HMAC keyed with the user's AES-GCM key, generated over the message
+        d: string  // E2EE ciphertext for the destination device (b64u iv||ct||tag)
+        u: string  // recipient user/group
+        dv: string // recipient device id (server routes per device)
+        f: string  // sender username
+        fd: string // sender device id
+        cid: string // client message id (idempotent retries)
+        t: number  // client epoch seconds (freshness window)
+        h: string  // HMAC-SHA256 over canonical(m minus h), keyed with the
+                   // sender's transport AES key (server-verifiable integrity)
     }
-    s: string // signature created using the ED25519 signing algorithm and message
+    s: string // optional Ed25519 signature over canonical(m)
 }
 ```
 
-Once a user has been created the message data (`m.d`) is encrypted with the user's AES key
-for transport, with the content additionally encrypted end-to-end with the conversation
-key. Depending on the message, the user may just encrypt the message without signing.
+Once a user has been created the message data (`m.d`) carries the end-to-end encrypted
+content (per-device-pair conversation key); the envelope is additionally authenticated
+towards the server with `h`. Depending on the message, the user may just encrypt the
+message without signing.
 
 Messages that need signing (`s`):
 - New user creation
@@ -274,6 +289,34 @@ await sub.subscribe('msg', (message) => {
 In the real implementation, workers are used to keep everything except pub/sub off the
 main loop/thread.
 
+## Milestone 3 implementation notes (decisions & deviations)
+
+- **WebSocket layer** — `@fastify/websocket` on the same Fastify server/port as REST.
+  The JWT is passed in the upgrade URL query (`/ws?token=...`, browsers cannot set WS
+  upgrade headers); the token is redacted from request logs. Server-initiated heartbeat:
+  ping every `WS_HEARTBEAT_SEC` (default 30s), connections that miss a pong are
+  terminated. One live connection per device — a newer connection replaces the older.
+- **Wire protocol** (JSON frames): client sends `{type:'msg', msg:envelope}` and
+  `{type:'pulled', ids:[...]}`; server sends `{type:'hello'}`,
+  `{type:'msg', id, ts, env}`, `{type:'ack', cid, ok, error?}` and
+  `{type:'delivered', cid, to}`.
+- **Store-and-forward** — every message is persisted to MongoDB immediately (one doc per
+  recipient device) AND published to the device's Redis channel `dm:<ul>:<dv>` when the
+  recipient may be online. **Deviation** from the earlier sketch ("Redis queue, move to
+  Mongo after X minutes"): immediate persistence is strictly more durable and removes the
+  timer jobs; Redis pub/sub is used only for live fan-out. A message is deleted from the
+  server only after the destination device confirms it with `pulled`.
+- **Delivery receipts** — when a device pulls, the server notifies the sender's device
+  channel (`delivered`), so the sender can show sent/delivered marks. Undeliverable
+  cleanup after X days (undelivered sweep) is still to come.
+- **Idempotent retries** — unique index on `(sender user, sender device, cid)`: a retried
+  envelope is acked without duplicating.
+- **Processing model (decision 2A)** — message processing is inline for milestone 3 to
+  keep the flow testable; the `handleSend`/`handlePulled` pair is the seam for moving
+  persistence/crypto work into `worker_threads` later.
+- **Rate limiting** — message sends limited per-account and per-IP; peer-key lookups
+  per-IP (see `.env.example`).
+
 ## Organisation of Messages
 
 - **Users** — 1:1 conversations.
@@ -343,9 +386,9 @@ layer (which will also validate the file-descriptor tuning).
 
 ## Milestones (MVP order)
 
-1. Accounts
-2. Multi-device
-3. 1:1 messages (text)
+1. Accounts ✅
+2. Multi-device ✅
+3. 1:1 messages (text) ✅
 4. Files/media (images etc.)
 5. Groups (with offline delivery)
 6. PWA polish (push, offline)

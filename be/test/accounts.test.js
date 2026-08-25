@@ -15,7 +15,7 @@ async function signupUser(app, client, u, a, d, t = nowEpoch()) {
   return app.inject({
     method: 'POST',
     url: '/api/signup',
-    payload: { u, p: client.p, a, d, t, s },
+    payload: { u, p: client.p, x: client.x, a, d, t, s },
   });
 }
 
@@ -104,6 +104,7 @@ test('signup rejects a bad signature', async () => {
       payload: {
         u,
         p: client.p,
+        x: client.x,
         a: randomAesKey(),
         d: 'device-one-123',
         t: nowEpoch(),
@@ -363,9 +364,9 @@ test('signup rate limiting kicks in after the limit', async () => {
 
 test('canonical signup payload is what the client signs', async () => {
   // Guards against FE/BE canonical drift for the exact signup shape.
-  const body = { a: 'AAA', d: 'device-one-123', p: 'BBB', t: 1700000000, u: 'alice' };
+  const body = { a: 'AAA', d: 'device-one-123', p: 'BBB', t: 1700000000, u: 'alice', x: 'XXX' };
   assert.equal(
     canonical(body),
-    canonical({ u: 'alice', t: 1700000000, p: 'BBB', d: 'device-one-123', a: 'AAA' }),
+    canonical({ u: 'alice', t: 1700000000, x: 'XXX', p: 'BBB', d: 'device-one-123', a: 'AAA' }),
   );
 });

@@ -1,7 +1,7 @@
 import { randomBytes, randomInt } from 'node:crypto';
 import { b64uDecode, b64uEncode } from '../../lib/b64u.js';
 import { canonical } from '../../lib/canon.js';
-import { importRawPublicKey, verifySignature } from '../../lib/ed25519.js';
+import { importRawPublicKey, importRawX25519PublicKey, verifySignature } from '../../lib/ed25519.js';
 import { rateLimit } from '../../lib/rateLimit.js';
 import { isValidUsername, isValidDeviceId } from '../../lib/username.js';
 import { fail, limited, requireAuth, isReplayedSignature, payloadTooOld } from '../shared.js';
@@ -12,17 +12,18 @@ const ENROLL_ID_RE = /^[A-Za-z0-9_-]{16,64}$/;
 const CODE_DRAW_ATTEMPTS = 3;
 
 // Redis keys:
-//   denroll:c:<ul>:<code>  pending enrollment (JSON { p, a, d, enrollId, requestedAt }),
+//   denroll:c:<ul>:<code>  pending enrollment (JSON { p, x, a, d, enrollId, requestedAt }),
 //                          single-use
 //   denroll:p:<enrollId>   pending marker, so the new device can poll its state
 //   denroll:ok:<enrollId>  approval marker, set when a device is added
 
 function validateDevicePayload(body) {
-  const { u, p, a, d } = body ?? {};
+  const { u, p, x, a, d } = body ?? {};
   if (!isValidUsername(u)) return 'invalid_username';
   if (!isValidDeviceId(d)) return 'invalid_device_id';
   const pubRaw = b64uDecode(p);
   if (!pubRaw || pubRaw.length !== 32) return 'invalid_public_key';
+  if (!importRawX25519PublicKey(x)) return 'invalid_x25519_key';
   const aesRaw = b64uDecode(a);
   if (!aesRaw || !AES_KEY_BYTES.has(aesRaw.length)) return 'invalid_aes_key';
   return null;
@@ -40,13 +41,13 @@ export default async function deviceRoutes(app, { users, redis, config }) {
     const problem = validateDevicePayload(request.body);
     if (problem) return fail(reply, problem, 'Invalid enrollment payload', 400);
 
-    const { u, p, a, d, t, s } = request.body;
+    const { u, p, x, a, d, t, s } = request.body;
     if (payloadTooOld(t, config.signedPayloadMaxAgeSec)) {
       return fail(reply, 'stale_payload', 'Payload timestamp missing or outside the accepted window', 400);
     }
 
     const publicKey = importRawPublicKey(p);
-    const signedBytes = Buffer.from(canonical({ a, d, p, t, u }), 'utf8');
+    const signedBytes = Buffer.from(canonical({ a, d, p, t, u, x }), 'utf8');
     if (!publicKey || !verifySignature(publicKey, signedBytes, s)) {
       return fail(reply, 'invalid_signature', 'Enrollment signature does not verify', 401);
     }
@@ -67,7 +68,7 @@ export default async function deviceRoutes(app, { users, redis, config }) {
     // L4 fix: SET NX so a drawn code can never clobber another pending
     // enrollment; re-draw on collision (vanishingly rare with 1M codes).
     const enrollId = b64uEncode(randomBytes(24));
-    const enrollment = JSON.stringify({ p, a, d, enrollId, requestedAt: new Date().toISOString() });
+    const enrollment = JSON.stringify({ p, x, a, d, enrollId, requestedAt: new Date().toISOString() });
     let code = null;
     for (let attempt = 0; attempt < CODE_DRAW_ATTEMPTS; attempt++) {
       const candidate = String(randomInt(1_000_000)).padStart(6, '0');
@@ -142,7 +143,7 @@ export default async function deviceRoutes(app, { users, redis, config }) {
     // Codes are scoped per account; GETDEL makes approval single-use.
     const raw = await redis.getDel(`denroll:c:${ul}:${code}`);
     if (!raw) return fail(reply, 'unknown_code', 'No pending enrollment with that code', 404);
-    const { p, a, d, enrollId } = JSON.parse(raw);
+    const { p, x, a, d, enrollId } = JSON.parse(raw);
 
     const user = await users.findOne({ ul });
     if (!user) return fail(reply, 'unknown_account', 'Account not found', 404);
@@ -155,7 +156,7 @@ export default async function deviceRoutes(app, { users, redis, config }) {
         'devices.id': { $ne: d },
         $expr: { $lt: [{ $size: '$devices' }, '$maxDevices'] },
       },
-      { $push: { devices: { id: d, pub: p, aes: a, main: false, createdAt: now, lastSeenAt: now } } },
+      { $push: { devices: { id: d, pub: p, x, aes: a, main: false, createdAt: now, lastSeenAt: now } } },
     );
     if (!res.matchedCount) {
       const fresh = await users.findOne({ ul });

@@ -1,9 +1,9 @@
 # be — technical overview
 
-Node.js ≥ 22.9, plain JavaScript (ESM), bare-minimum dependencies. Fastify for HTTP;
-MongoDB for persistence; Redis for nonces/rate limiting (and pub/sub once messaging
-lands). JWT handling is hand-rolled HS256 (`src/lib/jwt.js`) to avoid a dependency for
-something this small.
+Node.js ≥ 22.9, plain JavaScript (ESM), bare-minimum dependencies. Fastify for HTTP +
+WebSocket (`@fastify/websocket`); MongoDB for persistence; Redis for nonces, rate
+limiting and pub/sub fan-out. JWT handling is hand-rolled HS256 (`src/lib/jwt.js`) to
+avoid a dependency for something this small.
 
 ## Layout
 
@@ -19,13 +19,21 @@ src/
     shared.js      fail()/limited()/requireAuth(), security headers, freshness +
                    replay helpers
     app-routes/    public API, registered by app.js
-      index.js     registers signup + auth + me + devices
+      index.js     registers signup + auth + me + devices + userKeys
       signup.js    POST /api/signup
       auth.js      POST /api/auth/challenge, POST /api/auth/verify
       me.js        GET /api/me
       devices.js   POST /api/devices/enroll, GET /api/devices/enroll-status/:id,
                    POST /api/devices/pending, POST /api/devices/approve,
                    GET /api/devices
+      userKeys.js  GET /api/users/:username/keys (device public keys)
+    ws-routes/     WebSocket layer, registered by app.js
+      index.js     /ws endpoint: JWT-at-upgrade auth, heartbeats, dispatch,
+                   pub/sub wiring, one-live-connection-per-device
+      protocol.js  wire constants (frame cap, batch size) + sendJson/devKey
+      envelope.js  envelope validation: structure, freshness, HMAC, signature
+      handlers.js  handleSend / handlePulled / deliverPending (the
+                   store-and-forward seam for a future worker_threads move)
     admin-routes/  internal API, registered by admin.js
       index.js     registers users + rateLimits
       users.js     GET/DELETE /api/admin/users[...]
@@ -48,6 +56,8 @@ test/
   unit.test.js     canonical JSON, b64u, JWT, validation, Ed25519 helpers
   accounts.test.js integration: signup/auth flows, errors, replay, rate limits
   devices.test.js  integration: device enroll/approve/status/list flows
+  messaging.test.js integration (real WS): online/offline delivery, receipts,
+                   HMAC/sender/recipient guards, idempotent retries, keys endpoint
 ```
 
 `buildApp({ mongo, redis, config, feRoot })` is dependency-injected so tests run against
@@ -79,6 +89,24 @@ ephemeral stores with `app.inject()` — no ports needed.
 The schema is multi-device; devices are added via the pairing-code flow
 (`routes/app-routes/devices.js`).
 
+### MongoDB — `messages` collection (milestone 3)
+
+Store-and-forward queue: one doc per recipient device, deleted once that device pulls.
+
+```javascript
+{
+  mid: '<uuid>',              // server-assigned message id
+  to: { ul, dv },             // recipient account + device
+  from: { ul, fd },           // sender account + device
+  cid: '<client id>',         // sender's client id (idempotent retries)
+  env: { m, s? },             // the envelope as sent (ciphertext inside m.d)
+  ts: Date,                   // server receive time (ordering)
+}
+```
+
+Indexes: `{ to.ul, to.dv, ts }` (pending fetch) and unique `{ from.ul, from.fd, cid }`
+(idempotent retries).
+
 ### Redis key namespace
 
 | Key | Meaning |
@@ -97,6 +125,10 @@ The schema is multi-device; devices are added via the pairing-code flow
 | `denroll:c:<ul>:<code>` | pending device enrollment (JSON, single-use), TTL `DEVICE_CODE_TTL_SEC` |
 | `denroll:p:<enrollId>` | pending marker so the new device can poll its state |
 | `denroll:ok:<enrollId>` | approval marker set when the device is added |
+| `rl:msg:<ul>` | message sends per account |
+| `rl:msgip:<ip>` | message sends per IP |
+| `rl:userkeys:<ip>` | peer-key lookups per IP |
+| `dm:<ul>:<dv>` | live-delivery pub/sub channel for one device |
 
 Counters are created atomically with their TTL (`SET NX EX` then `INCR`), so a crash can
 never strand a key with no expiry.
@@ -107,15 +139,16 @@ Tests use Redis database 15 (`TEST_REDIS_URL`) and flush it before each suite.
 
 ### Signup — `POST /api/signup`
 
-Body `{ u, p, a, d, t, s }`:
+Body `{ u, p, x, a, d, t, s }`:
 
 - `u` — username: 5–64 chars of `[a-zA-Z0-9_-]`, not reserved, case-insensitively unique
 - `p` — raw 32-byte Ed25519 public key, base64url
+- `x` — raw 32-byte X25519 key-agreement public key, base64url (milestone 3)
 - `a` — raw AES-GCM key (16/24/32 bytes), base64url
 - `d` — device id: 8–64 chars of `[a-zA-Z0-9_-]` (clients use `crypto.randomUUID()`)
 - `t` — client epoch-seconds timestamp; must be within `SIGNED_PAYLOAD_MAX_AGE_SEC`
   (default 5 min) of server time
-- `s` — Ed25519 signature over the UTF-8 bytes of `canonical({ a, d, p, t, u })`;
+- `s` — Ed25519 signature over the UTF-8 bytes of `canonical({ a, d, p, t, u, x })`;
   accepted signatures are de-duplicated in Redis (`sigseen:`), so payloads are not
   replayable
 
@@ -169,7 +202,8 @@ devices authenticate independently, so several can be signed in simultaneously.
 Redis `SET NX EX` + `INCR` per window. Defaults (see `config.js`): signup 10/IP/15min,
 challenge 30/IP/15min, verify 20/account/15min + 20/IP/15min, device enroll 10/IP/15min,
 device approve/pending 20/account/15min, enroll-status 600/IP/15min, failed admin tokens
-10/IP/15min — all configurable. 429 responses carry `Retry-After`.
+10/IP/15min, message sends 120/account/15min + 240/IP/15min, peer-key lookups
+60/IP/15min — all configurable. 429 responses carry `Retry-After`.
 
 Behind nginx, set `TRUST_PROXY` so `request.ip` reflects real client IPs (Fastify
 `trustProxy`); otherwise every IP-scoped bucket collapses into one shared bucket.
@@ -179,6 +213,35 @@ Behind nginx, set `TRUST_PROXY` so `request.ip` reflects real client IPs (Fastif
 Every response from both servers carries a strict same-origin CSP (`default-src 'self'`,
 no inline scripts/styles), `X-Content-Type-Options: nosniff`, and
 `Referrer-Policy: no-referrer`.
+
+## Messaging (milestone 3)
+
+WebSocket endpoint `GET /ws?token=<jwt>` (same port as REST). The JWT is in the query
+string because browsers cannot set WS upgrade headers; it is validated the same way as
+REST and the token is redacted from request logs. The server heartbeats every
+`WS_HEARTBEAT_SEC` (default 30s) and terminates connections that miss a pong. One live
+connection per device — a newer connection replaces the older (`4000 replaced`).
+
+Wire protocol (JSON frames):
+
+| Direction | Frame | Meaning |
+| --------- | ----- | ------- |
+| c → s | `{type:'msg', msg:envelope}` | send a message envelope |
+| c → s | `{type:'pulled', ids:[mid,...]}` | confirm receipt of delivered messages |
+| s → c | `{type:'hello'}` | connection accepted |
+| s → c | `{type:'msg', id, ts, env}` | incoming message |
+| s → c | `{type:'ack', cid, ok, error?}` | server accepted/rejected an envelope |
+| s → c | `{type:'delivered', cid, to}` | a recipient device pulled your message |
+
+Flow: the sender builds an envelope (E2EE ciphertext per recipient device + HMAC `h`
+keyed with the sender's transport AES key), the server validates structure, freshness,
+sender match and HMAC, persists it to MongoDB, publishes to `dm:<ul>:<dv>` for live
+delivery, and acks. The recipient device decrypts, stores locally, and sends `pulled`;
+the server deletes the doc and notifies the sender (`delivered`). Retried envelopes are
+idempotent (unique `(from, cid)` index). Self-chat echoes (your own message routed back
+to your own device) are acked but not re-saved — the sender already has them as
+outgoing. See DESIGN.md "Milestone 3 implementation notes" for the decisions and
+deviations.
 
 ## Admin app
 
@@ -218,9 +281,7 @@ node scripts/verify-e2e.mjs        # live-server smoke test (server must be runn
 
 ## Roadmap (next milestones)
 
-- WebSocket server (`ws`): identity in headers/query at upgrade time, server-initiated
-  heartbeat, per-node `localClients` map, Redis pub/sub fan-out (see DESIGN.md "Message
-  Flow on BE").
-- `worker_threads` for everything except pub/sub (persistence, fan-out, crypto checks).
-- Store-and-forward message queues (Redis → MongoDB → expiry), per-device encrypted
-  messages, pull-on-reconnect.
+- Move message persistence/crypto into `worker_threads` (the `handleSend`/`handlePulled`
+  pair is the seam) — inline for milestone 3 to keep the flow testable.
+- Undelivered-message sweep (delete after X days) and the 14-day inactive-device removal.
+- Files/media attachments, groups + group key agreement, subgroups, message tags.

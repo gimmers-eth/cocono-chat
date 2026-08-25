@@ -49,4 +49,6 @@ export const api = {
       body: JSON.stringify({ code }),
     }),
   devices: (token) => withToken('/api/devices', token),
+  peerKeys: (token, username) =>
+    withToken(`/api/users/${encodeURIComponent(username)}/keys`, token),
 };

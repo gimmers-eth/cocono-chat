@@ -1,5 +1,12 @@
 <section id="view-home" hidden>
   <p class="status">Signed in as <strong id="home-user"></strong> <span id="home-device" class="dim"></span></p>
+  <h2>Conversations</h2>
+  <div class="approve-row">
+    <input id="chat-peer-name" type="text" autocomplete="off" spellcheck="false" placeholder="username to chat with" maxlength="64" />
+    <button id="btn-new-chat">Chat</button>
+  </div>
+  <ul id="conversation-list"></ul>
+  <p id="home-status" class="status"></p>
   <h2>Your devices <span id="device-count" class="dim"></span></h2>
   <ul id="device-list"></ul>
   <div class="approve-row">
@@ -7,7 +14,7 @@
     <button id="btn-approve">Approve new device</button>
   </div>
   <p id="approve-status" class="status"></p>
-  <p class="dim">Milestone 2: multi-device. Messaging arrives in milestone 3.</p>
+  <p class="dim">Milestone 3: end-to-end encrypted 1:1 messaging.</p>
   <button id="btn-logout">Log out</button>
   <button id="btn-forget" class="danger">Forget this device</button>
 </section>

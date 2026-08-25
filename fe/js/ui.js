@@ -2,7 +2,7 @@
 
 export const $ = (id) => document.getElementById(id);
 
-const VIEW_NAMES = ['auth', 'home', 'blocked'];
+const VIEW_NAMES = ['auth', 'home', 'chat', 'blocked'];
 
 // Elements are looked up lazily: view markup is injected at startup by
 // views.js, after modules have loaded, so nothing may be captured at import.

@@ -63,18 +63,32 @@ async function login(identity) {
 async function signup(username) {
   const keyPair = await cryptoLib.generateIdentityKeyPair();
   const pubRaw = await cryptoLib.exportRawPublicKey(keyPair);
+  const xPair = await cryptoLib.generateX25519KeyPair();
+  const xPubRaw = await cryptoLib.exportRawX25519(xPair);
   const aesExportable = await cryptoLib.generateAesKey();
   const aesRaw = await cryptoLib.exportRawAesKey(aesExportable);
   const deviceId = cryptoLib.newDeviceId();
 
   const t = Math.floor(Date.now() / 1000);
-  const s = await cryptoLib.sign(keyPair.privateKey, canonical({ a: aesRaw, d: deviceId, p: pubRaw, t, u: username }));
-  await api.signup({ u: username, p: pubRaw, a: aesRaw, d: deviceId, t, s });
+  const s = await cryptoLib.sign(
+    keyPair.privateKey,
+    canonical({ a: aesRaw, d: deviceId, p: pubRaw, t, u: username, x: xPubRaw }),
+  );
+  await api.signup({ u: username, p: pubRaw, x: xPubRaw, a: aesRaw, d: deviceId, t, s });
 
   // Server has the AES key: re-import it as non-exportable and keep only the
   // CryptoKey handles — the raw bytes are discarded (M3 fix).
   const { aesEnc, aesMac } = await cryptoLib.importAesKeys(aesRaw);
-  await saveIdentity({ username, deviceId, priv: keyPair.privateKey, pubRaw, aesEnc, aesMac });
+  await saveIdentity({
+    username,
+    deviceId,
+    priv: keyPair.privateKey,
+    pubRaw,
+    xPriv: xPair.privateKey,
+    xPubRaw,
+    aesEnc,
+    aesMac,
+  });
 
   const token = await login({ username, deviceId, priv: keyPair.privateKey });
   onLoggedIn(token, username);
@@ -128,13 +142,20 @@ async function startEnroll() {
   try {
     const keyPair = await cryptoLib.generateIdentityKeyPair();
     const pubRaw = await cryptoLib.exportRawPublicKey(keyPair);
+    const xPair = await cryptoLib.generateX25519KeyPair();
+    const xPubRaw = await cryptoLib.exportRawX25519(xPair);
     const aesExportable = await cryptoLib.generateAesKey();
     const aesRaw = await cryptoLib.exportRawAesKey(aesExportable);
     const deviceId = cryptoLib.newDeviceId();
 
     const t = Math.floor(Date.now() / 1000);
-    const s = await cryptoLib.sign(keyPair.privateKey, canonical({ a: aesRaw, d: deviceId, p: pubRaw, t, u: username }));
-    const { code, enrollId, expiresInSec } = await api.enrollDevice({ u: username, p: pubRaw, a: aesRaw, d: deviceId, t, s });
+    const s = await cryptoLib.sign(
+      keyPair.privateKey,
+      canonical({ a: aesRaw, d: deviceId, p: pubRaw, t, u: username, x: xPubRaw }),
+    );
+    const { code, enrollId, expiresInSec } = await api.enrollDevice({
+      u: username, p: pubRaw, x: xPubRaw, a: aesRaw, d: deviceId, t, s,
+    });
 
     $('add-device-row').hidden = true;
     $('enroll-waiting').hidden = false;
@@ -155,7 +176,16 @@ async function startEnroll() {
         stopPolling();
         $('enroll-status-line').textContent = 'Approved — logging in…';
         const { aesEnc, aesMac } = await cryptoLib.importAesKeys(aesRaw);
-        await saveIdentity({ username, deviceId, priv: keyPair.privateKey, pubRaw, aesEnc, aesMac });
+        await saveIdentity({
+          username,
+          deviceId,
+          priv: keyPair.privateKey,
+          pubRaw,
+          xPriv: xPair.privateKey,
+          xPubRaw,
+          aesEnc,
+          aesMac,
+        });
         const token = await login({ username, deviceId, priv: keyPair.privateKey });
         onLoggedIn(token, username);
       } catch (err) {

@@ -28,3 +28,22 @@ export function verifySignature(publicKey, dataBytes, signatureB64u) {
     return false;
   }
 }
+
+// --- X25519 (key agreement, milestone 3) ---
+// The server only validates these at signup/enroll; conversation keys are
+// derived by the clients (ECDH + HKDF), never by the server.
+
+export const RAW_X25519_KEY_BYTES = 32;
+
+export function importRawX25519PublicKey(b64u) {
+  const raw = b64uDecode(b64u);
+  if (!raw || raw.length !== RAW_X25519_KEY_BYTES) return null;
+  try {
+    return createPublicKey({
+      key: { kty: 'OKP', crv: 'X25519', x: b64u },
+      format: 'jwk',
+    });
+  } catch {
+    return null;
+  }
+}

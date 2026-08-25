@@ -63,6 +63,15 @@ export const config = {
   deviceApproveAccountWindowSec: numOf(env.DEVICE_APPROVE_ACCOUNT_WINDOW_SEC, DEFAULT_TIME_WINDOW),
   enrollStatusIpLimit: numOf(env.ENROLL_STATUS_IP_LIMIT, 600),
   enrollStatusIpWindowSec: numOf(env.ENROLL_STATUS_IP_WINDOW_SEC, DEFAULT_TIME_WINDOW),
+
+  // Messaging (milestone 3)
+  msgAccountLimit: numOf(env.MSG_ACCOUNT_LIMIT, 120),
+  msgAccountWindowSec: numOf(env.MSG_ACCOUNT_WINDOW_SEC, DEFAULT_TIME_WINDOW),
+  msgIpLimit: numOf(env.MSG_IP_LIMIT, 240),
+  msgIpWindowSec: numOf(env.MSG_IP_WINDOW_SEC, DEFAULT_TIME_WINDOW),
+  userKeysIpLimit: numOf(env.USER_KEYS_IP_LIMIT, 60),
+  userKeysIpWindowSec: numOf(env.USER_KEYS_IP_WINDOW_SEC, DEFAULT_TIME_WINDOW),
+  wsHeartbeatSec: numOf(env.WS_HEARTBEAT_SEC, 30),
 };
 
 config.jwtSecretInsecure = config.jwtSecret === 'dev-secret-change-me' || config.jwtSecret.length < 32;

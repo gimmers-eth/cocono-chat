@@ -3,7 +3,7 @@
 // its listeners. Fragments are plain <section> markup — no scripts — so
 // injecting them is CSP-safe.
 
-const VIEWS = ['auth', 'home', 'blocked'];
+const VIEWS = ['auth', 'home', 'chat', 'blocked'];
 
 export async function loadViews() {
   const fragments = await Promise.all(

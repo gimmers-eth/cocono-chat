@@ -18,7 +18,7 @@ async function signupUser(app, client, u, d) {
   return app.inject({
     method: 'POST',
     url: '/api/signup',
-    payload: { u, p: client.p, a, d, t, s },
+    payload: { u, p: client.p, x: client.x, a, d, t, s },
   });
 }
 
@@ -33,7 +33,7 @@ async function getToken(app, client, u, d) {
   return token;
 }
 
-// Enrollment is signed exactly like signup: canonical({ a, d, p, t, u }).
+// Enrollment is signed exactly like signup: canonical({ a, d, p, t, u, x }).
 async function enroll(app, client, u, d) {
   const a = randomAesKey();
   const t = nowEpoch();
@@ -41,7 +41,7 @@ async function enroll(app, client, u, d) {
   return app.inject({
     method: 'POST',
     url: '/api/devices/enroll',
-    payload: { u, p: client.p, a, d, t, s },
+    payload: { u, p: client.p, x: client.x, a, d, t, s },
   });
 }
 
@@ -125,10 +125,11 @@ test('enroll rejects unknown accounts, bad signatures, duplicates and limits', a
     assert.equal(ghostRes.statusCode, 404);
 
     // Bad signature.
+    const badSigClient = makeClient();
     const badSig = await app.inject({
       method: 'POST',
       url: '/api/devices/enroll',
-      payload: { u, p: makeClient().p, a: randomAesKey(), d: 'device-badsig-01', t: nowEpoch(), s: 'A'.repeat(86) },
+      payload: { u, p: badSigClient.p, x: badSigClient.x, a: randomAesKey(), d: 'device-badsig-01', t: nowEpoch(), s: 'A'.repeat(86) },
     });
     assert.equal(badSig.statusCode, 401);
 
@@ -253,7 +254,7 @@ test('enroll rejects stale or replayed payloads (M6)', async () => {
     const staleRes = await app.inject({
       method: 'POST',
       url: '/api/devices/enroll',
-      payload: { u, p: stale.p, a, d: 'device-stale-0001', t, s: stale.signSignup({ u, a, d: 'device-stale-0001', t }) },
+      payload: { u, p: stale.p, x: stale.x, a, d: 'device-stale-0001', t, s: stale.signSignup({ u, a, d: 'device-stale-0001', t }) },
     });
     assert.equal(staleRes.statusCode, 400);
     assert.equal(staleRes.json().error, 'stale_payload');
@@ -263,7 +264,7 @@ test('enroll rejects stale or replayed payloads (M6)', async () => {
     const a2 = randomAesKey();
     const t2 = nowEpoch();
     const d2 = 'second-device-0002';
-    const payload = { u, p: second.p, a: a2, d: d2, t: t2, s: second.signSignup({ u, a: a2, d: d2, t: t2 }) };
+    const payload = { u, p: second.p, x: second.x, a: a2, d: d2, t: t2, s: second.signSignup({ u, a: a2, d: d2, t: t2 }) };
     assert.equal((await app.inject({ method: 'POST', url: '/api/devices/enroll', payload })).statusCode, 201);
     const replay = await app.inject({ method: 'POST', url: '/api/devices/enroll', payload });
     assert.equal(replay.statusCode, 401);
