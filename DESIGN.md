@@ -103,8 +103,9 @@ Each user has an account that they can connect to using multiple devices.
 - Usernames cannot be changed once set.
 - **No passwords.** Account ownership is established by being first to register the
   username with a key pair.
-- Max devices per account: configurable, **default 3**; per-account overrides configurable
-  server-side by an admin (may become a premium feature later).
+- Max devices per account: configurable, **default 3**; per-account overrides are set by
+  an admin in the admin app (`PATCH /api/admin/users/:username/max-devices`, 1–1000;
+  raising lets a user enroll more devices — may become a premium feature later).
 - Recovery (MVP): none. Losing all devices means messages are lost. Later: email-based
   recovery of the username and backup options.
 

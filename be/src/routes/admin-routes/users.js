@@ -31,7 +31,12 @@ async function cleanupAccountState(redis, ul) {
   }
 }
 
-// GET /api/admin/users, DELETE user, DELETE device.
+// Per-account device cap: 1..MAX_DEVICES_CAP. Raising it lets a user enroll
+// more devices; lowering it below the current device count is allowed (the
+// existing devices keep working, no new ones can be added).
+const MAX_DEVICES_CAP = 1000;
+
+// GET /api/admin/users, PATCH max-devices, DELETE user, DELETE device.
 export default async function usersRoutes(app, { users, redis }) {
   app.get('/api/admin/users', async () => {
     const docs = await users.find({}, { projection: { _id: 0 } }).sort({ ul: 1 }).toArray();
@@ -47,6 +52,17 @@ export default async function usersRoutes(app, { users, redis }) {
         lastSeenAt: dev.lastSeenAt,
       })),
     }));
+  });
+
+  app.patch('/api/admin/users/:username/max-devices', async (request, reply) => {
+    const ul = request.params.username.toLowerCase();
+    const { maxDevices } = request.body ?? {};
+    if (!Number.isInteger(maxDevices) || maxDevices < 1 || maxDevices > MAX_DEVICES_CAP) {
+      return fail(reply, 'invalid_request', `maxDevices must be a whole number between 1 and ${MAX_DEVICES_CAP}`, 400);
+    }
+    const res = await users.updateOne({ ul }, { $set: { maxDevices } });
+    if (!res.matchedCount) return fail(reply, 'unknown_account', 'No such user', 404);
+    return { ul, maxDevices };
   });
 
   app.delete('/api/admin/users/:username', async (request, reply) => {

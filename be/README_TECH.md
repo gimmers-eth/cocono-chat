@@ -189,6 +189,7 @@ exposes internal-only endpoints:
 | Method | Path | Purpose |
 | ------ | ---- | ------- |
 | GET | `/api/admin/users` | users + devices (public keys omitted) |
+| PATCH | `/api/admin/users/:username/max-devices` | set the account's device cap (1–1000) |
 | GET | `/api/admin/rate-limits` | live `rl:*` counters via Redis SCAN |
 | POST | `/api/admin/rate-limits/clear` | clear by `{ ip }` (all IP-scoped counters) or exact `{ key }` |
 | DELETE | `/api/admin/users/:username` | delete an account |

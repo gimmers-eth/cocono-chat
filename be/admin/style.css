@@ -44,3 +44,4 @@ button:disabled { opacity: 0.5; cursor: default; }
 #status.error { color: var(--danger); }
 #status.ok { color: #6fbf73; }
 .device { padding: 0.2rem 0; }
+input.max-devices { width: 4.5rem; padding: 0.15rem 0.4rem; font-size: 0.85rem; }

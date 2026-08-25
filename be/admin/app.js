@@ -64,7 +64,11 @@ function renderUsers(users) {
     .map(
       (u) => `<tr>
         <td><strong>@${esc(u.u)}</strong><br /><span class="dim mono">${esc(u.ul)}</span></td>
-        <td>${fmtDate(u.createdAt)}<br /><span class="dim">max ${u.maxDevices} devices</span></td>
+        <td>${fmtDate(u.createdAt)}</td>
+        <td>
+          <input type="number" min="1" max="1000" value="${u.maxDevices}" class="max-devices" data-max-for="${esc(u.ul)}" />
+          <button class="tiny" data-set-max="${esc(u.ul)}">set</button>
+        </td>
         <td>${u.devices
           .map(
             (d) => `<div class="device">
@@ -87,7 +91,11 @@ async function refresh() {
       api('/api/admin/users'),
       api('/api/admin/rate-limits'),
     ]);
-    renderUsers(users);
+    // Don't clobber the row being edited: skip the users table re-render
+    // while a max-devices input has focus.
+    if (!document.activeElement?.classList?.contains('max-devices')) {
+      renderUsers(users);
+    }
     renderLimits(limits);
     $('updated').textContent = `updated ${new Date().toLocaleTimeString()}`;
     setStatus('');
@@ -121,6 +129,22 @@ document.addEventListener('click', (e) => {
   if (clearKey) {
     return run(`Cleared ${clearKey}`, () =>
       api('/api/admin/rate-limits/clear', { method: 'POST', body: JSON.stringify({ key: clearKey }) }));
+  }
+
+  const setMaxBtn = e.target.closest('[data-set-max]');
+  if (setMaxBtn) {
+    const ul = setMaxBtn.dataset.setMax;
+    const input = document.querySelector(`input[data-max-for="${ul}"]`);
+    const value = Number(input?.value);
+    if (!Number.isInteger(value) || value < 1) {
+      return setStatus('Max devices must be a whole number of at least 1', 'error');
+    }
+    input.blur(); // let the follow-up refresh re-render the row with the new value
+    return run(`Set @${ul} max devices to ${value}`, () =>
+      api(`/api/admin/users/${encodeURIComponent(ul)}/max-devices`, {
+        method: 'PATCH',
+        body: JSON.stringify({ maxDevices: value }),
+      }));
   }
 
   const delUser = e.target.closest('[data-del-user]')?.dataset.delUser;
