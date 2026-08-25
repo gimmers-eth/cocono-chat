@@ -1,5 +1,7 @@
 const env = process.env;
 
+const DEFAULT_TIME_WINDOW = 900 // 15 * 60 = 15 mins
+
 const listOf = (value, fallback) =>
   value ? value.split(',').map((s) => s.trim()).filter(Boolean) : fallback;
 
@@ -33,11 +35,11 @@ export const config = {
   maxDevicesDefault: numOf(env.MAX_DEVICES, 3),
 
   signupIpLimit: numOf(env.SIGNUP_IP_LIMIT, 10),
-  signupIpWindowSec: numOf(env.SIGNUP_IP_WINDOW_SEC, 60 * 5),
+  signupIpWindowSec: numOf(env.SIGNUP_IP_WINDOW_SEC, DEFAULT_TIME_WINDOW),
   challengeIpLimit: numOf(env.CHALLENGE_IP_LIMIT, 30),
-  challengeIpWindowSec: numOf(env.CHALLENGE_IP_WINDOW_SEC, 15 * 60),
+  challengeIpWindowSec: numOf(env.CHALLENGE_IP_WINDOW_SEC, DEFAULT_TIME_WINDOW),
   verifyAccountLimit: numOf(env.VERIFY_ACCOUNT_LIMIT, 20),
-  verifyAccountWindowSec: numOf(env.VERIFY_ACCOUNT_WINDOW_SEC, 15 * 60),
+  verifyAccountWindowSec: numOf(env.VERIFY_ACCOUNT_WINDOW_SEC, DEFAULT_TIME_WINDOW),
 };
 
 if (config.jwtSecret === 'dev-secret-change-me') {
