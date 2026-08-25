@@ -7,7 +7,7 @@
     "dev": "node --env-file-if-exists=.env --watch src/dev.js",
     "start": "node --env-file-if-exists=.env src/server.js",
     "admin": "node --env-file-if-exists=.env src/admin.js",
-    "test": "LOG_LEVEL=silent node --env-file-if-exists=.env.test --test 'test/*.test.js'"
+    "test": "LOG_LEVEL=silent node --env-file-if-exists=.env.test --test --test-concurrency=1 'test/*.test.js'"
   },
   "dependencies": {
     "@fastify/static": "^8.0.0",

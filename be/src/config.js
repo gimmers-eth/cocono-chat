@@ -40,6 +40,11 @@ export const config = {
   challengeIpWindowSec: numOf(env.CHALLENGE_IP_WINDOW_SEC, DEFAULT_TIME_WINDOW),
   verifyAccountLimit: numOf(env.VERIFY_ACCOUNT_LIMIT, 20),
   verifyAccountWindowSec: numOf(env.VERIFY_ACCOUNT_WINDOW_SEC, DEFAULT_TIME_WINDOW),
+  deviceCodeTtlSec: numOf(env.DEVICE_CODE_TTL_SEC, 10 * 60),
+  deviceEnrollIpLimit: numOf(env.DEVICE_ENROLL_IP_LIMIT, 10),
+  deviceEnrollIpWindowSec: numOf(env.DEVICE_ENROLL_IP_WINDOW_SEC, DEFAULT_TIME_WINDOW),
+  deviceApproveAccountLimit: numOf(env.DEVICE_APPROVE_ACCOUNT_LIMIT, 20),
+  deviceApproveAccountWindowSec: numOf(env.DEVICE_APPROVE_ACCOUNT_WINDOW_SEC, DEFAULT_TIME_WINDOW),
 };
 
 if (config.jwtSecret === 'dev-secret-change-me') {

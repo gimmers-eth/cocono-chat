@@ -1,9 +1,4 @@
-import { fail } from '../shared.js';
-
-function requireAuth(request, reply) {
-  if (!request.auth) return fail(reply, 'unauthorized', 'Missing or invalid token', 401);
-  return null;
-}
+import { fail, requireAuth } from '../shared.js';
 
 // GET /api/me — who am I (smoke test for JWT auth; grows later).
 export default async function meRoutes(app, { users }) {

@@ -190,13 +190,27 @@ Messages that need signing (`s`):
 - Optionally any message
 
 ### New device adding
-A user can add a new public and AES key to their account for a new device.
+A user can add a new public and AES key to their account for a new device. Implemented
+over REST (see `be/openapi.yaml`):
 
-- The user sends a message like the new-user message from the new device.
-- The server generates a 6 digit code, valid for **10 minutes** (configurable via `.env`).
-- The user confirms the code on an existing device already added to the account.
-- Once approved, all data (chat history, groups, etc.) is passed to the new device
-  **encrypted**.
+1. **Enroll** — the new device generates its own keys and posts the same payload shape
+   as signup to `POST /api/devices/enroll`, signed with its own private key. The server
+   checks the account exists and the device limit is not reached, then generates a
+   **6 digit code** valid for **10 minutes** (`DEVICE_CODE_TTL_SEC`), and returns the
+   code plus an unguessable `enrollId`.
+2. **Approve** — the user enters the code on an existing, already-registered device
+   (`POST /api/devices/approve`, JWT). Codes are scoped per account and single-use; the
+   new device is added atomically subject to the account's device limit.
+3. **Poll** — the new device polls `GET /api/devices/enroll-status/:enrollId` (the
+   `enrollId` is an unguessable capability; the device has no JWT yet). On approval it
+   saves its identity and logs in via the normal challenge-response flow.
+
+All devices on an account authenticate independently, so several devices can be logged
+in at the same time.
+
+- Rate limiting: enroll per-IP, approve per-account.
+- Once messaging exists, all data (chat history, groups, etc.) is passed to the new
+  device **encrypted**.
 
 ## Message Flow on BE
 

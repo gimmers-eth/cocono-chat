@@ -16,12 +16,14 @@ src/
   config.js        env-driven config with defaults (see .env.example)
   db.js            Mongo/Redis connection helpers (Mongo index creation lives here)
   routes/
-    shared.js      fail()/limited() response helpers
+    shared.js      fail()/limited()/requireAuth() response + auth helpers
     app-routes/    public API, registered by app.js
-      index.js     registers signup + auth + me
+      index.js     registers signup + auth + me + devices
       signup.js    POST /api/signup
       auth.js      POST /api/auth/challenge, POST /api/auth/verify
       me.js        GET /api/me
+      devices.js   POST /api/devices/enroll, GET /api/devices/enroll-status/:id,
+                   POST /api/devices/approve, GET /api/devices
     admin-routes/  internal API, registered by admin.js
       index.js     registers users + rateLimits
       users.js     GET/DELETE /api/admin/users[...]
@@ -42,6 +44,7 @@ test/
   helpers.js       setupApp() (ephemeral Mongo + Redis db 15) + simulated client
   unit.test.js     canonical JSON, b64u, JWT, validation, Ed25519 helpers
   accounts.test.js integration: signup/auth flows, errors, replay, rate limits
+  devices.test.js  integration: device enroll/approve/status/list flows
 ```
 
 `buildApp({ mongo, redis, config, feRoot })` is dependency-injected so tests run against
@@ -70,7 +73,8 @@ ephemeral stores with `app.inject()` — no ports needed.
 }
 ```
 
-The schema is already multi-device ready; milestone 2 adds the device-adding flow.
+The schema is multi-device; devices are added via the pairing-code flow
+(`routes/app-routes/devices.js`).
 
 ### Redis key namespace
 
@@ -80,6 +84,11 @@ The schema is already multi-device ready; milestone 2 adds the device-adding flo
 | `rl:signup:<ip>` | signup attempts per IP |
 | `rl:challenge:<ip>` | challenge requests per IP |
 | `rl:verify:<ul>` | verify attempts per account (brute-force protection) |
+| `rl:denroll:<ip>` | device enrollment requests per IP |
+| `rl:dapprove:<ul>` | device approval attempts per account |
+| `denroll:c:<ul>:<code>` | pending device enrollment (JSON, single-use), TTL `DEVICE_CODE_TTL_SEC` |
+| `denroll:p:<enrollId>` | pending marker so the new device can poll its state |
+| `denroll:ok:<enrollId>` | approval marker set when the device is added |
 
 Tests use Redis database 15 (`TEST_REDIS_URL`) and flush it before each suite.
 
@@ -114,11 +123,26 @@ JWT payload: `{ sub: <ul>, u: <display name>, d: <device id>, iat, exp }`, HS256
 `JWT_SECRET`. Authenticated routes read `Authorization: Bearer <token>` (set on
 `request.auth` in an onRequest hook).
 
+### Adding devices — pairing code
+
+1. `POST /api/devices/enroll` — same payload/signature as signup, signed by the NEW
+   device; the server checks the account exists, the device id is new, and `maxDevices`
+   is not reached, then issues `{ code, enrollId }` (6-digit code, TTL
+   `DEVICE_CODE_TTL_SEC`, default 10 min).
+2. `POST /api/devices/approve { code }` (JWT) — an existing device approves. Codes are
+   scoped per account (`denroll:c:<ul>:<code>`) and single-use; the device is added with
+   an atomic update guarded by a `$expr` size check against `maxDevices`.
+3. `GET /api/devices/enroll-status/:enrollId` — polled by the new device; `enrollId` is
+   an unguessable 192-bit capability (the device has no JWT yet).
+
+Once approved, the new device logs in via the normal challenge-response flow. All
+devices authenticate independently, so several can be signed in simultaneously.
+
 ### Rate limiting
 
 Redis INCR + EXPIRE per window. Defaults (see `config.js`): signup 10/IP/5min,
-challenge 30/IP/15min, verify 20/account/15min — all configurable. 429 responses carry
-`Retry-After`.
+challenge 30/IP/15min, verify 20/account/15min, device enroll 10/IP/15min, device
+approve 20/account/15min — all configurable. 429 responses carry `Retry-After`.
 
 ## Admin app
 
@@ -158,4 +182,3 @@ node scripts/verify-e2e.mjs        # live-server smoke test (server must be runn
 - `worker_threads` for everything except pub/sub (persistence, fan-out, crypto checks).
 - Store-and-forward message queues (Redis → MongoDB → expiry), per-device encrypted
   messages, pull-on-reconnect.
-- Device adding with 6-digit confirmation codes (`DEVICE_CODE_TTL`).

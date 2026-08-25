@@ -19,13 +19,35 @@
                placeholder="username (5+ chars: a-z, 0-9, _ -)" maxlength="64" />
         <button id="btn-signup">Create account</button>
       </div>
+      <p id="add-device-section" class="dim">
+        Already have an account?
+        <button id="btn-show-add" class="linkish">Add this device to it</button>
+      </p>
+      <div id="add-device-row" hidden>
+        <input id="add-username" type="text" autocomplete="username" spellcheck="false"
+               placeholder="your existing username" maxlength="64" />
+        <button id="btn-enroll">Add device</button>
+        <button id="btn-enroll-cancel" class="danger">Back</button>
+      </div>
+      <div id="enroll-waiting" hidden>
+        <p>Enter this code on one of your existing devices:</p>
+        <p id="enroll-code" class="code"></p>
+        <p id="enroll-status-line" class="dim">Waiting for approval…</p>
+      </div>
       <button id="btn-login" hidden>Log in</button>
       <p id="auth-status" class="status" role="status"></p>
     </section>
 
     <section id="view-home" hidden>
       <p class="status">Signed in as <strong id="home-user"></strong> <span id="home-device" class="dim"></span></p>
-      <p class="dim">Milestone 1: accounts. Messaging arrives in milestone 3.</p>
+      <h2>Your devices <span id="device-count" class="dim"></span></h2>
+      <ul id="device-list"></ul>
+      <div class="approve-row">
+        <input id="approve-code" type="text" inputmode="numeric" placeholder="6-digit code from the new device" maxlength="6" />
+        <button id="btn-approve">Approve new device</button>
+      </div>
+      <p id="approve-status" class="status"></p>
+      <p class="dim">Milestone 2: multi-device. Messaging arrives in milestone 3.</p>
       <button id="btn-logout">Log out</button>
       <button id="btn-forget" class="danger">Forget this device</button>
     </section>

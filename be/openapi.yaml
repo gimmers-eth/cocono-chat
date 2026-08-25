@@ -3,7 +3,7 @@ info:
   title: cocono-chat backend API
   version: 0.1.0
   description: |
-    REST API for cocono-chat accounts (milestone 1).
+    REST API for cocono-chat (milestones 1–2: accounts + multi-device).
 
     ## Encoding conventions
 
@@ -26,6 +26,16 @@ info:
 
     Errors are returned as `{ "error": <code>, "message": <human readable> }`.
     Rate-limited responses (429) additionally carry a `Retry-After` header (seconds).
+
+    ## Device adding (milestone 2)
+
+    An existing account can have multiple devices (default max 3). A new device
+    enrolls with its own keys (`POST /api/devices/enroll`, same shape as signup),
+    receives a 6-digit pairing code, and polls `GET /api/devices/enroll-status`.
+    A device already registered on the account approves the code
+    (`POST /api/devices/approve`, JWT). Once approved the new device logs in via
+    the normal challenge-response flow. Codes expire after `DEVICE_CODE_TTL_SEC`
+    (default 10 minutes).
 servers:
   - url: http://127.0.0.1:3000
     description: Local development server (pnpm dev)
@@ -35,6 +45,8 @@ tags:
     description: Account creation
   - name: auth
     description: Passwordless challenge-response login and session info
+  - name: devices
+    description: Multi-device enrollment, approval and listing (milestone 2)
 
 paths:
   /api/signup:
@@ -217,6 +229,189 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/devices/enroll:
+    post:
+      tags: [devices]
+      operationId: deviceEnroll
+      summary: Request to add this device to an existing account
+      description: |
+        Same shape and signing rules as signup, but targeting an account that already
+        exists and signed by the NEW device's key. The server issues a 6-digit pairing
+        code (shown on the new device) that a device already registered on the account
+        must approve via `POST /api/devices/approve`. The new device polls
+        `GET /api/devices/enroll-status/{enrollId}` until approved.
+
+        Enrollment itself is unauthenticated — approval by an existing device is the
+        gate. Rate limited per client IP (default 10/15min).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupRequest'
+      responses:
+        '201':
+          description: Enrollment pending approval.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnrollResponse'
+        '400':
+          description: |
+            Validation failure. `error` is one of:
+            `invalid_username`, `invalid_device_id`, `invalid_public_key`,
+            `invalid_aes_key`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 'Signature does not verify (`error: invalid_signature`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 'No such account (`error: unknown_account`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: |
+            `error` is one of:
+            `device_exists` (device id already registered on the account),
+            `device_limit` (account already has its maximum number of devices).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /api/devices/enroll-status/{enrollId}:
+    get:
+      tags: [devices]
+      operationId: deviceEnrollStatus
+      summary: Poll the state of a pending enrollment
+      description: |
+        Called by the enrolling device while it waits for approval. Unauthenticated by
+        necessity (the device has no JWT yet); the enrollId is an unguessable
+        192-bit capability issued by `POST /api/devices/enroll`.
+      parameters:
+        - name: enrollId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9_-]{16,64}$'
+      responses:
+        '200':
+          description: Enrollment state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnrollStatusResponse'
+        '400':
+          description: 'Malformed enrollId (`error: invalid_request`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: 'Enrollment expired or unknown (`error: expired`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/devices/approve:
+    post:
+      tags: [devices]
+      operationId: deviceApprove
+      summary: Approve a pending enrollment from a registered device
+      description: |
+        A device already registered on the account enters the 6-digit code shown on the
+        new device. Codes are scoped per account and single-use. The new device is
+        added atomically, subject to the account's device limit; the enrolling device
+        sees the approval on its next status poll.
+
+        Rate limited per account (default 20/15min).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveRequest'
+      responses:
+        '200':
+          description: Device approved and added to the account.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApproveResponse'
+        '400':
+          description: 'Code is not 6 digits (`error: invalid_request`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 'Missing, malformed or expired token (`error: unauthorized`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: |
+            No pending enrollment with that code for this account
+            (`error: unknown_code`). Also returned when the code was already used or
+            expired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: |
+            `error` is one of:
+            `device_exists` (device was added in the meantime),
+            `device_limit` (account reached its device maximum).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /api/devices:
+    get:
+      tags: [devices]
+      operationId: deviceList
+      summary: List the authenticated user's devices
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Device list (public keys and AES keys are never included).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceListResponse'
+        '401':
+          description: 'Missing, malformed or expired token (`error: unauthorized`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 'Account no longer exists (`error: unknown_account`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -356,6 +551,84 @@ components:
           type: string
           format: date-time
           description: Account creation time.
+
+    PairingCode:
+      type: string
+      description: 6-digit numeric pairing code shown on the enrolling device.
+      pattern: '^\d{6}$'
+      example: '482913'
+
+    EnrollResponse:
+      type: object
+      required: [code, enrollId, expiresInSec]
+      properties:
+        code:
+          $ref: '#/components/schemas/PairingCode'
+        enrollId:
+          type: string
+          description: |
+            Unguessable capability identifying this enrollment; used to poll
+            `GET /api/devices/enroll-status/{enrollId}`.
+        expiresInSec:
+          type: integer
+          description: Seconds until the pairing code expires.
+
+    EnrollStatusResponse:
+      type: object
+      required: [approved]
+      properties:
+        approved:
+          type: boolean
+          description: |
+            True once an existing device approved the enrollment. The enrolling
+            device can then log in via the challenge-response flow.
+
+    ApproveRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          $ref: '#/components/schemas/PairingCode'
+
+    ApproveResponse:
+      type: object
+      required: [approved]
+      properties:
+        approved:
+          allOf:
+            - $ref: '#/components/schemas/DeviceId'
+          description: The device id that was added to the account.
+
+    DeviceInfo:
+      type: object
+      required: [id, main, current, createdAt, lastSeenAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/DeviceId'
+        main:
+          type: boolean
+          description: True for the first (main) device on the account.
+        current:
+          type: boolean
+          description: True when this is the device making the request.
+        createdAt:
+          type: string
+          format: date-time
+        lastSeenAt:
+          type: string
+          format: date-time
+
+    DeviceListResponse:
+      type: object
+      required: [maxDevices, devices]
+      properties:
+        maxDevices:
+          type: integer
+          description: Maximum devices allowed on this account.
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeviceInfo'
 
     Error:
       type: object
