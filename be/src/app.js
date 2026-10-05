@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
@@ -17,7 +18,14 @@ function redactUrl(url) {
 }
 
 export async function buildApp({ mongo, redis, config, feRoot, sdkRoot }) {
+  // TLS is opt-in via TLS_KEY_PATH/TLS_CERT_PATH (validated at boot in
+  // server.js). Fastify serves https + wss when the options are present.
+  const tls = config.tlsKeyPath && config.tlsCertPath
+    ? { https: { key: fs.readFileSync(config.tlsKeyPath), cert: fs.readFileSync(config.tlsCertPath) } }
+    : {};
+
   const app = Fastify({
+    ...tls,
     // M2 fix: behind nginx, request.ip must be the real client IP or every
     // IP-scoped rate limit collapses into one shared bucket.
     trustProxy: config.trustProxy,

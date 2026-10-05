@@ -14,11 +14,18 @@ export async function start() {
     );
   }
 
+  // Boot-check TLS config: half-configured TLS is a silent footgun
+  // (server would come up plain http while operators think it's https).
+  if (Boolean(config.tlsKeyPath) !== Boolean(config.tlsCertPath)) {
+    throw new Error('TLS_KEY_PATH and TLS_CERT_PATH must both be set (or both unset).');
+  }
+
   const mongo = await connectMongo(config.mongoUrl);
   const redis = await connectRedis(config.redisUrl);
   const app = await buildApp({ mongo, redis, config, feRoot: defaultFeRoot, sdkRoot: defaultSdkRoot });
 
   await app.listen({ port: config.port, host: config.host });
+  app.log.info(`[server] listening on ${config.tlsCertPath ? 'https' : 'http'}://${config.host}:${config.port}`);
 
   const shutdown = async (signal) => {
     app.log.info(`[server] ${signal} received, shutting down`);

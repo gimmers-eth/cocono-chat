@@ -1,3 +1,5 @@
 packages:
   - be
   - client
+allowBuilds:
+  mongodb-memory-server: set this to true or false

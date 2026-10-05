@@ -30,6 +30,12 @@ export const config = {
   mongoUrl: env.MONGO_URL ?? 'mongodb://127.0.0.1:27017/cocono-chat',
   redisUrl: env.REDIS_URL ?? 'redis://127.0.0.1:6379/0',
 
+  // Native TLS: when BOTH paths are set the server speaks https/wss directly
+  // (no reverse proxy). Browsers require a secure context for WebCrypto/PWA,
+  // so LAN access over anything but localhost needs these.
+  tlsKeyPath: env.TLS_KEY_PATH || '',
+  tlsCertPath: env.TLS_CERT_PATH || '',
+
   adminPort: numOf(env.ADMIN_PORT, 3001),
   adminHost: env.ADMIN_HOST ?? '127.0.0.1',
   adminToken: env.ADMIN_TOKEN || '',
