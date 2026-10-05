@@ -59,7 +59,13 @@ await app.register(async function adminScope(instance) {
         .send({ error: rl.ok ? 'unauthorized' : 'rate_limited', message: 'Missing or invalid admin token' });
     });
   }
-  await instance.register(adminRoutes, { users: mongo.db.collection('users'), redis, config });
+  await instance.register(adminRoutes, {
+    users: mongo.db.collection('users'),
+    redis,
+    config,
+    diagnostics: mongo.db.collection('diagnostics'),
+    settings: mongo.db.collection('settings'),
+  });
 });
 
 await app.register(fastifyStatic, { root: path.resolve(import.meta.dirname, '..', 'admin') });

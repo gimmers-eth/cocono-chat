@@ -1,20 +1,57 @@
 // App-side message store (IndexedDB). The SDK owns identity + crypto; this
 // owns the decrypted transcript so history survives reloads.
 //
+// The store is SCOPED PER ACCOUNT: the database name (and the localStorage
+// read-marker key) includes the current username, so creating or logging in
+// as a different user in the same browser never shows the previous
+// account's conversations.
+//
 // record: { id, peer, dir: 'in'|'out', text, ts, state?, fromDeviceId? }
 //   id:    outgoing = 'out:'+localId (one per logical send)
 //          incoming = 'in:'+server mid (one per device copy)
 
-const DB_NAME = 'cocono-app';
+const DB_PREFIX = 'cocono-app';
 const DB_VERSION = 1;
 const MESSAGES = 'messages';
 
+let scope = 'anon';
 let dbPromise = null;
+
+// Called from main.js before any rendering: everything below is per-username.
+export function setScope(username) {
+  const next = String(username ?? 'anon').toLowerCase();
+  if (next === scope && dbPromise) return;
+  scope = next;
+  if (dbPromise) dbPromise.then((db) => db.close()).catch(() => {});
+  dbPromise = null;
+}
+
+// Hard-remove one account's local app data: message DB + read markers.
+// Used by 'Forget this device' so no decrypted transcript survives the keys.
+// Resolves once deletion finished (or was attempted); rejects only on error.
+export async function deleteAccountData(username) {
+  const ul = String(username ?? '').toLowerCase();
+  if (!ul) return;
+  try {
+    localStorage.removeItem(`cocono.reads.${ul}`);
+  } catch { /* storage unavailable — nothing to clean */ }
+  if (scope === ul) {
+    if (dbPromise) await dbPromise.then((db) => db.close()).catch(() => {});
+    dbPromise = null;
+  }
+  await new Promise((resolve, reject) => {
+    const req = indexedDB.deleteDatabase(`${DB_PREFIX}:${ul}`);
+    req.onsuccess = () => resolve();
+    // onblocked: another tab holds the DB; deletion proceeds once it closes.
+    req.onblocked = () => console.warn(`[store] deleteDatabase blocked: close other tabs of ${ul}`);
+    req.onerror = () => reject(req.error ?? new Error('deleteDatabase failed'));
+  });
+}
 
 function openDb() {
   if (!dbPromise) {
     dbPromise = new Promise((resolve, reject) => {
-      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      const req = indexedDB.open(`${DB_PREFIX}:${scope}`, DB_VERSION);
       req.onupgradeneeded = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains(MESSAGES)) {
@@ -61,13 +98,13 @@ export function allMessages() {
   return withStore('readonly', (s) => s.getAll());
 }
 
-// --- read markers (lightweight, localStorage) ---
+// --- read markers (lightweight, localStorage; scoped like the message DB) ---
 
-const READ_KEY = 'cocono.reads';
+const readsKey = () => `cocono.reads.${scope}`;
 
 const reads = () => {
   try {
-    return JSON.parse(localStorage.getItem(READ_KEY) ?? '{}');
+    return JSON.parse(localStorage.getItem(readsKey()) ?? '{}');
   } catch {
     return {};
   }
@@ -76,7 +113,7 @@ const reads = () => {
 export function markRead(peer, ts = Date.now()) {
   const r = reads();
   r[peer.toLowerCase()] = ts;
-  localStorage.setItem(READ_KEY, JSON.stringify(r));
+  localStorage.setItem(readsKey(), JSON.stringify(r));
 }
 
 export const isUnread = (peer, ts) => (ts ?? 0) > (reads()[String(peer).toLowerCase()] ?? 0);

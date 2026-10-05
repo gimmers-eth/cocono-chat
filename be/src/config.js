@@ -20,6 +20,10 @@ const parseTrustProxy = (value) => {
 };
 
 export const config = {
+  // Display name of the app (sign-in screen, chat header, PWA, admin).
+  // Overridable at runtime in the admin panel (settings collection).
+  appName: env.APP_NAME ?? 'co.co.no',
+
   port: numOf(env.PORT, 3000),
   // Default to all interfaces so LAN/mobile access works out of the box.
   // The app is passwordless and network-open by default — set a real
@@ -77,9 +81,19 @@ export const config = {
   msgAccountLimit: numOf(env.MSG_ACCOUNT_LIMIT, 120),
   msgAccountWindowSec: numOf(env.MSG_ACCOUNT_WINDOW_SEC, DEFAULT_TIME_WINDOW),
   msgIpLimit: numOf(env.MSG_IP_LIMIT, 240),
+  // Retention: how long PULLED copies stay server-side (expireAt = pulledAt +
+  // this) for re-delivery via 'resync'. Never-pulled copies stay queued.
+  msgRetentionSec: numOf(env.MSG_RETENTION_SEC, 30 * 24 * 3600),
   msgIpWindowSec: numOf(env.MSG_IP_WINDOW_SEC, DEFAULT_TIME_WINDOW),
   userKeysIpLimit: numOf(env.USER_KEYS_IP_LIMIT, 60),
   userKeysIpWindowSec: numOf(env.USER_KEYS_IP_WINDOW_SEC, DEFAULT_TIME_WINDOW),
+
+  // Diagnostics upload ('Send diagnostics' button) — payload size-capped and
+  // TTL-expired server-side; the per-IP limit is the spam gate.
+  diagIpLimit: numOf(env.DIAG_IP_LIMIT, 10),
+  diagIpWindowSec: numOf(env.DIAG_IP_WINDOW_SEC, 3600),
+  diagAccountLimit: numOf(env.DIAG_ACCOUNT_LIMIT, 10),
+  diagAccountWindowSec: numOf(env.DIAG_ACCOUNT_WINDOW_SEC, 24 * 3600),
   wsHeartbeatSec: numOf(env.WS_HEARTBEAT_SEC, 30),
 };
 

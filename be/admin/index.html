@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>cocono-chat admin</title>
+  <title>co.co.no admin</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <main>
-    <h1>cocono-chat — internal admin</h1>
+    <h1 id="admin-title">co.co.no — internal admin</h1>
     <div class="panel">
       <div class="row">
         <label class="dim" for="token">Admin token</label>
@@ -17,6 +17,15 @@
         <span id="updated" class="dim"></span>
       </div>
       <p id="status"></p>
+    </div>
+
+    <div class="panel">
+      <div class="row">
+        <label class="dim" for="branding-name">App name</label>
+        <input id="branding-name" type="text" maxlength="40" placeholder="APP_NAME default" size="24" />
+        <button id="btn-set-branding">Set</button>
+        <span class="dim">shown in the sign-in screen, chat header and PWA; empty = env default</span>
+      </div>
     </div>
 
     <h2>Rate limits</h2>
@@ -32,6 +41,16 @@
         <tbody id="limits-body"></tbody>
       </table>
       <p id="limits-empty" class="dim" hidden>No active rate-limit counters.</p>
+    </div>
+
+    <h2>Diagnostics</h2>
+    <div class="panel">
+      <div class="row">
+        <button id="btn-purge-diags" class="danger tiny">Purge all reports</button>
+        <span class="dim">uploaded via the app's "Send diagnostics" button; auto-expire after 30 days</span>
+      </div>
+      <div id="diags-list"></div>
+      <p id="diags-empty" class="dim" hidden>No diagnostics reports.</p>
     </div>
 
     <h2>Users &amp; devices</h2>

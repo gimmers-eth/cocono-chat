@@ -88,7 +88,7 @@ Key properties:
 
 | Symbol | Meaning | Format |
 | ------ | ------- | ------ |
-| `u` | username | 5–64 chars `[a-zA-Z0-9_-]`, case-insensitively unique, not reserved (`server`, `admin`, `root`, ... — configurable via `RESERVED_USERNAMES`). Original casing is kept for display (`u`), uniqueness is on the lowercase form (`ul`). Immutable once set. |
+| `u` | username | 5–64 chars `[a-zA-Z0-9_-]`, not reserved (`server`, `admin`, `root`, ... — configurable via `RESERVED_USERNAMES`). Normalised to lowercase at signup — the stored and displayed form is always lowercase; uniqueness is on the lowercase form (`ul`). Immutable once set. |
 | `d` | device id | client-generated, 8–64 chars `[a-zA-Z0-9_-]`; browsers use `crypto.randomUUID()` |
 | `p` | Ed25519 **identity public key** | raw 32 bytes, base64url. Verifies all signed payloads and login nonces |
 | `x` | X25519 **key-agreement public key** | raw 32 bytes, base64url. Used to derive pairwise E2EE conversation keys (see [MESSAGES.md](./MESSAGES.md)) |
@@ -112,7 +112,7 @@ Storage (MongoDB `users` collection, per account):
 
 ```javascript
 {
-  u: 'Alice', ul: 'alice',            // display casing + lowercase unique key
+  u: 'alice', ul: 'alice',            // lowercase display name + lowercase unique key
   devices: [{ id, pub, x, aes, main, createdAt, lastSeenAt }],
   maxDevices: 3,                      // admin-overridable per account (1–1000)
   createdAt,

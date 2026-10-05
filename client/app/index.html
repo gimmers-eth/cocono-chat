@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#111b21" />
-  <title>cocono-chat</title>
+  <title>co.co.no</title>
   <link rel="manifest" href="/manifest.webmanifest" />
   <!-- base.css: structure + default tokens. The theme stylesheet (loaded by
        js/theme.js) overrides the CSS custom properties per theme. -->
@@ -17,7 +17,7 @@
     <div class="auth-card">
       <div class="auth-brand">
         <div class="logo" aria-hidden="true">◍</div>
-        <h1>cocono-chat</h1>
+        <h1 data-app-name>co.co.no</h1>
         <p class="muted">Passwordless · End-to-end encrypted</p>
       </div>
 
@@ -90,7 +90,7 @@
       <div id="chat-empty" class="chat-empty">
         <div class="empty-inner">
           <div class="logo big" aria-hidden="true">◍</div>
-          <h2>cocono-chat</h2>
+          <h2 data-app-name>co.co.no</h2>
           <p class="muted">Pick a conversation or start a new one.<br />
              Messages are encrypted device-to-device.</p>
         </div>
@@ -119,7 +119,7 @@
   <div id="view-blocked" class="view auth-view" hidden>
     <div class="auth-card">
       <h1>Already open</h1>
-      <p class="muted">cocono-chat runs in one tab per device. Close this tab or the other one.</p>
+      <p class="muted"><span data-app-name>co.co.no</span> runs in one tab per device. Close this tab or the other one.</p>
     </div>
   </div>
 
@@ -145,8 +145,33 @@
 
       <h3>Appearance</h3>
       <select id="theme-select" class="select" aria-label="Theme"></select>
+
+      <h3>Diagnostics</h3>
+      <button id="btn-diag-send-drawer" class="btn btn-small">Send diagnostics</button>
+
+      <!-- In-drawer feedback (devices, pairing codes…) — the sidebar status
+           line is hidden behind this drawer, so settings actions report here. -->
+      <p id="drawer-status" class="status" role="status"></p>
     </div>
   </section>
+
+  <!-- Diagnostics modal: preview the report, then send. Opened from the
+       auth card footer and the Settings drawer. -->
+  <div id="diag-modal-overlay" class="overlay" hidden></div>
+  <section id="diag-modal" class="diag-modal" role="dialog" aria-modal="true" aria-labelledby="diag-modal-title" hidden>
+    <header class="drawer-head">
+      <h2 id="diag-modal-title">Send diagnostics</h2>
+      <button id="btn-diag-modal-close" class="icon-btn" title="Close">✕</button>
+    </header>
+    <pre id="diag-modal-report" class="diag-report">Collecting…</pre>
+    <div class="row-actions">
+      <button id="btn-diag-modal-send" class="btn btn-primary">Send</button>
+      <span id="diag-modal-status" class="muted small"></span>
+    </div>
+  </section>
+
+  <!-- Page footer: diagnostics send (login screen only). -->
+  <footer id="page-footer" class="page-footer"></footer>
 
   <script type="module" src="/js/main.js"></script>
 </body>

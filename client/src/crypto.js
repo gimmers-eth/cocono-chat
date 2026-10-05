@@ -1,12 +1,15 @@
 // All WebCrypto used by the SDK. Requires a secure context (https/localhost)
 // in browsers; Node >= 22.9 exposes crypto.subtle with Ed25519 + X25519.
-// Private keys are generated non-extractable and are only ever held as
-// CryptoKey handles inside the storage adapter — raw bytes never leave here.
+// Private keys are non-extractable at runtime. They are persisted either as
+// CryptoKey handles (legacy, unreliable on iOS WebKit) or — when a passkey is
+// available — as PKCS8 bytes sealed under a passkey-derived key (passkey.js);
+// the raw bytes only ever exist transiently between generate/export/wrap and
+// unwrap/import, always in memory.
 
 import { b64uEncode, b64uDecode, utf8 } from './encoding.js';
 
-export async function generateIdentityKeyPair() {
-  return crypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify']);
+export async function generateIdentityKeyPair(extractable = false) {
+  return crypto.subtle.generateKey({ name: 'Ed25519' }, extractable, ['sign', 'verify']);
 }
 
 export async function exportRawPublicKey(key) {
@@ -14,13 +17,27 @@ export async function exportRawPublicKey(key) {
   return b64uEncode(new Uint8Array(raw));
 }
 
-export async function generateX25519KeyPair() {
-  return crypto.subtle.generateKey({ name: 'X25519' }, false, ['deriveBits']);
+export async function generateX25519KeyPair(extractable = false) {
+  return crypto.subtle.generateKey({ name: 'X25519' }, extractable, ['deriveBits']);
 }
 
 export async function exportRawX25519(key) {
   const raw = await crypto.subtle.exportKey('raw', key);
   return b64uEncode(new Uint8Array(raw));
+}
+
+// --- PKCS8 export/import for passkey sealing (see passkey.js) ---
+
+export async function exportPkcs8b64u(privateKey) {
+  return b64uEncode(new Uint8Array(await crypto.subtle.exportKey('pkcs8', privateKey)));
+}
+
+export async function importEd25519PrivatePkcs8(pkcs8B64u) {
+  return crypto.subtle.importKey('pkcs8', b64uDecode(pkcs8B64u), { name: 'Ed25519' }, false, ['sign']);
+}
+
+export async function importX25519PrivatePkcs8(pkcs8B64u) {
+  return crypto.subtle.importKey('pkcs8', b64uDecode(pkcs8B64u), { name: 'X25519' }, false, ['deriveBits']);
 }
 
 export async function generateAesKey() {

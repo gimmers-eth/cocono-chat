@@ -11,7 +11,13 @@ import adminRoutes from '../src/routes/admin-routes/index.js';
 async function setupAdmin() {
   const ctx = await setupApp();
   const admin = Fastify({ logger: false });
-  await admin.register(adminRoutes, { users: ctx.mongo.db.collection('users'), redis: ctx.redis, config });
+  await admin.register(adminRoutes, {
+    users: ctx.mongo.db.collection('users'),
+    redis: ctx.redis,
+    config,
+    diagnostics: ctx.mongo.db.collection('diagnostics'),
+    settings: ctx.mongo.db.collection('settings'),
+  });
 
   const now = new Date();
   await ctx.mongo.db.collection('users').insertOne({
@@ -118,6 +124,41 @@ test('device removal guard still refuses the last device', async () => {
     });
     assert.equal(res.statusCode, 400);
     assert.equal(res.json().error, 'last_device');
+  } finally {
+    await teardown();
+  }
+});
+
+test('branding: admin GET reflects default, PATCH overrides and resets', async () => {
+  const { admin, teardown } = await setupAdmin();
+  try {
+    const g0 = await admin.inject({ method: 'GET', url: '/api/admin/branding' });
+    assert.equal(g0.statusCode, 200);
+    assert.equal(g0.json().appName, null);
+    assert.equal(g0.json().defaultName, config.appName);
+
+    const p = await admin.inject({
+      method: 'PATCH', url: '/api/admin/branding', payload: { appName: '  My Chat  ' },
+    });
+    assert.equal(p.statusCode, 200);
+    assert.equal(p.json().appName, 'My Chat');
+
+    const g1 = await admin.inject({ method: 'GET', url: '/api/admin/branding' });
+    assert.equal(g1.json().appName, 'My Chat');
+
+    // Rejected: oversized / control chars / empty-ish.
+    for (const bad of [{ appName: 'x'.repeat(41) }, { appName: 'a\u0000b' }, { appName: '.' }]) {
+      const r = await admin.inject({ method: 'PATCH', url: '/api/admin/branding', payload: bad });
+      assert.equal(r.statusCode, 400, JSON.stringify(bad));
+      assert.equal(r.json().error, 'invalid_name');
+    }
+
+    // Reset to the env default.
+    const reset = await admin.inject({ method: 'PATCH', url: '/api/admin/branding', payload: { appName: '' } });
+    assert.equal(reset.statusCode, 200);
+    assert.equal(reset.json().appName, null);
+    const g2 = await admin.inject({ method: 'GET', url: '/api/admin/branding' });
+    assert.equal(g2.json().appName, null);
   } finally {
     await teardown();
   }

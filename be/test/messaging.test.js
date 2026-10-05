@@ -142,17 +142,73 @@ test('messaging: online delivery with E2EE + pulled ack + delivered receipt', as
     assert.equal(incoming.env.m.cid, cid);
     assert.equal(e2eeDecrypt(convKey, incoming.env.m.d), `hello-${cid}`);
 
-    // Bob confirms the pull -> message deleted server-side...
+    // Bob confirms the pull -> message RETAINED server-side (pulled-marked,
+    // expireAt set for the TTL sweep)...
     wsB.send({ type: 'pulled', ids: [incoming.id] });
     // ...and Alice's device gets a delivery receipt.
     const delivered = await wsA.waitFor((m) => m.type === 'delivered' && m.cid === cid);
     assert.equal(delivered.to, 'bobby');
 
-    const left = await ctx.mongo.db.collection('messages').countDocuments({ mid: incoming.id });
-    assert.equal(left, 0);
+    const kept = await ctx.mongo.db.collection('messages').findOne({ mid: incoming.id });
+    assert.ok(kept, 'copy retained for the resync window');
+    assert.ok(kept.pulledAt instanceof Date, 'pulledAt marked');
+    assert.ok(kept.expireAt instanceof Date && kept.expireAt > kept.pulledAt, 'expireAt set');
 
     wsA.ws.close();
     wsB.ws.close();
+  } finally {
+    await ctx.teardown();
+  }
+});
+
+test('messaging: resync re-delivers pulled copies (retention window)', async () => {
+  const ctx = await setupLive();
+  try {
+    const alice = await createUser(ctx, makeClient(), 'alice');
+    const bob = await createUser(ctx, makeClient(), 'bobby');
+
+    const wsA = await connectWs(ctx.port, alice.token);
+    const wsB = await connectWs(ctx.port, bob.token);
+    await wsA.waitFor((m) => m.type === 'hello');
+    await wsB.waitFor((m) => m.type === 'hello');
+
+    const cid = 'cid-resync-1';
+    const { env } = buildEnvelope(alice, bob, bob.d, cid);
+    wsA.send({ type: 'msg', msg: env });
+    const incoming = await wsB.waitFor((m) => m.type === 'msg' && m.env.m.cid === cid);
+    wsB.send({ type: 'pulled', ids: [incoming.id] });
+    await wsA.waitFor((m) => m.type === 'delivered' && m.cid === cid);
+
+    // Reconnect: deliverPending must NOT replay the pulled copy.
+    wsB.ws.close();
+    const wsB2 = await connectWs(ctx.port, bob.token);
+    await wsB2.waitFor((m) => m.type === 'hello');
+    await new Promise((r) => setTimeout(r, 250));
+    assert.equal(
+      wsB2.received.filter((m) => m.type === 'msg' && m.id === incoming.id).length, 0,
+      'pulled copy must not auto-replay on connect',
+    );
+
+    // Explicit resync replays it (a device that lost its local message store
+    // but kept its identity recovers history this way).
+    wsB2.send({ type: 'resync' });
+    const redelivered = await wsB2.waitFor((m) => m.type === 'msg' && m.id === incoming.id);
+    assert.equal(redelivered.env.m.cid, cid, 'copy replayed verbatim');
+
+    // Re-pulling a pulled copy is a no-op: no second delivery receipt.
+    const aliceBefore = wsA.received.filter((m) => m.type === 'delivered').length;
+    wsB2.send({ type: 'pulled', ids: [redelivered.id] });
+    await new Promise((r) => setTimeout(r, 250));
+    assert.equal(wsA.received.filter((m) => m.type === 'delivered').length, aliceBefore);
+
+    // Resync is scoped to the device's own copies: Alice resyncs and gets
+    // nothing (her send left no copy addressed to her device).
+    wsA.send({ type: 'resync' });
+    await new Promise((r) => setTimeout(r, 250));
+    assert.equal(wsA.received.filter((m) => m.type === 'msg').length, 0);
+
+    wsA.ws.close();
+    wsB2.ws.close();
   } finally {
     await ctx.teardown();
   }
@@ -185,8 +241,9 @@ test('messaging: offline recipient gets store-and-forward on connect', async () 
     wsB.send({ type: 'pulled', ids: [incoming.id] });
     await wsA.waitFor((m) => m.type === 'delivered' && m.cid === cid);
 
-    const left = await ctx.mongo.db.collection('messages').countDocuments({ 'to.ul': 'bobby' });
-    assert.equal(left, 0);
+    const keptDocs = await ctx.mongo.db.collection('messages').find({ 'to.ul': 'bobby' }).toArray();
+    assert.equal(keptDocs.length, 1);
+    assert.ok(keptDocs[0].pulledAt instanceof Date, 'pulled copy retained');
 
     wsA.ws.close();
     wsB.ws.close();
@@ -349,7 +406,7 @@ test('messaging: multi-device recipient — exactly one copy per addressed devic
     assert.equal(wsA.received.filter((m) => m.type === 'msg').length, 0, 'sender must not receive its own messages');
 
     // Both devices pull their copies; the sender gets exactly one delivered
-    // receipt per copy (two total) and the store drains.
+    // receipt per copy (two total) and the copies are pulled-marked.
     wsB1.send({ type: 'pulled', ids: [in1.id] });
     wsB2.send({ type: 'pulled', ids: [in2.id] });
     const r1 = await wsA.waitFor((m) => m.type === 'delivered' && m.cid === cid1);
@@ -358,7 +415,9 @@ test('messaging: multi-device recipient — exactly one copy per addressed devic
     assert.equal(r2.to, 'bobby');
     await new Promise((r) => setTimeout(r, 250));
     assert.equal(wsA.received.filter((m) => m.type === 'delivered').length, 2);
-    assert.equal(await ctx.mongo.db.collection('messages').countDocuments({}), 0);
+    const all = await ctx.mongo.db.collection('messages').find({}).toArray();
+    assert.equal(all.length, 2, 'retention window keeps pulled copies');
+    assert.ok(all.every((d) => d.pulledAt instanceof Date));
 
     wsA.ws.close();
     wsB1.ws.close();

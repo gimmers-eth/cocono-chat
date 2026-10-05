@@ -61,7 +61,7 @@ export function createHandlers({ users, redis, pub, config, messages }) {
 
   async function deliverPending(socket, ul, dv) {
     const pending = await messages
-      .find({ 'to.ul': ul, 'to.dv': dv })
+      .find({ 'to.ul': ul, 'to.dv': dv, pulledAt: null })
       .sort({ ts: 1 })
       .limit(PENDING_BATCH)
       .toArray();
@@ -81,14 +81,24 @@ export function createHandlers({ users, redis, pub, config, messages }) {
       : [];
     if (!ids.length) return;
 
-    // Scope the delete to THIS device so a client can only confirm its own.
+    // Scope to THIS device so a client can only confirm its own copies.
+    // Retention: copies are NOT deleted on pull — they are marked and swept
+    // by the expireAt TTL index (MSG_RETENTION_SEC). That keeps a bounded
+    // re-delivery window (see handleResync) for a device that pulled but
+    // then lost its local message store. E2EE caveat: ciphertext is
+    // per-device, so only the SAME device identity can read it back.
     const docs = await messages
-      .find({ mid: { $in: ids }, 'to.ul': auth.sub, 'to.dv': auth.d })
+      .find({ mid: { $in: ids }, 'to.ul': auth.sub, 'to.dv': auth.d, pulledAt: null })
       .toArray();
     if (!docs.length) return;
-    await messages.deleteMany({ mid: { $in: docs.map((d) => d.mid) } });
+    const now = new Date();
+    await messages.updateMany(
+      { mid: { $in: docs.map((d) => d.mid) } },
+      { $set: { pulledAt: now, expireAt: new Date(now.getTime() + config.msgRetentionSec * 1000) } },
+    );
 
-    // Receipts: tell each sender's device that this message was pulled.
+    // Receipts: tell each sender's device that this message was pulled
+    // (newly-pulled copies only — a resynced copy re-pulled stays silent).
     for (const doc of docs) {
       await pub.publish(
         devKey(doc.from.ul, doc.from.fd),
@@ -97,5 +107,23 @@ export function createHandlers({ users, redis, pub, config, messages }) {
     }
   }
 
-  return { handleSend, handlePulled, deliverPending };
+  // Re-deliver this device's already-pulled copies still inside the
+  // retention window. Client dedupes by mid, so resync is safe to retry.
+  async function handleResync(socket, ul, dv) {
+    const kept = await messages
+      .find({ 'to.ul': ul, 'to.dv': dv, pulledAt: { $ne: null } })
+      .sort({ ts: 1 })
+      .limit(PENDING_BATCH)
+      .toArray();
+    for (const doc of kept) {
+      sendJson(socket, {
+        type: 'msg',
+        id: doc.mid,
+        ts: doc.ts instanceof Date ? doc.ts.getTime() : doc.ts,
+        env: doc.env,
+      });
+    }
+  }
+
+  return { handleSend, handlePulled, handleResync, deliverPending };
 }

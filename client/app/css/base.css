@@ -264,3 +264,43 @@ ul { list-style: none; padding: 0; }
   :root { --sidebar-w: 430px; }
   .messages { padding-inline: 8vw; }
 }
+
+/* Diagnostics: page footer (login screen) + preview modal */
+.page-footer {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 30;
+  display: none;
+  padding: .5rem 1rem calc(.5rem + env(safe-area-inset-bottom));
+  background: var(--bg); border-top: 1px solid var(--border);
+  font-size: .8rem; opacity: .9;
+}
+body[data-view="auth"] .page-footer,
+body:not([data-view]) .page-footer,
+#view-auth:not([hidden]) ~ main .page-footer,
+#view-auth:not([hidden]) ~ .page-footer { display: block; }
+body[data-view="app"] .page-footer,
+body[data-view="blocked"] .page-footer { display: none; }
+.diag-row { display: flex; gap: 0.6rem; align-items: center; justify-content: center; }
+
+.diag-modal {
+  position: fixed; top: 50%; left: 50%; z-index: 50;
+  transform: translate(-50%, -50%);
+  width: min(560px, calc(100% - 2rem));
+  max-height: min(80dvh, 640px);
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: .4rem 1.2rem 1rem;
+  animation: overlay-in .18s ease-out;
+}
+.diag-modal .drawer-head { margin-bottom: .4rem; }
+.diag-modal .row-actions { display: flex; gap: .6rem; align-items: center; margin-top: .6rem; }
+.diag-report {
+  margin: 0; padding: .6rem;
+  font-family: ui-monospace, monospace; font-size: .8rem;
+  background: rgba(127,127,127,0.08); border-radius: .4rem;
+  white-space: pre-wrap; word-break: break-all;
+  max-height: 45vh; overflow-y: auto;
+}
+.btn-small { padding: 0.35rem 0.8rem; font-size: 0.85rem; }

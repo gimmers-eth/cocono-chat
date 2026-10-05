@@ -5,6 +5,7 @@ import fastifyStatic from '@fastify/static';
 import { verifyJwt } from './lib/jwt.js';
 import { registerSecurityHeaders } from './routes/shared.js';
 import appRoutes from './routes/app-routes/index.js';
+import { resolveAppName } from './routes/app-routes/appInfo.js';
 import wsRoutes from './routes/ws-routes/index.js';
 
 // M5 fix: the enroll-status URL carries an unguessable capability and the
@@ -64,11 +65,33 @@ export async function buildApp({ mongo, redis, config, feRoot, sdkRoot }) {
     if (user?.devices.some((dev) => dev.id === payload.d)) request.auth = payload;
   });
 
-  const ctx = { users, redis, config };
+  const ctx = {
+    users,
+    redis,
+    config,
+    diagnostics: mongo.db.collection('diagnostics'),
+    settings: mongo.db.collection('settings'),
+  };
   await app.register(appRoutes, ctx);
   await app.register(wsRoutes, { ...ctx, messages: mongo.db.collection('messages') });
 
   if (feRoot) {
+    // PWA manifest served dynamically so the app-name setting is reflected
+    // in installed apps too. Registered BEFORE @fastify/static so the
+    // explicit route wins over the static wildcard.
+    let manifestTemplate = null;
+    app.get('/manifest.webmanifest', async (request, reply) => {
+      if (!manifestTemplate) {
+        manifestTemplate = JSON.parse(
+          fs.readFileSync(path.join(feRoot, 'manifest.webmanifest'), 'utf8'),
+        );
+      }
+      const name = await resolveAppName(ctx.settings, config);
+      return reply
+        .type('application/manifest+json')
+        .send({ ...manifestTemplate, name, short_name: name });
+    });
+
     await app.register(fastifyStatic, { root: feRoot });
     // The client SDK is imported by the app as '/sdk/index.js' (no bundler).
     // Wrapped in an anonymous (encapsulated) plugin: a second @fastify/static

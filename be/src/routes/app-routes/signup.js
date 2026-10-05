@@ -56,10 +56,14 @@ export default async function signupRoutes(app, { users, redis, config }) {
     }
 
     const now = new Date();
+    // Usernames are normalised to lowercase at account creation. The signature
+    // above is checked against the `u` as sent, so older clients that sign
+    // mixed-case input keep working.
+    const ul = u.toLowerCase();
     try {
       await users.insertOne({
-        u,
-        ul: u.toLowerCase(),
+        u: ul,
+        ul,
         devices: [{ id: d, pub: p, x, aes: a, main: true, createdAt: now, lastSeenAt: now }],
         maxDevices: config.maxDevicesDefault,
         createdAt: now,
@@ -71,6 +75,6 @@ export default async function signupRoutes(app, { users, redis, config }) {
       throw err;
     }
 
-    return reply.code(201).send({ u });
+    return reply.code(201).send({ u: ul });
   });
 }

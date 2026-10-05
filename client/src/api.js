@@ -42,6 +42,10 @@ export class Api {
     return this.#request('/api/me', { token });
   }
 
+  sendDiagnostics(report, token) {
+    return this.#request('/api/diagnostics', { method: 'POST', body: { report }, token });
+  }
+
   // --- devices / pairing ---
   enrollDevice(payload) {
     return this.#request('/api/devices/enroll', { method: 'POST', body: payload });

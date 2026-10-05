@@ -45,3 +45,12 @@ button:disabled { opacity: 0.5; cursor: default; }
 #status.ok { color: #6fbf73; }
 .device { padding: 0.2rem 0; }
 input.max-devices { width: 4.5rem; padding: 0.15rem 0.4rem; font-size: 0.85rem; }
+
+/* Diagnostics reports */
+details.diag { border-top: 1px solid rgba(127, 127, 127, 0.15); padding: 0.4rem 0; }
+details.diag summary { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; cursor: pointer; }
+.diag-report {
+  white-space: pre-wrap; word-break: break-all; margin: 0.4rem 0 0;
+  font-family: ui-monospace, monospace; font-size: 0.8rem;
+  background: rgba(127, 127, 127, 0.08); padding: 0.6rem; border-radius: 0.4rem;
+}

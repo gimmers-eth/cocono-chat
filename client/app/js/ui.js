@@ -12,6 +12,7 @@ export function showView(name) {
     if (v) v.hidden = key !== name;
   }
   if (name !== 'app') document.body.classList.remove('chat-open');
+  document.body.dataset.view = name; // lets CSS scope per-view chrome (footer)
 }
 
 export function setChatOpen(open) {

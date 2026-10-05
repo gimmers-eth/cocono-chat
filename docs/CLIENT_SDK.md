@@ -75,10 +75,16 @@ public material) is persisted through a tiny adapter:
 
 - `MemoryStorage` — per-session, gone on reload (fine for tests/CLI).
 - `IdbStorage` — browser IndexedDB (structured clone keeps CryptoKeys).
+  Identity records are keyed **per username** (`identity:<username>`) with a
+  `current` pointer selecting the active account, so several accounts can
+  coexist in one browser's storage without bleeding into each other (the
+  client uses one active account per device for now).
 - Bring your own for Electron/tauri/etc.
 
 Losing the identity = losing access to the account from that device (no
-recovery in the MVP, by design). `client.forget()` wipes it.
+recovery in the MVP, by design). `client.forget()` wipes the active account's
+identity; the web app additionally deletes that account's message database
+and read markers (`deleteAccountData()` in `client/app/js/store.js`).
 
 ## API
 

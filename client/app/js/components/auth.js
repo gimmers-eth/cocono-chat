@@ -2,6 +2,7 @@
 // device into an existing account. All actions go through the SDK.
 
 import { $, showView, setStatus } from '../ui.js';
+import { deleteAccountData } from '../store.js';
 
 export function createAuth({ client, onLoggedIn }) {
   const els = {
@@ -20,7 +21,13 @@ export function createAuth({ client, onLoggedIn }) {
     els.waiting.hidden = true;
     $('btn-show-pair').hidden = Boolean(identity);
     $('btn-show-signup').hidden = Boolean(identity);
-    if (identity) els.btnLogin.textContent = `Log in as @${identity.username}`;
+    // Passkey-sealed identities need an explicit tap to unlock (WebAuthn
+    // requires a user gesture); label the button accordingly.
+    if (identity) {
+      els.btnLogin.textContent = identity.format === 3
+        ? 'Unlock with passkey'
+        : `Log in as @${identity.username.toLowerCase()}`;
+    }
     setStatus(els.status, '');
   }
 
@@ -67,6 +74,11 @@ export function createAuth({ client, onLoggedIn }) {
       }),
     );
 
+    // Enter in the username field submits, like clicking the button.
+    $('signup-username').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') $('btn-signup').click();
+    });
+
     els.btnLogin.addEventListener('click', () =>
       guard(async () => {
         setStatus(els.status, 'Signing in…');
@@ -92,18 +104,29 @@ export function createAuth({ client, onLoggedIn }) {
       }).catch(() => {}),
     );
 
+    // Enter in the username field submits, like clicking the button.
+    $('pair-username').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') $('btn-pair-start').click();
+    });
+
     $('btn-pair-cancel').addEventListener('click', () => {
       client.cancelPairing();
       els.waiting.hidden = true;
       showMode('pair');
     });
 
-    $('btn-forget').addEventListener('click', async () => {
-      await client.forget();
-      applyIdentity(null);
-      showMode('signup');
-      setStatus(els.status, 'This device forgot its keys.');
-    });
+    $('btn-forget').addEventListener('click', () =>
+      guard(async () => {
+        // Capture the account BEFORE the identity is destroyed — the local
+        // message cache is scoped per username and must be wiped with it.
+        const identity = await client.storage.loadIdentity();
+        await client.forget();
+        if (identity?.username) await deleteAccountData(identity.username);
+        applyIdentity(null);
+        showMode('signup');
+        setStatus(els.status, 'This device forgot its keys and deleted all local message data.');
+      }),
+    );
   }
 
   return { wire, applyIdentity, showMode };

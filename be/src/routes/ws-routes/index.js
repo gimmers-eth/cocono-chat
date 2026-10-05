@@ -5,6 +5,8 @@
 // Wire protocol (JSON frames):
 //   client -> server: { type: 'msg', msg: envelope }
 //                     { type: 'pulled', ids: [mid, ...] }
+//                     { type: 'resync' }   re-deliver own pulled copies
+//                                          (still inside the retention window)
 //   server -> client: { type: 'hello' }
 //                     { type: 'msg', id, ts, env }
 //                     { type: 'ack', cid, ok, error? }
@@ -69,7 +71,7 @@ export default async function wsRoutes(app, { users, redis, config, messages }) 
     await Promise.allSettled([pub.quit(), sub.quit()]);
   });
 
-  const { handleSend, handlePulled, deliverPending } = createHandlers({
+  const { handleSend, handlePulled, handleResync, deliverPending } = createHandlers({
     users,
     redis,
     pub,
@@ -115,6 +117,7 @@ export default async function wsRoutes(app, { users, redis, config, messages }) 
       try {
         if (body?.type === 'msg') await handleSend(socket, request, body, payload);
         else if (body?.type === 'pulled') await handlePulled(socket, body, payload);
+        else if (body?.type === 'resync') await handleResync(socket, ul, dv);
       } catch (err) {
         app.log.error(err);
         sendJson(socket, { type: 'error', error: 'internal' });

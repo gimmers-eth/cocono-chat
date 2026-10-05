@@ -130,8 +130,11 @@ test('sdk: message exchange — ack, message event (decrypted), delivered receip
   assert.equal(delivered.to, bobName);
   assert.equal(delivered.localId, sent.localId);
 
-  // Server keeps nothing after the pull.
-  assert.equal(await srv.mongo.db.collection('messages').countDocuments({}), 0);
+  // Retention: pulled copies are kept (pulledAt-marked) for the resync window.
+  const kept = await srv.mongo.db.collection('messages').find({}).toArray();
+  assert.equal(kept.length, 1);
+  assert.ok(kept[0].pulledAt instanceof Date, 'copy marked pulled');
+  assert.ok(kept[0].expireAt instanceof Date, 'TTL expiry scheduled');
 
   alice.disconnect();
   bob.disconnect();
@@ -197,7 +200,9 @@ test('sdk: multi-device recipient — each device gets exactly one copy', async 
   assert.ok(acks.every((a) => a.ok && a.localId === sent.localId));
   assert.equal(receipts.length, 2);
   assert.ok(receipts.every((r) => r.to === gimmersName && r.localId === sent.localId));
-  assert.equal(await srv.mongo.db.collection('messages').countDocuments({}), 0, 'store drained');
+  const kept = await srv.mongo.db.collection('messages').find({}).toArray();
+  assert.equal(kept.length, 2, 'pulled copies retained for resync');
+  assert.ok(kept.every((d) => d.pulledAt instanceof Date), 'store pulled-marked');
 
   mike.disconnect();
   g1.disconnect();
@@ -239,9 +244,9 @@ test('sdk: offline recipient gets store-and-forward on connect', async (t) => {
 
   const receipt = await waitFor(sender, 'delivered');
   assert.equal(receipt.localId, sent.localId);
-  assert.equal(await srv.mongo.db.collection('messages').countDocuments({}), 0);
-
-  sender.disconnect();
+  const keptAfterPull = await srv.mongo.db.collection('messages').find({ 'to.ul': offlineName }).toArray();
+  assert.equal(keptAfterPull.length, 1, 'copy retained after pull');
+  assert.ok(keptAfterPull[0].pulledAt instanceof Date);
   offline.disconnect();
 });
 

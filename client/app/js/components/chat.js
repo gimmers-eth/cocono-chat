@@ -4,7 +4,7 @@
 // never interleave a clear/append and double-paint bubbles.
 
 import { $, setStatus, setChatOpen, fmtTime } from '../ui.js';
-import { saveMessage, updateMessage, messagesWith, markRead } from '../store.js';
+import { saveMessage, updateMessage, messagesWith, markRead, allMessages } from '../store.js';
 
 const STATE_MARK = { sending: '⏳', sent: '✓', delivered: '✓✓', failed: '!' };
 
@@ -21,6 +21,17 @@ export function createChat({ client, onHomeRefresh }) {
   // --- SDK event wiring (once) ---
 
   function connectEvents() {
+    // Retention/resync: when the socket opens and this device's local
+    // message store is empty (e.g. the browser evicted it while the identity
+    // survived), ask the server to replay our still-retained copies.
+    // Dedup is inherent: message ids are server-assigned mids.
+    let resynced = false;
+    client.on('state', async ({ state }) => {
+      if (state !== 'open' || resynced) return;
+      resynced = true;
+      if ((await allMessages()).length === 0) client.requestResync();
+    });
+
     client.on('message', async (m) => {
       await saveMessage({
         id: `in:${m.mid}`,

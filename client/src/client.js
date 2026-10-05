@@ -9,6 +9,7 @@ import { CoconoError } from './errors.js';
 import { MemoryStorage } from './storage.js';
 import { createLogger } from './logger.js';
 import { canonical, nowEpoch } from './encoding.js';
+import { passkeyAvailable, sealDevice, unsealDevice } from './passkey.js';
 import * as c from './crypto.js';
 
 export class CoconoClient extends Emitter {
@@ -47,7 +48,10 @@ export class CoconoClient extends Emitter {
 
   async #loadIdentity() {
     if (!this.#identity) {
-      this.#identity = (await this.storage.loadIdentity()) ?? null;
+      const stored = await this.storage.loadIdentity();
+      // Normalise identities persisted before lowercase normalisation.
+      if (stored?.username) stored.username = stored.username.toLowerCase();
+      this.#identity = stored ?? null;
     }
     return this.#identity;
   }
@@ -67,10 +71,13 @@ export class CoconoClient extends Emitter {
    * Build a fully new device identity (keys + transport AES) and produce the
    * signed payload shared by signup and enroll.
    */
-  async #generateDevicePayload(username) {
-    const keyPair = await c.generateIdentityKeyPair();
+  async #generateDevicePayload(username, { extractable = false } = {}) {
+    // Usernames are normalised to lowercase: the signed payload, the stored
+    // identity and everything displayed downstream agree on the lowercase form.
+    username = username.toLowerCase();
+    const keyPair = await c.generateIdentityKeyPair(extractable);
     const pubRaw = await c.exportRawPublicKey(keyPair.publicKey);
-    const xPair = await c.generateX25519KeyPair();
+    const xPair = await c.generateX25519KeyPair(extractable);
     const xPubRaw = await c.exportRawX25519(xPair.publicKey);
     const aesKey = await c.generateAesKey();
     const aesRaw = await c.exportRawAesKey(aesKey);
@@ -81,21 +88,35 @@ export class CoconoClient extends Emitter {
     return { username, deviceId, keyPair, pubRaw, xPair, xPubRaw, aesRaw, payload: { u: username, p: pubRaw, x: xPubRaw, a: aesRaw, d: deviceId, t, s } };
   }
 
-  async #persistIdentity(device, tokenLogin = true) {
-    const { aesEnc, aesMac } = await c.importAesKeys(device.aesRaw);
+  // `sealed` (see passkey.js): the identity is stored as passkey-wrapped
+  // bytes (format 3) — durable on iOS. Without it, the legacy CryptoKey
+  // handle record is used (fine on browsers that persist handles).
+  async #persistIdentity(device, tokenLogin = true, sealed = null) {
+    const runtime = sealed
+      ? sealed.runtime
+      : { ...(await c.importAesKeys(device.aesRaw)), priv: device.keyPair.privateKey, xPriv: device.xPair.privateKey };
     const identity = {
       username: device.username,
       deviceId: device.deviceId,
-      priv: device.keyPair.privateKey,
       pubRaw: device.pubRaw,
-      xPriv: device.xPair.privateKey,
       xPubRaw: device.xPubRaw,
-      aesEnc,
-      aesMac,
+      ...runtime,
     };
-    await this.storage.saveIdentity(identity);
+    const stored = sealed
+      ? {
+          format: 3,
+          username: identity.username,
+          deviceId: identity.deviceId,
+          pubRaw: identity.pubRaw,
+          xPubRaw: identity.xPubRaw,
+          credId: sealed.bundle.credId,
+          prfEval: sealed.bundle.prfEval,
+          wrapped: sealed.bundle.wrapped,
+        }
+      : identity;
+    await this.storage.saveIdentity(stored);
     this.#identity = identity;
-    this.logger.info(`identity stored for @${identity.username} device ${identity.deviceId}`);
+    this.logger.info(`identity stored for @${identity.username} device ${identity.deviceId} (${sealed ? 'passkey-sealed' : 'key handles'})`);
     if (tokenLogin) this.token = await this.#challengeVerify(identity);
     return identity;
   }
@@ -118,16 +139,40 @@ export class CoconoClient extends Emitter {
    */
   async register(username) {
     if (this.#identity) throw new CoconoError('This device already holds an identity — log out or use a fresh client.', 'identity_exists');
-    const device = await this.#generateDevicePayload(username);
+    const usePasskey = passkeyAvailable();
+    const device = await this.#generateDevicePayload(username, { extractable: usePasskey });
     await this.api.signup(device.payload);
-    const identity = await this.#persistIdentity(device);
+    let sealed = null;
+    if (usePasskey) {
+      try {
+        sealed = await sealDevice(device.username, device);
+      } catch (err) {
+        this.logger.warn('passkey sealing failed, falling back to key-handle storage:', err?.message ?? err);
+      }
+    }
+    const identity = await this.#persistIdentity(device, true, sealed);
     return { username: identity.username, deviceId: identity.deviceId, token: this.token };
   }
 
   /** Log in with the identity stored on this device. @returns {Promise<string>} token */
   async login() {
     const identity = await this.#requireIdentity();
+    // Passkey-sealed identity: unseal first — needs a user gesture (tap the
+    // login button) + biometric/PIN verification.
+    if (identity.format === 3 && !identity.priv) await this.#unlock(identity);
     return this.#challengeVerify(identity);
+  }
+
+  /** True when a passkey-sealed identity is stored but not yet unsealed. */
+  async needsUnlock() {
+    const identity = await this.#loadIdentity();
+    return Boolean(identity?.format === 3 && !identity.priv);
+  }
+
+  async #unlock(identity) {
+    const runtime = await unsealDevice({ credId: identity.credId, prfEval: identity.prfEval, wrapped: identity.wrapped });
+    Object.assign(identity, runtime);
+    this.logger.info(`identity unsealed for @${identity.username}`);
   }
 
   /** Forget the session (token only). Identity keys stay in storage. */
@@ -143,6 +188,15 @@ export class CoconoClient extends Emitter {
     this.#identity = null;
     this.#convKeyCache.clear();
     this.#cidToLocal.clear();
+  }
+
+  /**
+   * Upload a plain-text diagnostics report (see the app's Storage
+   * diagnostics panel). Works before login too; attaches the token when
+   * logged in so the report can be linked to the account.
+   */
+  async sendDiagnostics(report) {
+    return this.api.sendDiagnostics(report, this.token ?? undefined);
   }
 
   /** Current account info (GET /api/me). */
@@ -179,9 +233,18 @@ export class CoconoClient extends Emitter {
     if (this.#identity || this.#pendingPairing) {
       throw new CoconoError('This device already holds or is pairing an identity.', 'identity_exists');
     }
-    const device = await this.#generateDevicePayload(username);
+    const usePasskey = passkeyAvailable();
+    const device = await this.#generateDevicePayload(username, { extractable: usePasskey });
+    let sealed = null;
+    if (usePasskey) {
+      try {
+        sealed = await sealDevice(device.username, device);
+      } catch (err) {
+        this.logger.warn('passkey sealing failed, falling back to key-handle storage:', err?.message ?? err);
+      }
+    }
     const { code, enrollId, expiresInSec } = await this.api.enrollDevice(device.payload);
-    this.#pendingPairing = { ...device, enrollId, expiresAt: Date.now() + expiresInSec * 1000 };
+    this.#pendingPairing = { ...device, sealed, enrollId, expiresAt: Date.now() + expiresInSec * 1000 };
     this.logger.info(`pairing requested for @${username}, code ${code}`);
     return { code, enrollId, expiresInSec, deviceId: device.deviceId };
   }
@@ -214,7 +277,7 @@ export class CoconoClient extends Emitter {
       if (status.approved) break;
       await new Promise((r) => setTimeout(r, pollIntervalMs));
     }
-    const identity = await this.#persistIdentity(pending);
+    const identity = await this.#persistIdentity(pending, true, pending.sealed);
     this.#pendingPairing = null;
     return { username: identity.username, deviceId: identity.deviceId, token: this.token };
   }
@@ -265,6 +328,20 @@ export class CoconoClient extends Emitter {
   disconnect() {
     this.#transport?.close();
     this.#transport = null;
+  }
+
+  /**
+   * Ask the server to re-deliver this device's already-pulled copies that are
+   * still inside the retention window (see MSG_RETENTION_SEC). Useful after a
+   * partial storage wipe on a device that kept its identity — the server
+   * cannot re-encrypt for a NEW device (E2EE), only replay to the SAME one.
+   * Safe to retry: client dedupes by mid. No-op if the socket is not open.
+   */
+  requestResync() {
+    if (!this.#transport || this.#transport.state !== 'open') return false;
+    this.#transport.send({ type: 'resync' });
+    this.logger.info('resync requested');
+    return true;
   }
 
   get connectionState() {
@@ -378,7 +455,8 @@ export class CoconoClient extends Emitter {
       return;
     }
 
-    // Confirm the pull: server deletes its copy and notifies the sender.
+    // Confirm the pull: server marks its copy (kept for the retention
+    // window) and notifies the sender.
     this.#transport.send({ type: 'pulled', ids: [frame.id] });
     this.emit('message', {
       mid: frame.id,

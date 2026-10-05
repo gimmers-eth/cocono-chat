@@ -153,7 +153,7 @@ Signup happens via the REST API (`POST /api/signup`). The creation data object i
 JSON-encoded and sent to the server. Keys are base64url-encoded **raw** bytes. The
 signature proves possession of the private key at signup. The first registered device is
 the **main** device. `p`, `a` and usernames are validated server-side; usernames are
-stored case-insensitively for uniqueness.
+normalised to lowercase at signup and stored lowercase (`u` = `ul`).
 
 Freshness and replay protection: `t` must be within `SIGNED_PAYLOAD_MAX_AGE_SEC`
 (default 5 minutes) of server time, and every accepted signature is de-duplicated in

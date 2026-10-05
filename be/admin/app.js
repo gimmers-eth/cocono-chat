@@ -85,11 +85,45 @@ function renderUsers(users) {
     .join('');
 }
 
+let lastDiags = [];
+
+function renderDiags(diags) {
+  lastDiags = diags;
+  $('diags-empty').hidden = diags.length > 0;
+  $('diags-list').innerHTML = diags
+    .map(
+      (d) => `<details class="diag">
+      <summary>
+        <span class="mono">${fmtDate(d.ts)}</span>
+        <strong>@${esc(d.account ?? 'anonymous')}</strong>
+        <span class="dim mono">${esc(d.ip ?? '')}</span>
+        <span class="dim">${esc(String(d.ua ?? '').slice(0, 60))}</span>
+        <button class="tiny" data-copy-diag="${esc(d.id)}">copy</button>
+        <button class="danger tiny" data-del-diag="${esc(d.id)}">delete</button>
+      </summary>
+      <pre class="diag-report">${esc(d.report ?? '')}</pre>
+    </details>`,
+    )
+    .join('');
+}
+
+function renderBranding(b) {
+  const name = b.appName ?? b.defaultName ?? 'co.co.no';
+  document.title = `${name} admin`;
+  const title = $('admin-title');
+  if (title) title.textContent = `${name} — internal admin`;
+  // Don't clobber a name mid-edit.
+  const input = $('branding-name');
+  if (input && document.activeElement !== input) input.value = b.appName ?? '';
+}
+
 async function refresh() {
   try {
-    const [users, limits] = await Promise.all([
+    const [users, limits, diags, branding] = await Promise.all([
       api('/api/admin/users'),
       api('/api/admin/rate-limits'),
+      api('/api/admin/diagnostics'),
+      api('/api/admin/branding'),
     ]);
     // Don't clobber the row being edited: skip the users table re-render
     // while a max-devices input has focus.
@@ -97,6 +131,8 @@ async function refresh() {
       renderUsers(users);
     }
     renderLimits(limits);
+    renderDiags(diags);
+    renderBranding(branding);
     $('updated').textContent = `updated ${new Date().toLocaleTimeString()}`;
     setStatus('');
   } catch (err) {
@@ -124,7 +160,35 @@ $('btn-clear-ip').addEventListener('click', () => {
   $('clear-ip').value = '';
 });
 
+$('btn-purge-diags').addEventListener('click', () => {
+  if (!confirm('Delete ALL diagnostics reports?')) return;
+  run('Purged diagnostics reports', () => api('/api/admin/diagnostics', { method: 'DELETE' }));
+});
+
+$('btn-set-branding').addEventListener('click', () => {
+  const name = $('branding-name').value.trim();
+  run(name ? `App name set to “${name}”` : 'App name reset to default', () =>
+    api('/api/admin/branding', { method: 'PATCH', body: JSON.stringify({ appName: name }) }));
+  $('branding-name').blur();
+});
+
 document.addEventListener('click', (e) => {
+  const copyDiag = e.target.closest('[data-copy-diag]')?.dataset.copyDiag;
+  if (copyDiag) {
+    const report = lastDiags.find((d) => d.id === copyDiag)?.report ?? '';
+    navigator.clipboard.writeText(report).then(
+      () => setStatus('Report copied to clipboard', 'ok'),
+      () => setStatus('Clipboard unavailable in this context', 'error'),
+    );
+    return;
+  }
+
+  const delDiag = e.target.closest('[data-del-diag]')?.dataset.delDiag;
+  if (delDiag) {
+    return run(`Deleted diagnostics report`, () =>
+      api(`/api/admin/diagnostics/${encodeURIComponent(delDiag)}`, { method: 'DELETE' }));
+  }
+
   const clearKey = e.target.closest('[data-clear-key]')?.dataset.clearKey;
   if (clearKey) {
     return run(`Cleared ${clearKey}`, () =>

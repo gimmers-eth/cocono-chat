@@ -29,6 +29,7 @@ export function createHome({ client, chat, onLogout }) {
   }
 
   function paintMe(username) {
+    username = username.toLowerCase(); // display is always lowercase
     $('me-name').textContent = `@${username}`;
     $('me-avatar').textContent = username.slice(0, 1);
   }
@@ -86,7 +87,8 @@ export function createHome({ client, chat, onLogout }) {
 
   async function renderDevices() {
     const list = $('device-list');
-    const status = $('home-status');
+    // Drawer actions report INSIDE the drawer — #home-status is behind the scrim.
+    const status = $('drawer-status');
     try {
       const { devices, maxDevices } = await client.devices();
       const frag = document.createDocumentFragment();
@@ -116,7 +118,8 @@ export function createHome({ client, chat, onLogout }) {
     const reviewBtn = $('btn-approve');
     const confirmBtn = $('btn-approve-confirm');
     const preview = $('approve-preview');
-    const status = $('home-status');
+    // Pairing-code feedback belongs in the drawer, not the hidden sidebar.
+    const status = $('drawer-status');
     let codeInReview = null;
 
     async function review() {

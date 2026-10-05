@@ -69,7 +69,8 @@ paths:
         Registers a username together with the first device's Ed25519 public key and
         AES-GCM transport key. The request must be signed with the new Ed25519 private
         key to prove ownership. Usernames are 5-64 characters of `[a-zA-Z0-9_-]`,
-        case-insensitively unique, and must not be reserved.
+        normalised to lowercase at signup (case-insensitively unique), and must
+        not be reserved.
 
         The signed payload includes a client timestamp `t` and is protected against
         replay (see info description).
@@ -481,6 +482,43 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/diagnostics:
+    post:
+      summary: Submit a client diagnostics report
+      description: >
+        Stores a plain-text snapshot of the app's local state (origin,
+        IndexedDB contents, storage quota) for troubleshooting devices that
+        cannot run a web inspector. Works signed or anonymous; rate-limited
+        per IP, size-capped, and reports expire automatically after 30 days.
+      tags: [Diagnostics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [report]
+              properties:
+                report:
+                  type: string
+                  maxLength: 16384
+                  description: Plain-text diagnostics snapshot.
+      responses:
+        '202':
+          description: 'Report accepted (`{ ok: true }`); stored with server-side ip/ua/account metadata.'
+        '400':
+          description: '`error: invalid_report` — report missing or empty.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 'Per-IP rate limit reached.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -506,7 +544,7 @@ components:
   schemas:
     Username:
       type: string
-      description: 5-64 characters of `[a-zA-Z0-9_-]`; case-insensitively unique.
+      description: 5-64 characters of `[a-zA-Z0-9_-]`; normalised to lowercase at signup, case-insensitively unique.
       pattern: '^[a-zA-Z0-9_-]{5,64}$'
       example: alice
 

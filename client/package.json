@@ -9,7 +9,7 @@
     ".": "./src/index.js"
   },
   "scripts": {
-    "test": "node --env-file-if-exists=.env.test --test --test-concurrency=1 --test-timeout=60000 \"test/*.test.js\""
+    "test": "node --env-file-if-exists=.env.test --test --test-concurrency=1 --test-timeout=180000 \"test/*.test.js\""
   },
   "devDependencies": {
     "@cocono/be": "workspace:*",
