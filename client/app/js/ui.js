@@ -1,0 +1,41 @@
+// Small stateless DOM helpers shared by the components.
+
+export const $ = (id) => document.getElementById(id);
+
+const VIEW_NAMES = ['auth', 'app', 'blocked'];
+
+export function showView(name) {
+  const el = $(`view-${name}`);
+  if (!el) return;
+  for (const key of VIEW_NAMES) {
+    const v = $(`view-${key}`);
+    if (v) v.hidden = key !== name;
+  }
+  if (name !== 'app') document.body.classList.remove('chat-open');
+}
+
+export function setChatOpen(open) {
+  document.body.classList.toggle('chat-open', open);
+}
+
+export function setStatus(el, message, isError = false) {
+  if (!el) return;
+  el.textContent = message ?? '';
+  el.classList.toggle('error', Boolean(isError));
+}
+
+export function setBusy(busy) {
+  for (const btn of document.querySelectorAll('button')) btn.disabled = busy;
+}
+
+/** WhatsApp-style conversation time: today → HH:MM, this week → weekday, else date. */
+export function fmtTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const now = new Date();
+  const startOfDay = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const dayDiff = Math.round((startOfDay(now) - startOfDay(d)) / 86_400_000);
+  if (dayDiff === 0) return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  if (dayDiff > 0 && dayDiff < 7) return d.toLocaleDateString(undefined, { weekday: 'short' });
+  return d.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' });
+}

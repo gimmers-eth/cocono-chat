@@ -290,6 +290,84 @@ test('ws: invalid token is closed with 4401', async () => {
   }
 });
 
+test('messaging: multi-device recipient — exactly one copy per addressed device', async () => {
+  const ctx = await setupLive();
+  try {
+    const alice = await createUser(ctx, makeClient(), 'alice');
+    const bob = await createUser(ctx, makeClient(), 'bobby');
+
+    // Enroll a second device for Bob directly in Mongo (simulates a completed
+    // pairing flow) and get it a session token via the normal challenge/verify.
+    const clientB2 = makeClient();
+    const bobDev2 = randomUUID();
+    await ctx.mongo.db
+      .collection('users')
+      .updateOne({ ul: 'bobby' }, { $push: { devices: { id: bobDev2, pub: clientB2.p, x: clientB2.x, aes: randomAesKey() } } });
+    const { n } = (await ctx.app.inject({ method: 'POST', url: '/api/auth/challenge', payload: { u: 'bobby', d: bobDev2 } })).json();
+    const ve2 = await ctx.app.inject({
+      method: 'POST',
+      url: '/api/auth/verify',
+      payload: { u: 'bobby', d: bobDev2, n, s: clientB2.signBytes(Buffer.from(n, 'utf8')) },
+    });
+    assert.equal(ve2.statusCode, 200, ve2.body);
+    const bob2 = { ...bob, d: bobDev2, client: clientB2 };
+
+    const wsA = await connectWs(ctx.port, alice.token);
+    const wsB1 = await connectWs(ctx.port, bob.token);
+    const wsB2 = await connectWs(ctx.port, ve2.json().token);
+    await wsA.waitFor((m) => m.type === 'hello');
+    await wsB1.waitFor((m) => m.type === 'hello');
+    await wsB2.waitFor((m) => m.type === 'hello');
+
+    // Sender fan-out, exactly as the FE does it: one envelope per recipient
+    // device, each with its own cid and pairwise conversation key.
+    const cid1 = 'cid-md-dev1';
+    const cid2 = 'cid-md-dev2';
+    const { env: env1, convKey: key1 } = buildEnvelope(alice, bob, bob.d, cid1);
+    const { env: env2, convKey: key2 } = buildEnvelope(alice, bob2, bob2.d, cid2);
+    wsA.send({ type: 'msg', msg: env1 });
+    wsA.send({ type: 'msg', msg: env2 });
+
+    const ack1 = await wsA.waitFor((m) => m.type === 'ack' && m.cid === cid1);
+    assert.equal(ack1.ok, true, JSON.stringify(ack1));
+    const ack2 = await wsA.waitFor((m) => m.type === 'ack' && m.cid === cid2);
+    assert.equal(ack2.ok, true, JSON.stringify(ack2));
+
+    // Each device receives ONLY the copy addressed to it — no cross-delivery,
+    // no duplicates — and each copy decrypts with its own pairwise key.
+    const in1 = await wsB1.waitFor((m) => m.type === 'msg');
+    const in2 = await wsB2.waitFor((m) => m.type === 'msg');
+    assert.equal(in1.env.m.dv, bob.d);
+    assert.equal(in2.env.m.dv, bobDev2);
+    assert.equal(e2eeDecrypt(key1, in1.env.m.d), `hello-${cid1}`);
+    assert.equal(e2eeDecrypt(key2, in2.env.m.d), `hello-${cid2}`);
+
+    // Quiet period, then assert exact frame counts: no second copy anywhere.
+    await new Promise((r) => setTimeout(r, 250));
+    assert.equal(wsB1.received.filter((m) => m.type === 'msg').length, 1);
+    assert.equal(wsB2.received.filter((m) => m.type === 'msg').length, 1);
+    assert.equal(wsA.received.filter((m) => m.type === 'msg').length, 0, 'sender must not receive its own messages');
+
+    // Both devices pull their copies; the sender gets exactly one delivered
+    // receipt per copy (two total) and the store drains.
+    wsB1.send({ type: 'pulled', ids: [in1.id] });
+    wsB2.send({ type: 'pulled', ids: [in2.id] });
+    const r1 = await wsA.waitFor((m) => m.type === 'delivered' && m.cid === cid1);
+    const r2 = await wsA.waitFor((m) => m.type === 'delivered' && m.cid === cid2);
+    assert.equal(r1.to, 'bobby');
+    assert.equal(r2.to, 'bobby');
+    await new Promise((r) => setTimeout(r, 250));
+    assert.equal(wsA.received.filter((m) => m.type === 'delivered').length, 2);
+    assert.equal(await ctx.mongo.db.collection('messages').countDocuments({}), 0);
+
+    wsA.ws.close();
+    wsB1.ws.close();
+    wsB2.ws.close();
+  } finally {
+    await ctx.teardown();
+  }
+});
+
 test('keys endpoint: returns device keys, guards auth and existence', async () => {
   const ctx = await setupLive();
   try {

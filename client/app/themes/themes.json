@@ -1,0 +1,12 @@
+{
+  "default": "dark",
+  "themes": [
+    {
+      "id": "dark",
+      "label": "Dark",
+      "file": "dark/theme.css",
+      "colorScheme": "dark",
+      "themeColor": "#111b21"
+    }
+  ]
+}

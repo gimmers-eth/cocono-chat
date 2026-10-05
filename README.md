@@ -27,7 +27,8 @@ pnpm monorepo:
 | Path | Description | Docs |
 | ---- | ----------- | ---- |
 | `be/` | Node.js backend — Fastify REST API, MongoDB, Redis; serves the FE as static files | [README](./be/README.md) · [Technical](./be/README_TECH.md) · [OpenAPI](./be/openapi.yaml) |
-| `fe/` | The PWA — plain JavaScript ES modules, no frameworks, no bundler | [README](./fe/README.md) · [Technical](./fe/README_TECH.md) |
+| `fe/` | Legacy PWA (kept for reference; no longer served) | [README](./fe/README.md) · [Technical](./fe/README_TECH.md) |
+| `client/` | `@cocono/client` — event-driven JS SDK (register, login, pairing, E2EE messaging) **+ the new themeable FE** in `client/app` (WhatsApp-style, responsive, served at `/` with the SDK mounted at `/sdk/`) | [README](./client/README.md) · [SDK docs](./docs/CLIENT_SDK.md) · [Themes](./client/app/themes/README.md) |
 
 ## Quickstart
 
@@ -51,7 +52,9 @@ Open http://127.0.0.1:3000 and create an account.
 Run the tests (unit + integration, needs local Redis):
 
 ```bash
-pnpm test
+pnpm test           # backend
+pnpm test:client    # client SDK (boots the real backend in-process)
+pnpm test:all       # both
 ```
 
 ## Configuration
@@ -64,5 +67,9 @@ example and adjust when needed.
 ## Documentation
 
 - [DESIGN.md](./DESIGN.md) — architecture, encryption model, delivery, milestones
+- [docs/CLIENT_SDK.md](./docs/CLIENT_SDK.md) — client SDK: usage, events, pairing, storage, logging
+- [client/app/themes/README.md](./client/app/themes/README.md) — bootstrapping FE themes
+- [docs/SIGNUP.md](./docs/SIGNUP.md) — signup, passwordless login and multi-device pairing (with API examples)
+- [docs/MESSAGES.md](./docs/MESSAGES.md) — message sending & delivery: online, offline, multi-device (with protocol examples)
 - [QUESTIONS.md](./QUESTIONS.md) / [ANSWERS.md](./ANSWERS.md) — design decisions log
 - [be/openapi.yaml](./be/openapi.yaml) — REST API specification

@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#111b21" />
+  <title>cocono-chat</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <!-- base.css: structure + default tokens. The theme stylesheet (loaded by
+       js/theme.js) overrides the CSS custom properties per theme. -->
+  <link rel="stylesheet" href="/css/base.css" />
+  <link rel="stylesheet" id="theme-link" href="/themes/dark/theme.css" />
+</head>
+<body>
+  <!-- ============ AUTH ============ -->
+  <div id="view-auth" class="view auth-view" hidden>
+    <div class="auth-card">
+      <div class="auth-brand">
+        <div class="logo" aria-hidden="true">◍</div>
+        <h1>cocono-chat</h1>
+        <p class="muted">Passwordless · End-to-end encrypted</p>
+      </div>
+
+      <section id="auth-login" hidden>
+        <button id="btn-login" class="btn btn-primary btn-block"></button>
+        <button id="btn-forget" class="btn btn-ghost btn-block">Forget this device</button>
+      </section>
+
+      <section id="auth-signup" hidden>
+        <label class="field">
+          <input id="signup-username" type="text" autocomplete="username"
+                 placeholder="Pick a username" maxlength="64" spellcheck="false" />
+        </label>
+        <button id="btn-signup" class="btn btn-primary btn-block">Create account</button>
+        <p class="muted small">Keys are generated on this device and never leave it.</p>
+      </section>
+
+      <section id="auth-pair" hidden>
+        <label class="field">
+          <input id="pair-username" type="text" autocomplete="username"
+                 placeholder="Your username" maxlength="64" spellcheck="false" />
+        </label>
+        <button id="btn-pair-start" class="btn btn-primary btn-block">Request pairing code</button>
+      </section>
+
+      <section id="pair-waiting" hidden>
+        <p class="muted">Enter this code on one of your existing devices:</p>
+        <div id="pair-code" class="code-display"></div>
+        <p id="pair-hint" class="muted small">Waiting for approval…</p>
+        <button id="btn-pair-cancel" class="btn btn-ghost btn-block">Cancel</button>
+      </section>
+
+      <div class="auth-links">
+        <button id="btn-show-pair" class="linkish">Add an existing account</button>
+        <button id="btn-show-signup" class="linkish">Create a new account</button>
+      </div>
+      <p id="auth-status" class="status" role="status"></p>
+    </div>
+  </div>
+
+  <!-- ============ APP (WhatsApp-style two-pane) ============ -->
+  <div id="view-app" class="app-shell" hidden>
+    <aside class="sidebar">
+      <header class="side-head">
+        <div class="me">
+          <span id="me-avatar" class="avatar" aria-hidden="true"></span>
+          <span id="me-name" class="me-name"></span>
+        </div>
+        <div class="side-actions">
+          <span id="ws-dot" class="dot dot-off" title="connection"></span>
+          <button id="btn-devices" class="icon-btn" title="Devices">⛭</button>
+          <button id="btn-logout" class="icon-btn" title="Log out">⏻</button>
+        </div>
+      </header>
+
+      <div class="new-chat">
+        <input id="chat-peer-name" type="text" placeholder="Start a chat with a username"
+               maxlength="64" spellcheck="false" autocomplete="off" />
+        <button id="btn-new-chat" class="btn btn-accent">Chat</button>
+      </div>
+
+      <p id="home-status" class="status side-status" role="status"></p>
+
+      <nav class="convo-wrap">
+        <ul id="conversation-list" class="convo-list"></ul>
+      </nav>
+    </aside>
+
+    <main class="chat-pane">
+      <div id="chat-empty" class="chat-empty">
+        <div class="empty-inner">
+          <div class="logo big" aria-hidden="true">◍</div>
+          <h2>cocono-chat</h2>
+          <p class="muted">Pick a conversation or start a new one.<br />
+             Messages are encrypted device-to-device.</p>
+        </div>
+      </div>
+
+      <section id="chat-view" class="chat-view" hidden>
+        <header class="chat-head">
+          <button id="btn-chat-back" class="icon-btn back" title="Back">←</button>
+          <div class="chat-peer">
+            <span id="chat-peer" class="chat-peer-name"></span>
+            <span id="chat-sub" class="muted small"></span>
+          </div>
+        </header>
+        <ul id="chat-messages" class="messages"></ul>
+        <footer class="composer">
+          <input id="chat-input" type="text" placeholder="Type a message"
+                 autocomplete="off" maxlength="4096" />
+          <button id="btn-send" class="btn btn-accent round" title="Send">➤</button>
+        </footer>
+        <p id="chat-status" class="status" role="status"></p>
+      </section>
+    </main>
+  </div>
+
+  <!-- ============ BLOCKED (second tab) ============ -->
+  <div id="view-blocked" class="view auth-view" hidden>
+    <div class="auth-card">
+      <h1>Already open</h1>
+      <p class="muted">cocono-chat runs in one tab per device. Close this tab or the other one.</p>
+    </div>
+  </div>
+
+  <!-- Settings drawer: slides down from the top over a semi-transparent scrim. -->
+  <div id="drawer-overlay" class="overlay" hidden></div>
+  <section id="settings-drawer" class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" hidden>
+    <header class="drawer-head">
+      <h2 id="drawer-title">Settings</h2>
+      <button id="btn-settings-close" class="icon-btn" title="Close">✕</button>
+    </header>
+    <div class="drawer-body">
+      <h3>Devices</h3>
+      <ul id="device-list" class="device-list"></ul>
+
+      <h3>Approve a new device</h3>
+      <div class="approve-code">
+        <input id="approve-input" type="text" inputmode="numeric" maxlength="6"
+               placeholder="6-digit pairing code" autocomplete="off" />
+        <button id="btn-approve" class="btn btn-accent">Review</button>
+      </div>
+      <p id="approve-preview" class="muted small" hidden></p>
+      <button id="btn-approve-confirm" class="btn btn-primary" hidden>Approve</button>
+
+      <h3>Appearance</h3>
+      <select id="theme-select" class="select" aria-label="Theme"></select>
+    </div>
+  </section>
+
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>

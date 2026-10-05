@@ -1,0 +1,199 @@
+// Home: sidebar chrome (identity, connection state, log out), conversation
+// list, new-chat launcher and the devices panel (list + approve pairing +
+// theme picker).
+
+import { $, setStatus, fmtTime } from '../ui.js';
+import { allMessages, isUnread } from '../store.js';
+import { loadRegistry, applyTheme, savedTheme, wireThemeSelect } from '../theme.js';
+
+const MSG_STATE_MARK = { sending: '⏳', sent: '✓', delivered: '✓✓', failed: '!' };
+
+export function createHome({ client, chat, onLogout }) {
+  let settingsOpen = false;
+
+  function openSettings() {
+    if (settingsOpen) return;
+    settingsOpen = true;
+    $('drawer-overlay').hidden = false;
+    $('settings-drawer').hidden = false;
+    renderDevices();
+    wireThemePicker();
+    $('btn-settings-close').focus?.();
+  }
+
+  function closeSettings() {
+    if (!settingsOpen) return;
+    settingsOpen = false;
+    $('settings-drawer').hidden = true;
+    $('drawer-overlay').hidden = true;
+  }
+
+  function paintMe(username) {
+    $('me-name').textContent = `@${username}`;
+    $('me-avatar').textContent = username.slice(0, 1);
+  }
+
+  function paintConnection(state) {
+    const dot = $('ws-dot');
+    dot.className = 'dot ' + (state === 'open' ? 'dot-on' : state === 'connecting' ? 'dot-busy' : 'dot-off');
+    dot.title = state;
+  }
+
+  async function renderConversationList() {
+    const list = $('conversation-list');
+    const all = await allMessages();
+    const latestByPeer = new Map();
+    for (const m of all) {
+      const cur = latestByPeer.get(m.peer);
+      if (!cur || m.ts > cur.ts) latestByPeer.set(m.peer, m);
+    }
+    const entries = [...latestByPeer.entries()].sort((a, b) => b[1].ts - a[1].ts);
+    const frag = document.createDocumentFragment();
+    for (const [peer, last] of entries) {
+      const li = document.createElement('li');
+      const btn = document.createElement('button');
+      const av = document.createElement('span');
+      av.className = 'avatar';
+      av.textContent = peer.slice(0, 1);
+      const meta = document.createElement('span');
+      meta.className = 'convo-meta';
+      const name = document.createElement('span');
+      name.className = 'convo-name';
+      name.textContent = peer;
+      const preview = document.createElement('span');
+      preview.className = 'convo-last';
+      preview.textContent =
+        (last.dir === 'out' ? `You: ${MSG_STATE_MARK[last.state] ?? ''} ` : '') + (last.text ?? '');
+      meta.append(name, preview);
+      const side = document.createElement('span');
+      side.className = 'convo-side';
+      const time = document.createElement('span');
+      time.className = 'convo-time';
+      time.textContent = fmtTime(last.ts);
+      side.appendChild(time);
+      if (isUnread(peer, last.ts)) {
+        const dot = document.createElement('span');
+        dot.className = 'unread';
+        side.appendChild(dot);
+      }
+      btn.append(av, meta, side);
+      btn.addEventListener('click', () => chat.openChat(peer));
+      li.appendChild(btn);
+      frag.appendChild(li);
+    }
+    list.replaceChildren(frag);
+  }
+
+  async function renderDevices() {
+    const list = $('device-list');
+    const status = $('home-status');
+    try {
+      const { devices, maxDevices } = await client.devices();
+      const frag = document.createDocumentFragment();
+      for (const dev of devices) {
+        const li = document.createElement('li');
+        const id = document.createElement('span');
+        id.textContent = dev.id.slice(0, 8) + '…';
+        const tag = document.createElement('span');
+        tag.className = 'dim';
+        tag.textContent = [dev.current && 'this device', dev.main && 'main', `${maxDevices} max`]
+          .filter(Boolean)
+          .join(' · ');
+        li.append(id, tag);
+        frag.appendChild(li);
+      }
+      list.replaceChildren(frag);
+      setStatus(status, '');
+    } catch (err) {
+      setStatus(status, err.message ?? String(err), true);
+    }
+  }
+
+  // --- approve a pairing code coming from a NEW device ---
+
+  function wireApproveCode() {
+    const input = $('approve-input');
+    const reviewBtn = $('btn-approve');
+    const confirmBtn = $('btn-approve-confirm');
+    const preview = $('approve-preview');
+    const status = $('home-status');
+    let codeInReview = null;
+
+    async function review() {
+      const code = input.value.trim();
+      if (!/^\d{6}$/.test(code)) return setStatus(status, 'Pairing codes are 6 digits.', true);
+      try {
+        const p = await client.pendingPairing(code);
+        codeInReview = code;
+        preview.hidden = false;
+        preview.textContent = `Device "${p.d.slice(0, 8)}…" requests access (requested ${p.requestAt ?? p.requestedAt}).`;
+        confirmBtn.hidden = false;
+        setStatus(status, '');
+      } catch (err) {
+        preview.hidden = true;
+        confirmBtn.hidden = true;
+        setStatus(status, err.message ?? String(err), true);
+      }
+    }
+
+    reviewBtn.addEventListener('click', review);
+    input.addEventListener('keydown', (e) => e.key === 'Enter' && review());
+
+    confirmBtn.addEventListener('click', async () => {
+      if (!codeInReview) return;
+      try {
+        await client.approvePairing(codeInReview);
+        setStatus(status, 'Device approved — it will log in any moment.');
+        input.value = '';
+        preview.hidden = true;
+        confirmBtn.hidden = true;
+        codeInReview = null;
+        renderDevices();
+      } catch (err) {
+        setStatus(status, err.message ?? String(err), true);
+      }
+    });
+  }
+
+  async function wireThemePicker() {
+    const select = $('theme-select');
+    try {
+      const registry = await loadRegistry();
+      wireThemeSelect(select, registry, savedTheme() ?? registry.default, () => {});
+    } catch {
+      // The <link> fallback in index.html already applied a theme.
+      select.hidden = true;
+    }
+  }
+
+  function wire() {
+    $('btn-logout').addEventListener('click', () => {
+      client.logout();
+      onLogout();
+    });
+
+    // Settings drawer: opens from the top over a click-to-dismiss scrim.
+    $('btn-devices').addEventListener('click', openSettings);
+    $('btn-settings-close').addEventListener('click', closeSettings);
+    $('drawer-overlay').addEventListener('click', closeSettings);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeSettings();
+    });
+  
+    const openNew = async () => {
+      const input = $('chat-peer-name');
+      const username = input.value.trim();
+      if (username.length < 5) return setStatus($('home-status'), 'Username must be at least 5 characters.', true);
+      await chat.openChat(username);
+      input.value = '';
+    };
+    $('btn-new-chat').addEventListener('click', openNew);
+    $('chat-peer-name').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') openNew();
+    });
+
+    wireApproveCode();
+  }
+
+  return { wire, paintMe, paintConnection, renderConversationList, renderDevices };
+}

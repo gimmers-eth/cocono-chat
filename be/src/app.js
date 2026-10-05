@@ -16,7 +16,7 @@ function redactUrl(url) {
   return url;
 }
 
-export async function buildApp({ mongo, redis, config, feRoot }) {
+export async function buildApp({ mongo, redis, config, feRoot, sdkRoot }) {
   const app = Fastify({
     // M2 fix: behind nginx, request.ip must be the real client IP or every
     // IP-scoped rate limit collapses into one shared bucket.
@@ -62,9 +62,16 @@ export async function buildApp({ mongo, redis, config, feRoot }) {
 
   if (feRoot) {
     await app.register(fastifyStatic, { root: feRoot });
+    // The client SDK is imported by the app as '/sdk/index.js' (no bundler).
+    // Wrapped in an anonymous (encapsulated) plugin: a second @fastify/static
+    // in the same scope would collide on the 'sendFile' decorator.
+    if (sdkRoot) {
+      await app.register((instance) => instance.register(fastifyStatic, { root: sdkRoot, prefix: '/sdk/' }));
+    }
   }
 
   return app;
 }
 
-export const defaultFeRoot = path.resolve(import.meta.dirname, '..', '..', 'fe');
+export const defaultFeRoot = path.resolve(import.meta.dirname, '..', '..', 'client', 'app');
+export const defaultSdkRoot = path.resolve(import.meta.dirname, '..', '..', 'client', 'src');

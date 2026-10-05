@@ -33,6 +33,15 @@ importers:
         specifier: ^8.21.3
         version: 8.21.3
 
+  client:
+    devDependencies:
+      '@cocono/be':
+        specifier: workspace:*
+        version: link:../be
+      mongodb-memory-server:
+        specifier: ^10.1.0
+        version: 10.4.3
+
 packages:
 
   '@fastify/accept-negotiator@2.1.0':

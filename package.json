@@ -6,7 +6,9 @@
     "dev": "pnpm --filter @cocono/be dev",
     "start": "pnpm --filter @cocono/be start",
     "admin": "pnpm --filter @cocono/be admin",
-    "test": "pnpm --filter @cocono/be test"
+    "test": "pnpm --filter @cocono/be test",
+    "test:client": "pnpm --filter @cocono/client test",
+    "test:all": "pnpm --filter @cocono/be test && pnpm --filter @cocono/client test"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

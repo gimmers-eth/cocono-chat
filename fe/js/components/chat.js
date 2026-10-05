@@ -159,8 +159,11 @@ export function createChat({ getToken, getIdentity, onHomeRefresh }) {
   async function renderConversation() {
     const list = $('chat-messages');
     if (!list || !currentPeer) return;
-    list.textContent = '';
     const msgs = (await messagesWith(currentPeer)).sort((a, b) => a.ts - b.ts);
+    // Build off-DOM and swap atomically: concurrent renders (e.g. two acks
+    // from a fan-out send to a multi-device peer) must never interleave
+    // clear+append, or every bubble renders once per pending render.
+    const frag = document.createDocumentFragment();
     for (const m of msgs) {
       const li = document.createElement('li');
       li.className = `msg ${m.dir}`;
@@ -173,15 +176,15 @@ export function createChat({ getToken, getIdentity, onHomeRefresh }) {
         mark.textContent = MSG_STATE_MARK[m.state] ?? '';
         li.appendChild(mark);
       }
-      list.appendChild(li);
+      frag.appendChild(li);
     }
+    list.replaceChildren(frag);
     list.scrollTop = list.scrollHeight;
   }
 
   async function renderConversationList() {
     const list = $('conversation-list');
     if (!list) return;
-    list.textContent = '';
     const all = await allMessages();
     const latestByPeer = new Map();
     for (const m of all) {
@@ -189,6 +192,7 @@ export function createChat({ getToken, getIdentity, onHomeRefresh }) {
       if (!cur || m.ts > cur.ts) latestByPeer.set(m.peer, m);
     }
     const entries = [...latestByPeer.entries()].sort((a, b) => b[1].ts - a[1].ts);
+    const frag = document.createDocumentFragment();
     for (const [peer, last] of entries) {
       const li = document.createElement('li');
       const btn = document.createElement('button');
@@ -196,8 +200,9 @@ export function createChat({ getToken, getIdentity, onHomeRefresh }) {
       btn.textContent = `@${peer} — ${last.text.slice(0, 48)}`;
       btn.addEventListener('click', () => openChat(peer));
       li.appendChild(btn);
-      list.appendChild(li);
+      frag.appendChild(li);
     }
+    list.replaceChildren(frag);
   }
 
   async function openChat(username) {

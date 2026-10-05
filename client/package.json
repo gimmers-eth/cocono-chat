@@ -1,0 +1,18 @@
+{
+  "name": "@cocono/client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Event-driven JavaScript SDK for the cocono-chat API. Isomorphic: runs in browsers (WebCrypto + WebSocket + fetch) and Node.js >= 22.9.",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "node --env-file-if-exists=.env.test --test --test-concurrency=1 --test-timeout=60000 \"test/*.test.js\""
+  },
+  "devDependencies": {
+    "@cocono/be": "workspace:*",
+    "mongodb-memory-server": "^10.1.0"
+  }
+}

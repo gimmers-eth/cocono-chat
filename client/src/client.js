@@ -1,0 +1,393 @@
+// CoconoClient — the whole public surface of the SDK. Everything the old FE
+// did is available here: register, login, device pairing, messaging. Receiving
+// is event-driven: 'message', 'ack', 'delivered', 'state', 'ready', 'error'.
+
+import { Api } from './api.js';
+import { Transport } from './transport.js';
+import { Emitter } from './emitter.js';
+import { CoconoError } from './errors.js';
+import { MemoryStorage } from './storage.js';
+import { createLogger } from './logger.js';
+import { canonical, nowEpoch } from './encoding.js';
+import * as c from './crypto.js';
+
+export class CoconoClient extends Emitter {
+  #identity = null; // loaded lazily from storage
+  #transport = null;
+  #peerCache = new Map(); // ul -> { u, devices: [{d,p,x}] }
+  #convKeyCache = new Map(); // `${ul}:${dv}` -> CryptoKey
+  #cidToLocal = new Map(); // outgoing cid -> localId
+  #pendingPairing = null; // { username, deviceId, keyPair, xPair, aesRaw, pubRaw, xPubRaw, enrollId, expiresAt }
+
+  /**
+   * @param {object} options
+   * @param {string} [options.baseUrl]        Server origin, e.g. 'http://127.0.0.1:3000'. '' = same-origin (browser).
+   * @param {boolean|function} [options.logging=false]  true = console, or a custom (level, ...args) sink.
+   * @param {object} [options.storage]        Identity persistence: MemoryStorage (default), IdbStorage, or your own
+   *                                          {loadIdentity, saveIdentity, clearIdentity} adapter.
+   * @param {function} [options.fetchImpl]    Custom fetch (rarely needed).
+   */
+  constructor({ baseUrl = '', logging = false, storage = new MemoryStorage(), fetchImpl } = {}) {
+    super();
+    this.logger = createLogger(logging);
+    this.storage = storage;
+    this.api = new Api({ baseUrl, fetchImpl, logger: this.logger });
+    this.token = null;
+  }
+
+  get username() {
+    return this.#identity?.username ?? null;
+  }
+
+  get deviceId() {
+    return this.#identity?.deviceId ?? null;
+  }
+
+  // --- identity helpers ---
+
+  async #loadIdentity() {
+    if (!this.#identity) {
+      this.#identity = (await this.storage.loadIdentity()) ?? null;
+    }
+    return this.#identity;
+  }
+
+  async #requireIdentity() {
+    const identity = await this.#loadIdentity();
+    if (!identity) throw new CoconoError('No identity on this device — register(), login() or pair() first.', 'no_identity');
+    return identity;
+  }
+
+  #requireToken() {
+    if (!this.token) throw new CoconoError('Not logged in — call login() first.', 'not_authenticated');
+    return this.token;
+  }
+
+  /**
+   * Build a fully new device identity (keys + transport AES) and produce the
+   * signed payload shared by signup and enroll.
+   */
+  async #generateDevicePayload(username) {
+    const keyPair = await c.generateIdentityKeyPair();
+    const pubRaw = await c.exportRawPublicKey(keyPair.publicKey);
+    const xPair = await c.generateX25519KeyPair();
+    const xPubRaw = await c.exportRawX25519(xPair.publicKey);
+    const aesKey = await c.generateAesKey();
+    const aesRaw = await c.exportRawAesKey(aesKey);
+    const deviceId = c.newDeviceId();
+    const t = nowEpoch();
+    // The server checks the signature over canonical({ a, d, p, t, u, x }).
+    const s = await c.sign(keyPair.privateKey, canonical({ a: aesRaw, d: deviceId, p: pubRaw, t, u: username, x: xPubRaw }));
+    return { username, deviceId, keyPair, pubRaw, xPair, xPubRaw, aesRaw, payload: { u: username, p: pubRaw, x: xPubRaw, a: aesRaw, d: deviceId, t, s } };
+  }
+
+  async #persistIdentity(device, tokenLogin = true) {
+    const { aesEnc, aesMac } = await c.importAesKeys(device.aesRaw);
+    const identity = {
+      username: device.username,
+      deviceId: device.deviceId,
+      priv: device.keyPair.privateKey,
+      pubRaw: device.pubRaw,
+      xPriv: device.xPair.privateKey,
+      xPubRaw: device.xPubRaw,
+      aesEnc,
+      aesMac,
+    };
+    await this.storage.saveIdentity(identity);
+    this.#identity = identity;
+    this.logger.info(`identity stored for @${identity.username} device ${identity.deviceId}`);
+    if (tokenLogin) this.token = await this.#challengeVerify(identity);
+    return identity;
+  }
+
+  async #challengeVerify(identity) {
+    const { n } = await this.api.challenge({ u: identity.username, d: identity.deviceId });
+    const s = await c.sign(identity.priv, n);
+    const { token } = await this.api.verify({ u: identity.username, d: identity.deviceId, n, s });
+    this.token = token;
+    this.emit('ready', { username: identity.username, deviceId: identity.deviceId });
+    this.logger.info(`session opened for @${identity.username}`);
+    return token;
+  }
+
+  // ==================== public API ====================
+
+  /**
+   * Register a new account (this device becomes the main one) and log in.
+   * @returns {Promise<{username: string, deviceId: string, token: string}>}
+   */
+  async register(username) {
+    if (this.#identity) throw new CoconoError('This device already holds an identity — log out or use a fresh client.', 'identity_exists');
+    const device = await this.#generateDevicePayload(username);
+    await this.api.signup(device.payload);
+    const identity = await this.#persistIdentity(device);
+    return { username: identity.username, deviceId: identity.deviceId, token: this.token };
+  }
+
+  /** Log in with the identity stored on this device. @returns {Promise<string>} token */
+  async login() {
+    const identity = await this.#requireIdentity();
+    return this.#challengeVerify(identity);
+  }
+
+  /** Forget the session (token only). Identity keys stay in storage. */
+  logout() {
+    this.token = null;
+    this.disconnect();
+  }
+
+  /** Wipe the on-device identity (keys) and session. Account access from this device is gone. */
+  async forget() {
+    this.logout();
+    await this.storage.clearIdentity();
+    this.#identity = null;
+    this.#convKeyCache.clear();
+    this.#cidToLocal.clear();
+  }
+
+  /** Current account info (GET /api/me). */
+  async me() {
+    return this.api.me(this.#requireToken());
+  }
+
+  /** List devices on the current account (GET /api/devices). */
+  async devices() {
+    return this.api.devices(this.#requireToken());
+  }
+
+  /** Public key material for a peer (GET /api/users/:username/keys). */
+  async peerKeys(username, { refresh = false } = {}) {
+    const ul = username.toLowerCase();
+    if (refresh || !this.#peerCache.has(ul)) {
+      this.#peerCache.set(ul, await this.api.peerKeys(this.#requireToken(), username));
+    }
+    return this.#peerCache.get(ul);
+  }
+
+  /** Drop cached key material for a peer (e.g. after they add a device). */
+  forgetPeer(username) {
+    this.#peerCache.delete(username.toLowerCase());
+  }
+
+  /**
+   * Pairing, NEW-device side step 1: request to join an existing account.
+   * Returns the 6-digit code to show the user; an already-paired device must
+   * approve it via approvePairing(code).
+   * @returns {Promise<{code: string, enrollId: string, expiresInSec: number, deviceId: string}>}
+   */
+  async beginPairing(username) {
+    if (this.#identity || this.#pendingPairing) {
+      throw new CoconoError('This device already holds or is pairing an identity.', 'identity_exists');
+    }
+    const device = await this.#generateDevicePayload(username);
+    const { code, enrollId, expiresInSec } = await this.api.enrollDevice(device.payload);
+    this.#pendingPairing = { ...device, enrollId, expiresAt: Date.now() + expiresInSec * 1000 };
+    this.logger.info(`pairing requested for @${username}, code ${code}`);
+    return { code, enrollId, expiresInSec, deviceId: device.deviceId };
+  }
+
+  /**
+   * Pairing, NEW-device side step 2: poll until the code is approved, then
+   * store the identity and log in.
+   */
+  async completePairing({ pollIntervalMs = 2000 } = {}) {
+    const pending = this.#pendingPairing;
+    if (!pending) throw new CoconoError('Call beginPairing() first.', 'no_pending_pairing');
+    for (;;) {
+      if (!this.#pendingPairing) {
+        throw new CoconoError('Pairing cancelled.', 'pairing_cancelled');
+      }
+      if (Date.now() > pending.expiresAt) {
+        this.#pendingPairing = null;
+        throw new CoconoError('Pairing code expired — start again with beginPairing().', 'pairing_expired');
+      }
+      let status;
+      try {
+        status = await this.api.enrollStatus(pending.enrollId);
+      } catch (err) {
+        if (err.status === 410) {
+          this.#pendingPairing = null;
+          throw new CoconoError('Pairing code expired or unknown.', 'pairing_expired');
+        }
+        throw err;
+      }
+      if (status.approved) break;
+      await new Promise((r) => setTimeout(r, pollIntervalMs));
+    }
+    const identity = await this.#persistIdentity(pending);
+    this.#pendingPairing = null;
+    return { username: identity.username, deviceId: identity.deviceId, token: this.token };
+  }
+
+  /**
+   * Pairing, NEW-device side: abandon a pending pairing request (the code
+   * simply expires server-side).
+   */
+  cancelPairing() {
+    this.#pendingPairing = null;
+  }
+
+  /**
+   * Pairing, APPROVING-device side: inspect a code before approving (shows
+   * the requesting device id). Requires a logged-in device.
+   */
+  async pendingPairing(code) {
+    return this.api.pendingEnrollment(this.#requireToken(), code);
+  }
+
+  /** Pairing, APPROVING-device side: approve a 6-digit pairing code. */
+  async approvePairing(code) {
+    return this.api.approveDevice(this.#requireToken(), code);
+  }
+
+  /**
+   * Open the messaging WebSocket. Incoming frames turn into events:
+   * 'message', 'ack', 'delivered', 'state'. Safe to call repeatedly.
+   */
+  connect() {
+    this.#requireToken();
+    if (this.#transport) {
+      this.#transport.kick();
+      return this.#transport;
+    }
+    const transport = new Transport({
+      getUrl: () => this.api.wsUrl(),
+      getToken: () => this.token,
+      logger: this.logger,
+    });
+    transport.on('frame', (frame) => this.#onFrame(frame));
+    transport.on('state', (state) => this.emit('state', { state }));
+    this.#transport = transport;
+    transport.connect();
+    return transport;
+  }
+
+  disconnect() {
+    this.#transport?.close();
+    this.#transport = null;
+  }
+
+  get connectionState() {
+    return this.#transport?.state ?? 'closed';
+  }
+
+  /**
+   * E2EE text message to a peer account. Mirrors the FE fan-out: one envelope
+   * per recipient device, all sharing one localId. Acks arrive as 'ack'
+   * events (one per envelope); 'delivered' fires when a recipient device
+   * pulls its copy.
+   * @returns {Promise<{localId: string, peer: string, cids: string[]}>}
+   */
+  async sendMessage(username, text) {
+    const identity = await this.#requireIdentity();
+    this.#requireToken();
+    if (!this.#transport || this.#transport.state !== 'open') {
+      throw new CoconoError('Websocket not open — call connect() and wait for the "open" state.', 'not_connected');
+    }
+    const peer = await this.peerKeys(username);
+    const t = nowEpoch();
+    const localId = crypto.randomUUID();
+    const cids = [];
+    for (const dev of peer.devices) {
+      if (!dev.x) {
+        this.logger.warn(`skipping device ${dev.d} of @${peer.u}: no X25519 key (pre-M3 device)`);
+        continue;
+      }
+      const cid = crypto.randomUUID();
+      this.#cidToLocal.set(cid, localId);
+      const key = await this.#getConvKey(identity, peer.u.toLowerCase(), dev.d, dev.x);
+      const d = await c.encryptForConversation(key, text);
+      const m = { d, u: peer.u, dv: dev.d, f: identity.username, fd: identity.deviceId, cid, t };
+      const h = await c.hmac(identity.aesMac, canonical(m));
+      this.#transport.send({ type: 'msg', msg: { m: { ...m, h } } });
+      cids.push(cid);
+    }
+    if (!cids.length) throw new CoconoError(`No encryptable devices for @${peer.u}`, 'no_peer_devices');
+    return { localId, peer: peer.u, cids };
+  }
+
+  // --- internals ---
+
+  async #getConvKey(identity, theirUl, theirDv, theirX) {
+    const cacheKey = `${theirUl}:${theirDv}`;
+    if (!this.#convKeyCache.has(cacheKey)) {
+      const info = c.pairInfo(identity.username.toLowerCase(), identity.deviceId, theirUl, theirDv);
+      this.#convKeyCache.set(cacheKey, await c.deriveConversationKey(identity.xPriv, theirX, info));
+    }
+    return this.#convKeyCache.get(cacheKey);
+  }
+
+  #onFrame(frame) {
+    switch (frame?.type) {
+      case 'msg':
+        this.#onIncoming(frame).catch((err) => this.emit('error', { error: err }));
+        break;
+      case 'ack': {
+        const localId = this.#cidToLocal.get(frame.cid);
+        this.emit('ack', { cid: frame.cid, localId, ok: frame.ok, error: frame.error });
+        if (localId !== undefined && !frame.ok) this.#cidToLocal.delete(frame.cid);
+        break;
+      }
+      case 'delivered': {
+        const localId = this.#cidToLocal.get(frame.cid);
+        if (!localId) break;
+        this.emit('delivered', { cid: frame.cid, localId, to: frame.to });
+        break;
+      }
+      case 'hello':
+        break;
+      case 'error':
+        this.emit('error', { error: new CoconoError(frame.error ?? 'server error', 'server_error') });
+        break;
+      default:
+        this.logger.debug('unhandled frame type', frame?.type);
+    }
+  }
+
+  async #onIncoming(frame) {
+    const m = frame.env?.m;
+    if (!m) return;
+    const identity = await this.#requireIdentity();
+    const myUl = identity.username.toLowerCase();
+    const senderUl = (m.f ?? '').toLowerCase();
+
+    // Echo of a message WE sent (self-chat): confirm so the server drops it.
+    if (senderUl === myUl && m.fd === identity.deviceId) {
+      this.#transport.send({ type: 'pulled', ids: [frame.id] });
+      return;
+    }
+
+    const peerKeys = await this.peerKeys(senderUl).catch(() => null);
+    if (!peerKeys) {
+      this.logger.warn(`incoming msg from unknown peer @${m.f}; leaving queued`);
+      return;
+    }
+    const senderDevice = peerKeys.devices.find((dev) => dev.d === m.fd);
+    if (!senderDevice?.x) {
+      this.logger.warn(`incoming msg from unknown/device-less sender ${m.fd}; leaving queued`);
+      return;
+    }
+
+    let text;
+    try {
+      const key = await this.#getConvKey(identity, senderUl, m.fd, senderDevice.x);
+      text = await c.decryptFromConversation(key, m.d);
+    } catch (err) {
+      // Wrong key / tampered ciphertext: do NOT confirm the pull.
+      this.emit('error', { error: new CoconoError(`Failed to decrypt message ${frame.id}: ${err.message}`, 'decrypt_failed') });
+      return;
+    }
+
+    // Confirm the pull: server deletes its copy and notifies the sender.
+    this.#transport.send({ type: 'pulled', ids: [frame.id] });
+    this.emit('message', {
+      mid: frame.id,
+      peer: m.f,
+      from: m.f,
+      fromDeviceId: m.fd,
+      text,
+      ts: frame.ts,
+      self: senderUl === myUl,
+    });
+  }
+}

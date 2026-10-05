@@ -21,7 +21,10 @@ const parseTrustProxy = (value) => {
 
 export const config = {
   port: numOf(env.PORT, 3000),
-  host: env.HOST ?? '127.0.0.1',
+  // Default to all interfaces so LAN/mobile access works out of the box.
+  // The app is passwordless and network-open by default — set a real
+  // JWT_SECRET and consider restricting with HOST=127.0.0.1 on shared nets.
+  host: env.HOST ?? '0.0.0.0',
   trustProxy: parseTrustProxy(env.TRUST_PROXY),
 
   mongoUrl: env.MONGO_URL ?? 'mongodb://127.0.0.1:27017/cocono-chat',

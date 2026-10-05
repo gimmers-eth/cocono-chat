@@ -1,7 +1,7 @@
 import { pathToFileURL } from 'node:url';
 import { config } from './config.js';
 import { connectMongo, connectRedis } from './db.js';
-import { buildApp, defaultFeRoot } from './app.js';
+import { buildApp, defaultFeRoot, defaultSdkRoot } from './app.js';
 
 export async function start() {
   // H2 fix: refuse to serve with the dev default (or a too-short) JWT secret.
@@ -16,7 +16,7 @@ export async function start() {
 
   const mongo = await connectMongo(config.mongoUrl);
   const redis = await connectRedis(config.redisUrl);
-  const app = await buildApp({ mongo, redis, config, feRoot: defaultFeRoot });
+  const app = await buildApp({ mongo, redis, config, feRoot: defaultFeRoot, sdkRoot: defaultSdkRoot });
 
   await app.listen({ port: config.port, host: config.host });
 

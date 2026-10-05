@@ -1,0 +1,40 @@
+/* ==========================================================================
+   Theme: Dark  (WhatsApp-inspired palette)
+   A theme ONLY re-defines the custom properties declared in css/base.css.
+   To add a theme: create <name>/theme.css in this folder, define the token
+   values you want to change, and add one entry to themes/themes.json.
+   ========================================================================== */
+
+:root {
+  color-scheme: dark;
+
+  --bg: #0b141a;               /* app backdrop / chat wallpaper */
+  --panel: #111b21;            /* sidebar, headers, cards       */
+  --panel-raised: #202c33;     /* list hover, inputs, bubbles-in */
+  --border: #222d34;
+  --divider: #1c262d;
+
+  --text: #e9edef;
+  --muted: #8696a0;
+
+  --accent: #00a884;           /* brand green */
+  --accent-strong: #008069;
+  --on-accent: #ffffff;
+
+  --bubble-in: #202c33;
+  --bubble-out: #005c4b;
+  --bubble-text: #e9edef;
+
+  --danger: #ef6975;
+  --success: #00a884;
+  --warning: #ffa355;
+
+  --dot-off: #556068;
+  --dot-on: #00a884;
+  --dot-busy: #ffa355;
+
+  --overlay: rgba(0, 0, 0, 0.55);   /* drawer scrim */
+
+  --shadow: 0 2px 14px rgba(0, 0, 0, 0.45);
+  --radius-bubble: 8px;
+}
