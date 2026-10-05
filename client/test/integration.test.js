@@ -247,6 +247,7 @@ test('sdk: offline recipient gets store-and-forward on connect', async (t) => {
   const keptAfterPull = await srv.mongo.db.collection('messages').find({ 'to.ul': offlineName }).toArray();
   assert.equal(keptAfterPull.length, 1, 'copy retained after pull');
   assert.ok(keptAfterPull[0].pulledAt instanceof Date);
+  sender.disconnect();
   offline.disconnect();
 });
 
