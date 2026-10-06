@@ -21,7 +21,6 @@
 
 const SHELL_CACHE = 'cocono-shell-v3';
 const FALLBACK_TITLE = 'co.co.no';
-const ENRICH_BUDGET_MS = 9000;
 const SETTLE_MS = 1500;
 
 self.addEventListener('install', () => self.skipWaiting());
@@ -114,37 +113,52 @@ async function upgradeContent() {
   return lib.peek(token, record, xPriv, SETTLE_MS);
 }
 
-const withBudget = (promise, ms) =>
-  Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve(null), ms))]);
+// Exactly ONE banner per push: try the rich path under a short grace window
+// (LAN upgrades land in well under a second); only show the generic if the
+// upgrade has not beaten the clock. If it fails outright, the generic still
+// covers — so the handler can never END without a notification, which is
+// what produced Chrome's "site has been upgraded in the background" toast.
+const GRACE_MS = 1500;
+const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
 
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { /* blind */ }
   const type = data.t || 'activity';
 
-  // Generic notification FIRST, synchronously: Chrome shows "this site has
-  // been upgraded in the background" whenever the push handler dies before
-  // any showNotification — so nothing may sit in front of it: no fetches, no
-  // awaits, and no localStorage (workers have none — the ReferenceError ate
-  // every notification until this line changed). Title = in-memory cache.
-  const name = cachedTitle;
   event.waitUntil((async () => {
-    await showNotification(name, type === 'msg' ? 'You have a new message' : 'New activity — open to see', type);
-    // keep the zero-await cache fresh for the next push (non-blocking style:
-    // awaited here, but AFTER the notification is already shown)
-    try { cachedTitle = await appTitle(); } catch { /* keep cache */ }
-    if (type !== 'msg') return;
-    try {
-      const rich = await withBudget(upgradeContent(), ENRICH_BUDGET_MS);
-      if (!rich) return; // nothing (yet) — the generic notification stands
-      const snippet = (rich.text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
-      const more = rich.extra > 0 ? ` (+${rich.extra} more)` : '';
-      await showNotification(await appTitle(), `@${rich.peer}: ${snippet || '(message)'}${more}`, 'msg');
-    } catch (err) {
+    const name = cachedTitle;
+    let shown = false;
+    const showGeneric = async () => {
+      if (shown) return;
+      shown = true;
+      await showNotification(name, type === 'msg' ? 'You have a new message' : 'New activity — open to see', type);
+    };
+
+    if (type !== 'msg') { await showGeneric(); return; }
+
+    const upgrade = upgradeContent().then(async (rich) => {
+      if (rich) {
+        try { cachedTitle = await appTitle(); } catch { /* keep cache */ }
+        const snippet = (rich.text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+        const more = rich.extra > 0 ? ` (+${rich.extra} more)` : '';
+        if (shown) {
+          // generic already up: close+show upgrades it in place
+        }
+        shown = true;
+        await showNotification(cachedTitle, `@${rich.peer}: ${snippet || '(message)'}${more}`, 'msg');
+      } else {
+        await showGeneric(); // upgrade succeeded but queue was empty/raced
+      }
+    }).catch(async (err) => {
       const why = String(err?.message ?? err).slice(0, 160);
       console.warn('[sw] enrich failed:', why);
       reportSwFailure(why);
-    }
+      await showGeneric(); // degraded, but never silent
+    });
+
+    await Promise.race([upgrade, sleep(GRACE_MS).then(showGeneric)]);
+    await upgrade; // keep the worker alive until the peek settles
   })());
 });
 
