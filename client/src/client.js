@@ -561,12 +561,20 @@ export class CoconoClient extends Emitter {
       return;
     }
 
-    const peerKeys = await this.peerKeys(senderUl).catch(() => null);
+    let peerKeys = await this.peerKeys(senderUl).catch(() => null);
     if (!peerKeys) {
       this.logger.warn(`incoming msg from unknown peer @${m.f}; leaving queued`);
       return;
     }
-    const senderDevice = peerKeys.devices.find((dev) => dev.d === m.fd);
+    let senderDevice = peerKeys.devices.find((dev) => dev.d === m.fd);
+    if (!senderDevice?.x) {
+      // Sender added a device after our last lookup (stale peer cache):
+      // refresh once before giving up — otherwise this frame is stranded
+      // until the next reconnect while the app stays open.
+      peerKeys = await this.peerKeys(senderUl, { refresh: true }).catch(() => null);
+      senderDevice = peerKeys?.devices?.find((dev) => dev.d === m.fd);
+      if (senderDevice?.x) this.emit('peerIdentityChanged', { peer: m.f, reason: 'new-device' });
+    }
     if (!senderDevice?.x) {
       this.logger.warn(`incoming msg from unknown/device-less sender ${m.fd}; leaving queued`);
       return;
@@ -577,9 +585,32 @@ export class CoconoClient extends Emitter {
       const key = await this.#getConvKey(identity, senderUl, m.fd, senderDevice.x);
       text = await c.decryptFromConversation(key, m.d);
     } catch (err) {
-      // Wrong key / tampered ciphertext: do NOT confirm the pull.
-      this.emit('error', { error: new CoconoError(`Failed to decrypt message ${frame.id}: ${err.message}`, 'decrypt_failed') });
-      return;
+      // Decrypt failure usually means the peer's identity rotated (account
+      // re-created, device re-paired) while our cached peer keys / derived
+      // conversation key went stale. The push path never noticed because a
+      // fresh worker always fetches current keys — make the live path match:
+      // force-refresh peer keys, drop the derived-key cache, retry once.
+      let recovered = false;
+      try {
+        const fresh = await this.peerKeys(senderUl, { refresh: true });
+        this.#convKeyCache.delete(`${senderUl}:${m.fd}`);
+        const freshDev = fresh?.devices?.find((dev) => dev.d === m.fd);
+        if (freshDev?.x) {
+          text = await c.decryptFromConversation(
+            await this.#getConvKey(identity, senderUl, m.fd, freshDev.x), m.d,
+          );
+          recovered = true;
+          this.logger.info(`decrypted ${frame.id} after refreshing @${m.f} key material`);
+          this.emit('peerIdentityChanged', { peer: m.f, reason: 'key-changed' }); // safety notice UI hook
+        }
+      } catch { /* genuinely tampered/unknown key -> original error path */ }
+
+      if (!recovered) {
+        // Still wrong key / tampered ciphertext: do NOT confirm the pull —
+        // the copy stays queued (and is re-offered on the next connect).
+        this.emit('error', { error: new CoconoError(`Failed to decrypt message ${frame.id}: ${err.message}`, 'decrypt_failed') });
+        return;
+      }
     }
 
     // Confirm the pull: server marks its copy (kept for the retention

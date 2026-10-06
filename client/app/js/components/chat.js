@@ -73,6 +73,10 @@ export function createChat({ client, onHomeRefresh }) {
       }
     });
 
+    client.on('peerIdentityChanged', ({ peer }) => {
+      showBanner(`@${peer}: key material refreshed (account re-created or device re-paired)`, peer);
+    });
+
     client.on('ack', async ({ localId, ok, error }) => {
       if (!localId) return;
       const rec = await updateMessage(`out:${localId}`, { state: ok ? 'sent' : 'failed' });

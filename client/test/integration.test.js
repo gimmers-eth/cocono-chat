@@ -301,3 +301,48 @@ test('sdk: sendMessage without a connection fails with a clear error', async (t)
     (err) => err.code === 'not_connected',
   );
 });
+
+test('sdk: recipient self-heals when sender re-creates their account (stale peer cache)', async () => {
+  const srv = await startServer();
+  const aliceName = randUser('stalealice');
+  const bobName = randUser('stalebob');
+  let alice = srv.client();
+  await alice.register(aliceName);
+  const bob = srv.client();
+  await bob.register(bobName);
+  await alice.connect(); await waitOpen(alice);
+  await bob.connect(); await waitOpen(bob);
+
+  try {
+    // Baseline exchange — also primes bob's peer-key cache with OLD alice.
+    const first = waitFor(bob, 'message', (m) => m.from === aliceName);
+    await alice.sendMessage(bobName, 'pre-recreate');
+    await first;
+
+    // Alice is wiped and re-registered: brand-new identity, new device id.
+    await srv.deleteUser(aliceName);
+    alice.disconnect();
+    alice = srv.client();
+    await alice.register(aliceName);
+    await alice.connect(); await waitOpen(alice);
+
+    const notices = [];
+    bob.on('peerIdentityChanged', (e) => notices.push(e));
+
+    // Previously: bob's cached peer data lacked the new device -> frame was
+    // dropped as "unknown/device-less sender" and never recovered while the
+    // app stayed open. Now: refresh-and-retry delivers it.
+    const second = waitFor(bob, 'message', (m) => m.text === 'post-recreate');
+    await alice.sendMessage(bobName, 'post-recreate');
+    const msg = await second;
+    assert.equal(msg.from, aliceName);
+    assert.ok(notices.length >= 1, 'peerIdentityChanged surfaced to the UI');
+    assert.ok(['new-device', 'key-changed'].includes(notices[0].reason));
+  } finally {
+    alice.disconnect();
+    bob.disconnect();
+    await srv.deleteUser(aliceName);
+    await srv.deleteUser(bobName);
+    await srv.stop();
+  }
+});
