@@ -66,9 +66,17 @@ self.addEventListener('activate', (event) => {
 });
 
 async function showNotification(titleText, body, type) {
+  // Replace-in-place MUST be manual: Safari/WebKit does not honour tag
+  // replacement in service workers, so the generic and the upgraded notice
+  // would otherwise stack as two notifications. Close-then-show is the
+  // portable pattern (no-op when nothing is showing).
+  try {
+    const open = await self.registration.getNotifications({ tag: 'cocono-activity' });
+    for (const n of open) { try { n.close(); } catch { /* racing close */ } }
+  } catch { /* getNotifications unsupported — fall through to plain show */ }
   await self.registration.showNotification(titleText, {
     body,
-    tag: 'cocono-activity', // replaces the earlier notification of the same tag
+    tag: 'cocono-activity', // still dedupes on engines that honour it
     timestamp: Date.now(),
     data: { type },
   });
