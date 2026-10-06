@@ -73,7 +73,7 @@ export const config = {
   challengeIpWindowSec: numOf(env.CHALLENGE_IP_WINDOW_SEC, DEFAULT_TIME_WINDOW),
   verifyAccountLimit: numOf(env.VERIFY_ACCOUNT_LIMIT, 20),
   verifyAccountWindowSec: numOf(env.VERIFY_ACCOUNT_WINDOW_SEC, DEFAULT_TIME_WINDOW),
-  verifyIpLimit: numOf(env.VERIFY_IP_LIMIT, 20),
+  verifyIpLimit: numOf(env.VERIFY_IP_LIMIT, 50),
   verifyIpWindowSec: numOf(env.VERIFY_IP_WINDOW_SEC, DEFAULT_TIME_WINDOW),
   deviceCodeTtlSec: numOf(env.DEVICE_CODE_TTL_SEC, 10 * 60),
   deviceEnrollIpLimit: numOf(env.DEVICE_ENROLL_IP_LIMIT, 10),
