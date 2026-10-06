@@ -58,7 +58,11 @@ export function createHandlers({ users, redis, pub, config, messages }) {
     }
 
     await pub.publish(devKey(rul, m.dv), JSON.stringify({ type: 'msg', id: doc.mid, ts: doc.ts.getTime(), env }));
+    const acked = ack(true);
 
+    // Notifications are fire-and-forget AFTER the ack is queued: push
+    // latency/hiccups must never sit in the message-ack path (that coupling
+    // was the ack jitter behind the idempotent-retry test's flake).
     // Phase 1 notifications: push ONLY when the recipient device is offline
     // (no live WS). Blind payload — event type, nothing else. Never push to
     // the sender's own device (self-chat echo arrives via its live WS anyway).
@@ -84,7 +88,7 @@ export function createHandlers({ users, redis, pub, config, messages }) {
     } else if (m.d !== auth.d) {
       request.log.info(`[push] skip ${rul}/${m.dv.slice(0, 8)}: no push subscription on this device`);
     }
-    return ack(true);
+    return acked;
   }
 
   async function deliverPending(socket, ul, dv) {

@@ -115,9 +115,22 @@ export default async function wsRoutes(app, { users, redis, config, messages }) 
       socket.isAlive = true;
     });
 
-    sendJson(socket, { type: 'hello' });
-    await deliverPending(socket, ul, dv);
+    // THE RACE FIX: a client may answer 'hello' faster than this handler
+    // finishes its async setup (deliverPending's Mongo query). Events with no
+    // listener are DROPPED by the emitter, so attach a queueing listener
+    // BEFORE hello and hand over to the real dispatch once setup is done.
+    const early = [];
+    const queueEarly = (raw) => { early.push(raw); };
+    socket.on('message', queueEarly);
 
+    sendJson(socket, { type: 'hello' });
+    try {
+      await deliverPending(socket, ul, dv);
+    } catch (err) {
+      app.log.error(err);
+    }
+
+    socket.off('message', queueEarly);
     socket.on('message', async (raw) => {
       if (raw.length > MAX_FRAME_BYTES) return socket.close(4413, 'frame too large');
       let body;
@@ -145,6 +158,9 @@ export default async function wsRoutes(app, { users, redis, config, messages }) 
         sendJson(socket, { type: 'error', error: 'internal' });
       }
     });
+
+    // Drain anything that queued during setup, in arrival order.
+    for (const raw of early.splice(0)) socket.emit('message', raw);
 
     socket.on('close', () => {
       if (local.get(key) === socket) {

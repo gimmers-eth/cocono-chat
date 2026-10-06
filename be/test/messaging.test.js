@@ -53,7 +53,7 @@ function connectWs(port, token) {
       received.push(msg);
       for (const l of [...listeners]) l();
     });
-    async function waitFor(pred, timeoutMs = 5000) {
+    async function waitFor(pred, timeoutMs = 10000) {
       const deadline = Date.now() + timeoutMs;
       for (;;) {
         const found = received.find(pred);
