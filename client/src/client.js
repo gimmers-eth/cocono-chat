@@ -447,6 +447,15 @@ export class CoconoClient extends Emitter {
     });
     transport.on('frame', (frame) => this.#onFrame(frame));
     transport.on('state', (state) => this.emit('state', { state }));
+    transport.on('auth-failed', () => {
+      // Server rejected our session: drop the token, close cleanly, and let
+      // the app surface a re-login prompt instead of going quietly deaf.
+      this.token = null;
+      this.disconnect();
+      this.emit('authFailed', {
+        error: new CoconoError('Session no longer valid on the server (device detached or account deleted). Log in again.', 'session_expired'),
+      });
+    });
     this.#transport = transport;
     transport.connect();
     return transport;

@@ -346,3 +346,29 @@ test('sdk: recipient self-heals when sender re-creates their account (stale peer
     await srv.stop();
   }
 });
+
+test('sdk: dead session (4401) surfaces authFailed and stops reconnecting', async () => {
+  const srv = await startServer();
+  const name = randUser('deadsession');
+  try {
+    const c1 = srv.client();
+    await c1.register(name);
+    c1.connect();
+    await waitOpen(c1);
+    // Invalidate the session exactly like a server-side detach would, then
+    // reconnect: the WS handshake must fail 4401 and surface authFailed.
+    c1.token = 'expired.' + c1.token.slice(8);
+    c1.disconnect();
+    const failed = waitFor(c1, 'authFailed');
+    c1.connect();
+    const ev = await failed;
+    assert.equal(ev.error.code, 'session_expired');
+    await new Promise((r) => setTimeout(r, 1500));
+    assert.equal(c1.connectionState, 'closed', 'no zombie reconnect loop');
+    assert.equal(c1.token, null, 'token dropped');
+    c1.disconnect();
+    await srv.deleteUser(name);
+  } finally {
+    await srv.stop();
+  }
+});

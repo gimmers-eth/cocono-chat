@@ -152,6 +152,12 @@ chat.connectEvents();
 home.wire();
 auth.wire();
 client.on('state', ({ state }) => home.paintConnection(state));
+// Permanent WS rejection (detached device / deleted account): surface it —
+// without this the open app looks alive but deaf.
+client.on('authFailed', ({ error }) => {
+  setStatus($('auth-status'), error.message, true);
+  showAuth();
+});
 
 try {
   let identity = await client.storage.loadIdentity();

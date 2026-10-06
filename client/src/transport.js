@@ -69,9 +69,18 @@ export class Transport extends Emitter {
       }
       this.emit('frame', frame);
     };
-    ws.onclose = () => {
+    ws.onclose = (e) => {
       if (this.#ws === ws) this.#ws = null;
       this.emit('state', 'closed');
+      // 4401/4403: our JWT is dead (device detached, account deleted, secret
+      // rotated). Reconnecting can never win — without this guard the client
+      // loops forever in a zombie state that LOOKS like "messages don't
+      // arrive in the open app" while push (SW) still works.
+      if (e.code === 4401 || e.code === 4403) {
+        this.#stopped = true;
+        this.emit('auth-failed');
+        return;
+      }
       if (!this.#stopped) this.#scheduleReconnect();
     };
     ws.onerror = () => {
