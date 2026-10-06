@@ -376,3 +376,97 @@ test('admin device removal revokes the device session (H4)', async () => {
     await teardown();
   }
 });
+
+// --- self-service device removal (DELETE /api/devices/:deviceId) ---
+
+test('device removal: another device can detach a lost phone, queues swept', async () => {
+  const { app, mongo, teardown } = await setupApp(LIMITS);
+  try {
+    const u = 'gimmers';
+    const main = makeClient();
+    const second = makeClient();
+    const dMain = 'device-main-0001';
+    const dSecond = 'device-second-2';
+    assert.equal((await signupUser(app, main, u, dMain)).statusCode, 201);
+    const tokenMain = await getToken(app, main, u, dMain);
+
+    // Enroll a second device (happy path from the earlier tests).
+    const a2 = randomAesKey();
+    const t2 = nowEpoch();
+    const enroll = (await app.inject({
+      method: 'POST',
+      url: '/api/devices/enroll',
+      payload: { u, p: second.p, x: second.x, a: a2, d: dSecond, t: t2, s: second.signSignup({ u, a: a2, d: dSecond, t: t2 }) },
+      headers: { authorization: `Bearer ${tokenMain}` },
+    })).json();
+    await app.inject({
+      method: 'POST', url: '/api/devices/approve',
+      payload: { code: enroll.code }, headers: { authorization: `Bearer ${tokenMain}` },
+    });
+
+    // A queued message for the second device exists.
+    await mongo.db.collection('messages').insertOne({
+      mid: 'm-1', to: { ul: u, dv: dSecond }, from: { ul: u, fd: dMain }, cid: 'cid-1', env: {}, ts: new Date(),
+    });
+
+    const res = await app.inject({
+      method: 'DELETE', url: `/api/devices/${dSecond}`, headers: { authorization: `Bearer ${tokenMain}` },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.json(), { removed: dSecond, devices: 1, orphaned: false });
+    assert.equal(await mongo.db.collection('messages').countDocuments({ 'to.dv': dSecond }), 0);
+
+    // Removed device's token is dead (bearer hook re-checks membership).
+    const tokenSecond = await getToken(app, second, u, dSecond);
+    const me = await app.inject({
+      method: 'GET', url: '/api/me', headers: { authorization: `Bearer ${tokenSecond}` },
+    });
+    assert.equal(me.statusCode, 401);
+  } finally {
+    await teardown();
+  }
+});
+
+test('device removal: last device leaves the account orphaned but reserved', async () => {
+  const { app, mongo, teardown } = await setupApp(LIMITS);
+  const users = mongo.db.collection('users');
+  try {
+    const u = 'gimmers';
+    const c1 = makeClient();
+    const d1 = 'device-main-0001';
+    assert.equal((await signupUser(app, c1, u, d1)).statusCode, 201);
+    const token = await getToken(app, c1, u, d1);
+
+    const res = await app.inject({
+      method: 'DELETE', url: `/api/devices/${d1}`, headers: { authorization: `Bearer ${token}` },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().orphaned, true);
+
+    // Doc survives with no devices; the username stays taken.
+    const doc = await users.findOne({ ul: u });
+    assert.ok(doc);
+    assert.equal(doc.devices.length, 0);
+    const dup = await signupUser(app, makeClient(), u, 'device-other-99');
+    assert.equal(dup.statusCode, 409);
+
+    // The detached device's own token is dead immediately (the bearer hook
+    // re-checks device membership; this request carried the removed id).
+    const selfAgain = await app.inject({
+      method: 'DELETE', url: `/api/devices/${d1}`, headers: { authorization: `Bearer ${token}` },
+    });
+    assert.equal(selfAgain.statusCode, 401);
+
+    // No path back in: verify for the orphan's detached device fails.
+    const { n } = (await app.inject({
+      method: 'POST', url: '/api/auth/challenge', payload: { u, d: d1 },
+    })).json();
+    const ve = await app.inject({
+      method: 'POST', url: '/api/auth/verify',
+      payload: { u, d: d1, n, s: c1.signBytes(Buffer.from(n, 'utf8')) },
+    });
+    assert.equal(ve.statusCode, 401); // bad_signature: device no longer on file
+  } finally {
+    await teardown();
+  }
+});

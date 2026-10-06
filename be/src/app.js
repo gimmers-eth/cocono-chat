@@ -71,9 +71,10 @@ export async function buildApp({ mongo, redis, config, feRoot, sdkRoot }) {
     config,
     diagnostics: mongo.db.collection('diagnostics'),
     settings: mongo.db.collection('settings'),
+    messages: mongo.db.collection('messages'),
   };
   await app.register(appRoutes, ctx);
-  await app.register(wsRoutes, { ...ctx, messages: mongo.db.collection('messages') });
+  await app.register(wsRoutes, ctx);
 
   if (feRoot) {
     // PWA manifest served dynamically so the app-name setting is reflected

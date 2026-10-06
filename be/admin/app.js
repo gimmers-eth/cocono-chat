@@ -58,12 +58,13 @@ function renderLimits(limits) {
 }
 
 function renderUsers(users) {
+  lastUsers = users;
   const body = $('users-body');
   $('users-empty').hidden = users.length > 0;
   body.innerHTML = users
     .map(
       (u) => `<tr>
-        <td><strong>@${esc(u.u)}</strong><br /><span class="dim mono">${esc(u.ul)}</span></td>
+        <td><strong>@${esc(u.u)}</strong>${u.devices.length === 0 ? ' <span class="badge orphan">orphaned — no devices</span>' : ''}<br /><span class="dim mono">${esc(u.ul)}</span></td>
         <td>${fmtDate(u.createdAt)}</td>
         <td>
           <input type="number" min="1" max="1000" value="${u.maxDevices}" class="max-devices" data-max-for="${esc(u.ul)}" />
@@ -86,6 +87,16 @@ function renderUsers(users) {
 }
 
 let lastDiags = [];
+let lastUsers = [];
+
+// Warning appended to the device-remove confirm when the account would be
+// left with zero devices (username stays reserved, account inaccessible).
+function orphanNote(ul) {
+  const u = lastUsers.find((x) => x.ul === ul);
+  return u && u.devices.length <= 1
+    ? '\n\n⚠ This is the ONLY device: the account becomes ORPHANED — username reserved, but no device can sign in and there is no recovery yet.'
+    : '';
+}
 
 function renderDiags(diags) {
   lastDiags = diags;
@@ -221,7 +232,7 @@ document.addEventListener('click', (e) => {
   const delDeviceBtn = e.target.closest('[data-del-device]');
   if (delDeviceBtn) {
     const { delDevice: ul, device } = delDeviceBtn.dataset;
-    if (!confirm(`Remove device ${device.slice(0, 8)}… from @${ul}?`)) return;
+    if (!confirm(`Remove device ${device.slice(0, 8)}… from @${ul}?` + orphanNote(ul))) return;
     return run(`Removed device from @${ul}`, () =>
       api(`/api/admin/users/${encodeURIComponent(ul)}/devices/${encodeURIComponent(device)}`, { method: 'DELETE' }));
   }

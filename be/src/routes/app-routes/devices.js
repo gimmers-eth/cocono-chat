@@ -29,7 +29,7 @@ function validateDevicePayload(body) {
   return null;
 }
 
-export default async function deviceRoutes(app, { users, redis, config }) {
+export default async function deviceRoutes(app, { users, redis, config, messages }) {
   // POST /api/devices/enroll — a new device asks to join an existing account.
   // Body is shaped like signup: { u, p, a, d, t, s }, signed by the NEW
   // device's key. An already-registered device must then approve the 6-digit
@@ -189,6 +189,38 @@ export default async function deviceRoutes(app, { users, redis, config }) {
         createdAt: dev.createdAt,
         lastSeenAt: dev.lastSeenAt,
       })),
+    };
+  });
+
+  // DELETE /api/devices/:deviceId — detach one device from the account.
+  // Callable by any signed-in device, INCLUDING the device itself ("remove
+  // this browser" on the login screen). Removing the LAST device is allowed:
+  // the account doc stays (username reserved), becomes inaccessible
+  // ('orphaned' in the admin panel) — and unrecoverable, since pairing
+  // needs an existing device to approve. Queued copies for the device are
+  // dropped; other devices' queues are untouched.
+  app.delete('/api/devices/:deviceId', async (request, reply) => {
+    const denied = requireAuth(request, reply);
+    if (denied) return denied;
+    const deviceId = request.params.deviceId;
+    if (!isValidDeviceId(deviceId)) return fail(reply, 'invalid_device_id', 'Malformed device id', 400);
+
+    const ul = request.auth.sub;
+    const rl = await rateLimit(redis, `rl:dremove:${ul}`, config.deviceRemoveAccountLimit, config.deviceRemoveWindowSec);
+    if (!rl.ok) return limited(reply, rl);
+
+    const result = await users.updateOne(
+      { ul, 'devices.id': deviceId },
+      { $pull: { devices: { id: deviceId } } },
+    );
+    if (result.modifiedCount === 0) return fail(reply, 'unknown_device', 'No such device on this account', 404);
+
+    await messages.deleteMany({ 'to.ul': ul, 'to.dv': deviceId });
+    const user = await users.findOne({ ul }, { projection: { devices: 1 } });
+    return {
+      removed: deviceId,
+      devices: user.devices.length,
+      orphaned: user.devices.length === 0,
     };
   });
 }

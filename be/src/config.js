@@ -88,6 +88,10 @@ export const config = {
   userKeysIpLimit: numOf(env.USER_KEYS_IP_LIMIT, 60),
   userKeysIpWindowSec: numOf(env.USER_KEYS_IP_WINDOW_SEC, DEFAULT_TIME_WINDOW),
 
+  // Self-service device removal (DELETE /api/devices/:id).
+  deviceRemoveAccountLimit: numOf(env.DEVICE_REMOVE_ACCOUNT_LIMIT, 10),
+  deviceRemoveWindowSec: numOf(env.DEVICE_REMOVE_WINDOW_SEC, 3600),
+
   // Diagnostics upload ('Send diagnostics' button) — payload size-capped and
   // TTL-expired server-side; the per-IP limit is the spam gate.
   diagIpLimit: numOf(env.DIAG_IP_LIMIT, 10),

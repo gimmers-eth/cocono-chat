@@ -2,7 +2,7 @@
 // list, new-chat launcher and the devices panel (list + approve pairing +
 // theme picker).
 
-import { $, setStatus, fmtTime } from '../ui.js';
+import { $, setStatus, fmtTime, confirmModal } from '../ui.js';
 import { allMessages, isUnread } from '../store.js';
 import { loadRegistry, applyTheme, savedTheme, wireThemeSelect } from '../theme.js';
 
@@ -102,6 +102,15 @@ export function createHome({ client, chat, onLogout }) {
           .filter(Boolean)
           .join(' · ');
         li.append(id, tag);
+        if (!dev.current) {
+          // Self-removal lives on the login screen ("remove account from this
+          // browser"); from settings you detach OTHER devices (e.g. lost phone).
+          const btn = document.createElement('button');
+          btn.className = 'btn btn-small';
+          btn.textContent = 'remove';
+          btn.dataset.removeDevice = dev.id;
+          li.append(btn);
+        }
         frag.appendChild(li);
       }
       list.replaceChildren(frag);
@@ -193,6 +202,28 @@ export function createHome({ client, chat, onLogout }) {
     $('btn-new-chat').addEventListener('click', openNew);
     $('chat-peer-name').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') openNew();
+    });
+
+    // Detach another device (lost phone, old laptop) from this account.
+    $('device-list').addEventListener('click', (e) => {
+      const deviceId = e.target.closest('[data-remove-device]')?.dataset.removeDevice;
+      if (!deviceId) return;
+      const ok = await confirmModal({
+        title: 'Remove this device?',
+        body: `Device ${deviceId.slice(0, 8)}… will lose access to this account ` 
+          + 'immediately (its sign-in stops working and queued messages for it are '
+          + 'deleted). This cannot be undone from that device.',
+        okLabel: 'Remove device',
+        danger: true,
+      });
+      if (!ok) return;
+      try {
+        await client.removeDevice(deviceId);
+        setStatus($('drawer-status'), `Device ${deviceId.slice(0, 8)}… removed.`);
+      } catch (err) {
+        setStatus($('drawer-status'), `Could not remove device: ${err?.message ?? err}`);
+      }
+      renderDevices();
     });
 
     wireApproveCode();

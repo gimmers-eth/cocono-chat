@@ -239,6 +239,23 @@ export class CoconoClient extends Emitter {
     return ul;
   }
 
+  /**
+   * Detach THIS device from its account on the server (queues swept; the
+   * account survives on its other devices — removing the last one leaves it
+   * ORPHANED: username reserved, no device can access it). The JWT stops
+   * working immediately server-side; call order matters: detach FIRST, then
+   * forget locally. Requires a live session (login() first).
+   * @returns {Promise<{removed: string, devices: number, orphaned: boolean}>}
+   */
+  async detachCurrentDevice() {
+    const identity = await this.#requireIdentity();
+    this.#requireToken();
+    const res = await this.api.removeDevice(this.token, identity.deviceId);
+    this.logout();
+    this.logger.info(`device ${identity.deviceId} detached from @${identity.username} (orphaned=${res.orphaned})`);
+    return res;
+  }
+
   async #unlock(identity) {
     const runtime = await unsealDevice({ credId: identity.credId, prfEval: identity.prfEval, wrapped: identity.wrapped });
     Object.assign(identity, runtime);
@@ -277,6 +294,22 @@ export class CoconoClient extends Emitter {
   /** List devices on the current account (GET /api/devices). */
   async devices() {
     return this.api.devices(this.#requireToken());
+  }
+
+  /**
+   * Detach ONE device from the current account (DELETE /api/devices/:id).
+   * Any signed-in device may remove any other; removing your own logs you
+   * out (the JWT dies with the device entry). Last device => orphaned.
+   */
+  async removeDevice(deviceId) {
+    const res = await this.api.removeDevice(this.#requireToken(), deviceId);
+    const identity = this.#identity;
+    if (identity && deviceId === identity.deviceId) {
+      this.logout();
+      await this.storage.clearIdentity();
+      this.#identity = null;
+    }
+    return res;
   }
 
   /** Public key material for a peer (GET /api/users/:username/keys). */

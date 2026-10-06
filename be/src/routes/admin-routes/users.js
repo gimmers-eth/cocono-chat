@@ -37,7 +37,7 @@ async function cleanupAccountState(redis, ul) {
 const MAX_DEVICES_CAP = 1000;
 
 // GET /api/admin/users, PATCH max-devices, DELETE user, DELETE device.
-export default async function usersRoutes(app, { users, redis }) {
+export default async function usersRoutes(app, { users, redis, messages }) {
   app.get('/api/admin/users', async () => {
     const docs = await users.find({}, { projection: { _id: 0 } }).sort({ ul: 1 }).toArray();
     return docs.map((doc) => ({
@@ -72,6 +72,9 @@ export default async function usersRoutes(app, { users, redis }) {
       return fail(reply, 'unknown_account', 'No such user', 404);
     }
     await cleanupAccountState(redis, ul);
+    if (messages) {
+      await messages.deleteMany({ $or: [{ 'to.ul': ul }, { 'from.ul': ul }] });
+    }
     return { deleted: ul };
   });
 
@@ -87,11 +90,13 @@ export default async function usersRoutes(app, { users, redis }) {
     if (!user.devices.some((dev) => dev.id === deviceId)) {
       return fail(reply, 'unknown_device', 'No such device on this account', 404);
     }
-    if (user.devices.length <= 1) {
-      return fail(reply, 'last_device', 'Cannot remove the only device — delete the user instead', 400);
-    }
-
+    // Removing the LAST device is allowed: the account doc survives with no
+    // devices (username stays reserved; shown as 'orphaned' in this panel).
+    // No explicit token revocation needed — the bearer hook re-checks device
+    // membership on every request.
     await users.updateOne({ ul }, { $pull: { devices: { id: deviceId } } });
-    return { removed: deviceId };
+    if (messages) await messages.deleteMany({ 'to.ul': ul, 'to.dv': deviceId });
+    const after = await users.findOne({ ul }, { projection: { devices: 1 } });
+    return { removed: deviceId, devices: after.devices.length, orphaned: after.devices.length === 0 };
   });
 }

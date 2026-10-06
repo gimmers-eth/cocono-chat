@@ -17,6 +17,7 @@ async function setupAdmin() {
     config,
     diagnostics: ctx.mongo.db.collection('diagnostics'),
     settings: ctx.mongo.db.collection('settings'),
+    messages: ctx.mongo.db.collection('messages'),
   });
 
   const now = new Date();
@@ -115,15 +116,22 @@ test('PATCH max-devices on an unknown account returns 404', async () => {
   }
 });
 
-test('device removal guard still refuses the last device', async () => {
-  const { admin, teardown } = await setupAdmin();
+test('admin device removal allows orphaning: last device detach keeps the account', async () => {
+  const { admin, users, teardown } = await setupAdmin();
   try {
     const res = await admin.inject({
       method: 'DELETE',
       url: '/api/admin/users/alice/devices/device-one-123',
     });
-    assert.equal(res.statusCode, 400);
-    assert.equal(res.json().error, 'last_device');
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.devices, 0);
+    assert.equal(body.orphaned, true);
+
+    // Account doc survives (username reserved) and re-signup collides.
+    const doc = await users.findOne({ ul: 'alice' });
+    assert.ok(doc, 'orphaned account keeps its doc to reserve the username');
+    assert.equal(doc.devices.length, 0);
   } finally {
     await teardown();
   }

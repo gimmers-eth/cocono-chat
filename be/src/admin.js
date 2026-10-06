@@ -65,6 +65,7 @@ await app.register(async function adminScope(instance) {
     config,
     diagnostics: mongo.db.collection('diagnostics'),
     settings: mongo.db.collection('settings'),
+    messages: mongo.db.collection('messages'),
   });
 });
 

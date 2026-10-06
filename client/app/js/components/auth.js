@@ -174,59 +174,80 @@ export function createAuth({ client, onLoggedIn }) {
     });
   }
 
-  // How many devices does this account have? Briefly switches the active
-  // identity and logs in (a v3 passkey account may prompt biometrics), then
-  // restores the previous selection. null => account not reachable (e.g.
-  // already deleted server-side — a local zombie record).
-  async function deviceCountFor(username) {
+  // Probe an account's device roster: switch to it (if needed) and log in,
+  // KEEPING the session so a confirmed removal can detach this device on the
+  // server right away. count=null => account unreachable (deleted
+  // server-side: a local zombie record). Caller must logOutRestore regardless.
+  async function probeAccount(username) {
     const accounts = await client.storedAccounts();
     const prev = accounts.find((a) => a.current)?.username ?? null;
     try {
       if (prev !== username) await client.useStoredAccount(username);
       await client.login();
       const { devices } = await client.devices();
-      return devices.length;
+      return { count: devices.length, prev };
     } catch {
-      return null;
-    } finally {
-      client.logout();
-      if (prev && prev !== username) {
-        try { await client.useStoredAccount(prev); } catch { /* ignore */ }
-      }
+      return { count: null, prev };
+    }
+  }
+
+  async function logOutRestore(prev) {
+    client.logout();
+    if (prev) {
+      try { await client.useStoredAccount(prev); } catch { /* ignore */ }
     }
   }
 
   async function removeWithWarning(removeName) {
-    const count = await deviceCountFor(removeName);
+    const { count, prev } = await probeAccount(removeName);
     let title = `Remove @${removeName}?`;
     let body;
     let okLabel = 'Remove';
     let danger = false;
     if (count === 1) {
-      // The only device holding the keys: removal strands the account.
-      title = `Delete @${removeName}?`;
-      body = `This browser is the ONLY device holding @${removeName}'s keys. `
-        + 'There is no account recovery yet — removing it makes the account ' 
-        + 'permanently inaccessible everywhere: effectively, the account and its messages are gone.';
-      okLabel = 'Remove and lose the account';
+      // Only device: detaching it server-side leaves the account ORPHANED —
+      // username still reserved, but no device can sign in or approve
+      // pairing, and there is no recovery yet.
+      title = `Orphan @${removeName}?`;
+      body = 'This browser is @' + removeName + "'s ONLY device. Removing it detaches the device "
+        + 'on the server too: the username stays reserved, but the account will have NO devices — '
+        + 'nothing can sign in or recover it, and its queued messages are deleted.';
+      okLabel = 'Remove and orphan the account';
       danger = true;
     } else if (count === null) {
-      body = `Could not reach @${removeName}'s account (it may already be deleted). ` 
-        + 'Its keys and local messages will be erased from this browser. '
-        + 'If no other device holds this account\u2019s keys, it cannot be recovered.';
+      body = `Could not reach @${removeName}'s account (it may already be deleted on the server). `
+        + 'Its keys and local messages will be erased from this browser only.';
       danger = true;
     } else {
-      body = `@${removeName} stays usable on its other ${count - 1} device(s); ` 
-        + 'this browser will simply forget it.';
+      body = 'This browser will be REMOVED as a device of @' + removeName + ' (server-side, '
+        + 'effective immediately) and forgotten here. The account stays usable on its other '
+        + (count - 1) + ' device(s).';
+      okLabel = 'Remove this device';
     }
-    if (!(await confirmModal({ title, body, okLabel, danger }))) return;
+    if (!(await confirmModal({ title, body, okLabel, danger }))) {
+      await logOutRestore(prev);
+      applyIdentity(await client.storage.loadIdentity());
+      return;
+    }
+    if (count !== null) {
+      try {
+        await client.detachCurrentDevice();
+      } catch (err) {
+        setStatus(els.status, `Removed locally, but the server detach failed: ${err?.message ?? err} `
+          + '— the device stays listed until removed from another device\u2019s settings.');
+      }
+    }
     await client.removeStoredAccount(removeName);
     await deleteAccountData(removeName);
+    await logOutRestore(prev === removeName ? null : prev);
     const next = await client.storage.loadIdentity();
     applyIdentity(next);
     if (!next) {
       showMode('signup');
-      setStatus(els.status, `@${removeName} removed from this browser.`);
+      if (!els.status.textContent) {
+        setStatus(els.status, `@${removeName} removed from this browser`
+          + (count === 1 ? ' and orphaned on the server.' : '.'));
+      }
     }
   }
 

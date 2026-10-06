@@ -63,6 +63,10 @@ export class Api {
     return this.#request('/api/devices/approve', { method: 'POST', body: { code }, token });
   }
 
+  removeDevice(token, deviceId) {
+    return this.#request(`/api/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE', token });
+  }
+
   devices(token) {
     return this.#request('/api/devices', { token });
   }
