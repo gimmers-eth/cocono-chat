@@ -87,7 +87,13 @@ export function createChat({ client, onHomeRefresh }) {
       await render();
       onHomeRefresh?.();
     } catch (err) {
-      setStatus($('chat-status'), err.message ?? String(err), true);
+      setStatus(
+        $('chat-status'),
+        navigator.onLine === false
+          ? 'Offline — messages cannot be sent yet. They stay unsent until you reconnect.'
+          : err.message ?? String(err),
+        true,
+      );
     }
   }
 
@@ -119,10 +125,19 @@ export function createChat({ client, onHomeRefresh }) {
   async function openChat(username) {
     const status = $('home-status');
     try {
-      const peer = await client.peerKeys(username); // validates existence, caches
-      currentPeer = peer.u;
-      $('chat-peer').textContent = `@${peer.u}`;
-      $('chat-sub').textContent = `${peer.devices.length} device${peer.devices.length === 1 ? '' : 's'}`;
+      let peer = null;
+      try {
+        peer = await client.peerKeys(username); // validates existence, caches
+      } catch (err) {
+        // Offline read-only mode (no session): fall back to the local store.
+        if (navigator.onLine === false && !client.token) peer = null;
+        else throw err;
+      }
+      currentPeer = (peer?.u ?? username).toLowerCase();
+      $('chat-peer').textContent = `@${currentPeer}`;
+      $('chat-sub').textContent = peer
+        ? `${peer.devices.length} device${peer.devices.length === 1 ? '' : 's'}`
+        : 'Offline — stored messages only';
       setStatus($('chat-status'), '');
       $('chat-empty').hidden = true;
       $('chat-view').hidden = false;
@@ -144,12 +159,17 @@ export function createChat({ client, onHomeRefresh }) {
     $('chat-input').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') sendCurrent();
     });
-    $('btn-chat-back').addEventListener('click', () => {
+    const closeChatPane = () => {
       currentPeer = null;
       setChatOpen(false);
       $('chat-view').hidden = true;
       $('chat-empty').hidden = false;
       onHomeRefresh?.();
+    };
+    $('btn-chat-back').addEventListener('click', closeChatPane);
+    // Escape closes the open conversation (desktop "close" gesture).
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && document.body.classList.contains('chat-open')) closeChatPane();
     });
 
     // Catch up on attention: when the window becomes visible/focused (or the

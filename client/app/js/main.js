@@ -35,10 +35,17 @@ const auth = createAuth({ client, onLoggedIn: () => enterApp({ gesture: true }) 
 function paintOnline() {
   const b = $('offline-banner');
   if (b) b.hidden = navigator.onLine !== false;
-  if (navigator.onLine !== false && client.token) {
+  if (navigator.onLine === false) return;
+  navigator.serviceWorker?.getRegistration?.()?.then?.((r) => r?.update?.());
+  if (client.token) {
     client.connect(); // Transport.kick semantics: safe while open
-    navigator.serviceWorker?.getRegistration?.()?.then?.((r) => r?.update?.());
+    return;
   }
+  // Back online after an offline-mode boot: promote to a real session.
+  client.storage.loadIdentity().then((id) => {
+    if (!id) return;
+    client.login().then(() => enterApp()).catch(() => {});
+  }).catch(() => {});
 }
 window.addEventListener('online', paintOnline);
 window.addEventListener('offline', () => {
@@ -57,7 +64,7 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-async function enterApp({ gesture = false } = {}) {
+async function enterApp({ gesture = false, offline = false } = {}) {
   // Durability: ask the browser to keep our IndexedDB (identity + message
   // store) out of eviction under storage pressure. Best-effort: Chrome/
   // Android honours it (reported as persistent=true in Storage
@@ -72,13 +79,14 @@ async function enterApp({ gesture = false } = {}) {
   setScope(client.username);
   showView('app');
   home.paintMe(client.username);
-  home.paintConnection(client.connectionState);
-  client.connect();
+  home.paintConnection(offline ? 'closed' : client.connectionState);
+  if (!offline) client.connect(); // offline mode: browse the local store only
   await home.renderConversationList();
 
   // OS notifications: from a gesture (login/signup button) this may prompt
   // for permission; on silent boot-resume it only re-registers a
   // subscription if permission was already granted. Both are best-effort.
+  if (offline) return;
   client.enablePush({ prompt: gesture }).then((r) => {
     if (r.state !== 'enabled' && r.state !== 'needs-prompt' && r.state !== 'unsupported') {
       client.logger.debug(`push not enabled: ${r.state} (${r.permission ?? 'n/a'})`);
@@ -145,9 +153,16 @@ try {
     }
   }
   if (identity) {
-    // Silent resume: challenge/response with the stored (non-extractable) keys.
-    await client.login();
-    await enterApp();
+    try {
+      // Silent resume: challenge/response with the stored (non-extractable) keys.
+      await client.login();
+      await enterApp();
+    } catch (err) {
+      if (err instanceof CoconoApiError) throw err; // account issue -> auth view
+      // Network was unreachable: the shell cache worked, so come in anyway
+      // and browse the local transcript read-only until connection returns.
+      await enterApp({ offline: true });
+    }
   } else {
     await showAuth();
   }
