@@ -12,13 +12,19 @@ device. See [DESIGN.md](./DESIGN.md) for the full design (resolved via
 
 MVP milestones, in order:
 
-1. **Accounts** — done
-2. **Multi-device** — done (pairing codes, per-device detach, orphan-free removal)
+1. **Accounts** — done (passwordless Ed25519, lowercase usernames)
+2. **Multi-device** — done (pairing codes, per-device detach; removing the
+   last device deletes the account)
 3. **1:1 messages (text)** — done (E2EE, store-and-forward, retention/resync)
-4. Files/media (images etc.)
+4. Files/media (images etc.) — **next**
 5. Groups (with offline delivery)
-6. **PWA polish** — done (installable, rich + blind push, offline app shell)
+6. **PWA polish** — done (installable, blind-but-locally-decrypted push
+   notifications, offline app shell, iOS local-sealed keys)
 7. Subgroups / tags
+
+> **📋 Full working state — deployment, security posture, known gaps, ops,
+> and next steps: [docs/PROJECT_STATUS.md](./docs/PROJECT_STATUS.md).**
+> Read that first when picking this project back up.
 
 ## Repository layout
 
@@ -66,6 +72,7 @@ example and adjust when needed.
 
 ## Documentation
 
+- [docs/PROJECT_STATUS.md](./docs/PROJECT_STATUS.md) — current state, security notes, ops, next steps (read first)
 - [DESIGN.md](./DESIGN.md) — architecture, encryption model, delivery, milestones
 - [docs/CLIENT_SDK.md](./docs/CLIENT_SDK.md) — client SDK: usage, events, pairing, storage, logging
 - [client/app/themes/README.md](./client/app/themes/README.md) — bootstrapping FE themes
