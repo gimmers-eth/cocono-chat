@@ -110,6 +110,7 @@ function renderDiags(diags) {
         <span class="dim mono">${esc(d.ip ?? '')}</span>
         <span class="dim">${esc(String(d.ua ?? '').slice(0, 60))}</span>
         <button class="tiny" data-copy-diag="${esc(d.id)}">copy</button>
+        ${d.ip ? `<button class="tiny" data-clear-ip-of="${esc(d.ip)}" title="Clear all IP-scoped rate limits for this device">un-limit IP</button>` : ''}
         <button class="danger tiny" data-del-diag="${esc(d.id)}">delete</button>
       </summary>
       <pre class="diag-report">${esc(d.report ?? '')}</pre>
@@ -192,6 +193,12 @@ document.addEventListener('click', (e) => {
       () => setStatus('Clipboard unavailable in this context', 'error'),
     );
     return;
+  }
+
+  const unIp = e.target.closest('[data-clear-ip-of]')?.dataset.clearIpOf;
+  if (unIp) {
+    return run(`Cleared all rate limits for ${unIp}`, () =>
+      api('/api/admin/rate-limits/clear', { method: 'POST', body: JSON.stringify({ ip: unIp }) }));
   }
 
   const delDiag = e.target.closest('[data-del-diag]')?.dataset.delDiag;
