@@ -1,7 +1,7 @@
 // Auth view: create account, log in with the on-device identity, or pair this
 // device into an existing account. All actions go through the SDK.
 
-import { $, showView, setStatus } from '../ui.js';
+import { $, showView, setStatus, confirmModal } from '../ui.js';
 import { deleteAccountData } from '../store.js';
 
 export function createAuth({ client, onLoggedIn }) {
@@ -156,24 +156,6 @@ export function createAuth({ client, onLoggedIn }) {
       showMode('pair');
     });
 
-    $('btn-forget').addEventListener('click', () =>
-      guard(async () => {
-        // "Clear this browser": remove EVERY account identity stored here
-        // plus each account's local message data. Servers keep the accounts —
-        // they can be paired/used from other devices again later.
-        const accounts = await client.storedAccounts();
-        for (const a of accounts) {
-          await client.removeStoredAccount(a.username);
-          await deleteAccountData(a.username);
-        }
-        applyIdentity(null);
-        showMode('signup');
-        setStatus(els.status, accounts.length
-          ? `Removed ${accounts.length} stored account${accounts.length > 1 ? 's' : ''} and all local data from this browser.`
-          : 'This browser is clean — nothing was stored.');
-      }),
-    );
-
     // Per-account use / remove (delegated; list re-renders after each action).
     $('account-list').addEventListener('click', (e) => {
       const useName = e.target.closest('[data-use-account]')?.dataset.useAccount;
@@ -187,15 +169,65 @@ export function createAuth({ client, onLoggedIn }) {
       }
       const removeName = e.target.closest('[data-remove-account]')?.dataset.removeAccount;
       if (removeName) {
-        return guard(async () => {
-          await client.removeStoredAccount(removeName);
-          await deleteAccountData(removeName);
-          const next = await client.storage.loadIdentity();
-          applyIdentity(next); // re-renders the list and the login button
-          if (!next) { showMode('signup'); setStatus(els.status, `@${removeName} removed from this browser.`); }
-        });
+        return guard(async () => await removeWithWarning(removeName));
       }
     });
+  }
+
+  // How many devices does this account have? Briefly switches the active
+  // identity and logs in (a v3 passkey account may prompt biometrics), then
+  // restores the previous selection. null => account not reachable (e.g.
+  // already deleted server-side — a local zombie record).
+  async function deviceCountFor(username) {
+    const accounts = await client.storedAccounts();
+    const prev = accounts.find((a) => a.current)?.username ?? null;
+    try {
+      if (prev !== username) await client.useStoredAccount(username);
+      await client.login();
+      const { devices } = await client.devices();
+      return devices.length;
+    } catch {
+      return null;
+    } finally {
+      client.logout();
+      if (prev && prev !== username) {
+        try { await client.useStoredAccount(prev); } catch { /* ignore */ }
+      }
+    }
+  }
+
+  async function removeWithWarning(removeName) {
+    const count = await deviceCountFor(removeName);
+    let title = `Remove @${removeName}?`;
+    let body;
+    let okLabel = 'Remove';
+    let danger = false;
+    if (count === 1) {
+      // The only device holding the keys: removal strands the account.
+      title = `Delete @${removeName}?`;
+      body = `This browser is the ONLY device holding @${removeName}'s keys. `
+        + 'There is no account recovery yet — removing it makes the account ' 
+        + 'permanently inaccessible everywhere: effectively, the account and its messages are gone.';
+      okLabel = 'Remove and lose the account';
+      danger = true;
+    } else if (count === null) {
+      body = `Could not reach @${removeName}'s account (it may already be deleted). ` 
+        + 'Its keys and local messages will be erased from this browser. '
+        + 'If no other device holds this account\u2019s keys, it cannot be recovered.';
+      danger = true;
+    } else {
+      body = `@${removeName} stays usable on its other ${count - 1} device(s); ` 
+        + 'this browser will simply forget it.';
+    }
+    if (!(await confirmModal({ title, body, okLabel, danger }))) return;
+    await client.removeStoredAccount(removeName);
+    await deleteAccountData(removeName);
+    const next = await client.storage.loadIdentity();
+    applyIdentity(next);
+    if (!next) {
+      showMode('signup');
+      setStatus(els.status, `@${removeName} removed from this browser.`);
+    }
   }
 
   return { wire, applyIdentity, showMode };

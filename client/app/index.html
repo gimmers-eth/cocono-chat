@@ -27,7 +27,6 @@
           <p class="muted small">Accounts stored on this device:</p>
           <ul id="account-list" class="account-list"></ul>
         </div>
-        <button id="btn-forget" class="btn btn-ghost btn-block">Clear this browser</button>
       </section>
 
       <section id="auth-signup" hidden>
@@ -156,6 +155,20 @@
       <!-- In-drawer feedback (devices, pairing codes…) — the sidebar status
            line is hidden behind this drawer, so settings actions report here. -->
       <p id="drawer-status" class="status" role="status"></p>
+    </div>
+  </section>
+
+  <!-- Generic confirm dialog (destructive actions such as removing an
+       account from this browser). -->
+  <div id="confirm-overlay" class="overlay" hidden></div>
+  <section id="confirm-modal" class="diag-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title" hidden>
+    <header class="drawer-head">
+      <h2 id="confirm-title"></h2>
+      <button id="btn-confirm-cancel" class="icon-btn" title="Cancel">✕</button>
+    </header>
+    <p id="confirm-body" class="muted"></p>
+    <div class="row-actions">
+      <button id="btn-confirm-ok" class="btn btn-primary"></button>
     </div>
   </section>
 

@@ -29,6 +29,42 @@ export function setBusy(busy) {
   for (const btn of document.querySelectorAll('button')) btn.disabled = busy;
 }
 
+/**
+ * Promise-based confirm dialog: resolves true on confirm, false on cancel /
+ * scrim / Escape. Falls back to window.confirm if the markup is missing.
+ */
+export function confirmModal({ title, body, okLabel = 'Confirm', danger = false }) {
+  const overlay = $('confirm-overlay');
+  const modal = $('confirm-modal');
+  if (!modal || !overlay) return Promise.resolve(window.confirm(`${title}\n\n${body}`));
+  $('confirm-title').textContent = title;
+  $('confirm-body').textContent = body;
+  const ok = $('btn-confirm-ok');
+  ok.textContent = okLabel;
+  ok.classList.toggle('btn-danger', danger);
+  return new Promise((resolve) => {
+    const done = (value) => {
+      overlay.hidden = true;
+      modal.hidden = true;
+      ok.removeEventListener('click', onOk);
+      $('btn-confirm-cancel').removeEventListener('click', onCancel);
+      overlay.removeEventListener('click', onCancel);
+      document.removeEventListener('keydown', onKey);
+      resolve(value);
+    };
+    const onOk = () => done(true);
+    const onCancel = () => done(false);
+    const onKey = (e) => { if (e.key === 'Escape') done(false); };
+    ok.addEventListener('click', onOk);
+    $('btn-confirm-cancel').addEventListener('click', onCancel);
+    overlay.addEventListener('click', onCancel);
+    document.addEventListener('keydown', onKey);
+    overlay.hidden = false;
+    modal.hidden = false;
+    ok.focus?.();
+  });
+}
+
 /** WhatsApp-style conversation time: today → HH:MM, this week → weekday, else date. */
 export function fmtTime(ts) {
   if (!ts) return '';
