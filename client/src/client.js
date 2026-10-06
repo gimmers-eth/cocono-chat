@@ -10,7 +10,17 @@ import { MemoryStorage } from './storage.js';
 import { createLogger } from './logger.js';
 import { canonical, nowEpoch } from './encoding.js';
 import { passkeyAvailable, sealDevice, unsealDevice } from './passkey.js';
+import { localSeal, localUnseal } from './localseal.js';
 import * as c from './crypto.js';
+
+// iOS/iPadOS WebKit: storing CryptoKey HANDLES in IndexedDB is broken (the
+// record deserializes empty after reload), so passkey-PRF sealing is
+// mandatory there — a silent fallback there creates accounts that die on
+// refresh, which is the bug this guards against.
+const iosLike = () =>
+  typeof navigator !== 'undefined' &&
+  /iPhone|iPad|iPod/.test(navigator.userAgent) &&
+  (navigator.maxTouchPoints ?? 0) > 0;
 
 export class CoconoClient extends Emitter {
   #identity = null; // loaded lazily from storage
@@ -88,9 +98,10 @@ export class CoconoClient extends Emitter {
     return { username, deviceId, keyPair, pubRaw, xPair, xPubRaw, aesRaw, payload: { u: username, p: pubRaw, x: xPubRaw, a: aesRaw, d: deviceId, t, s } };
   }
 
-  // `sealed` (see passkey.js): the identity is stored as passkey-wrapped
-  // bytes (format 3) — durable on iOS. Without it, the legacy CryptoKey
-  // handle record is used (fine on browsers that persist handles).
+  // `sealed` (see passkey.js/localseal.js): { bundle:{format,...}, runtime:{handles} }
+  //   format 3 — passkey-PRF wrapped (best: biometric-gated, hardware-held key)
+  //   format 4 — local-wrapped bytes (iOS without PRF: bytes persist, handles don't)
+  //   null     — legacy CryptoKey handle record (fine on engines that persist handles)
   async #persistIdentity(device, tokenLogin = true, sealed = null) {
     const runtime = sealed
       ? sealed.runtime
@@ -104,21 +115,43 @@ export class CoconoClient extends Emitter {
     };
     const stored = sealed
       ? {
-          format: 3,
+          ...sealed.bundle,
           username: identity.username,
           deviceId: identity.deviceId,
           pubRaw: identity.pubRaw,
           xPubRaw: identity.xPubRaw,
-          credId: sealed.bundle.credId,
-          prfEval: sealed.bundle.prfEval,
-          wrapped: sealed.bundle.wrapped,
         }
       : identity;
     await this.storage.saveIdentity(stored);
     this.#identity = identity;
-    this.logger.info(`identity stored for @${identity.username} device ${identity.deviceId} (${sealed ? 'passkey-sealed' : 'key handles'})`);
+    this.logger.info(`identity stored for @${identity.username} device ${identity.deviceId} (${sealed ? `sealed:v${sealed.bundle.format}` : 'key handles'})`);
     if (tokenLogin) this.token = await this.#challengeVerify(identity);
     return identity;
+  }
+
+  // Seal strategy chain: passkey-PRF (v3) -> local wrap bytes (v4, iOS only) ->
+  // handle storage (v2, only where handles demonstrably persist). Never a
+  // silent v2 on iOS — that is the "account dies on refresh" bug.
+  async #sealStrategy(device) {
+    if (passkeyAvailable()) {
+      try {
+        return await sealDevice(device.username, device);
+      } catch (err) {
+        this.logger.warn('passkey PRF unavailable:', err?.message ?? err);
+      }
+    }
+    if (iosLike()) {
+      try {
+        return await localSeal(device.username, device);
+      } catch (err) {
+        throw new CoconoError(
+          `Cannot store keys safely on this device: ${err?.message ?? err}. ` +
+          'No account was created.',
+          'key_storage_unavailable',
+        );
+      }
+    }
+    return null;
   }
 
   async #challengeVerify(identity) {
@@ -139,17 +172,12 @@ export class CoconoClient extends Emitter {
    */
   async register(username) {
     if (this.#identity) throw new CoconoError('This device already holds an identity — log out or use a fresh client.', 'identity_exists');
-    const usePasskey = passkeyAvailable();
-    const device = await this.#generateDevicePayload(username, { extractable: usePasskey });
+    const canSeal = passkeyAvailable() || iosLike();
+    const device = await this.#generateDevicePayload(username, { extractable: canSeal });
+    // Seal BEFORE touching the server: a failure here must not leave a
+    // half-created account we cannot safely key.
+    const sealed = await this.#sealStrategy(device);
     await this.api.signup(device.payload);
-    let sealed = null;
-    if (usePasskey) {
-      try {
-        sealed = await sealDevice(device.username, device);
-      } catch (err) {
-        this.logger.warn('passkey sealing failed, falling back to key-handle storage:', err?.message ?? err);
-      }
-    }
     const identity = await this.#persistIdentity(device, true, sealed);
     return { username: identity.username, deviceId: identity.deviceId, token: this.token };
   }
@@ -157,16 +185,58 @@ export class CoconoClient extends Emitter {
   /** Log in with the identity stored on this device. @returns {Promise<string>} token */
   async login() {
     const identity = await this.#requireIdentity();
-    // Passkey-sealed identity: unseal first — needs a user gesture (tap the
-    // login button) + biometric/PIN verification.
+    // Sealed identities must be unseated before use. v3 (passkey) needs a
+    // user gesture + biometric; v4 (local wrap) is silent.
     if (identity.format === 3 && !identity.priv) await this.#unlock(identity);
+    else if (identity.format === 4 && !identity.priv) Object.assign(identity, await localUnseal(identity));
     return this.#challengeVerify(identity);
   }
 
-  /** True when a passkey-sealed identity is stored but not yet unsealed. */
+  /** True when a PASSKEY-sealed identity is stored (needs a gesture to unlock). */
   async needsUnlock() {
     const identity = await this.#loadIdentity();
     return Boolean(identity?.format === 3 && !identity.priv);
+  }
+
+  /** Accounts whose identity is stored on THIS device: [{username, deviceId, current}]. */
+  async storedAccounts() {
+    if (this.storage.listAccounts) return this.storage.listAccounts();
+    const rec = await this.storage.loadIdentity();
+    return rec ? [{ username: String(rec.username).toLowerCase(), deviceId: rec.deviceId, current: true }] : [];
+  }
+
+  /**
+   * Make a stored account the active one (the login screen's "use"). Clears
+   * the in-memory identity so the next login() loads the newly selected one.
+   */
+  async useStoredAccount(username) {
+    if (!this.storage.useAccount) throw new CoconoError('This storage adapter cannot switch accounts.', 'unsupported');
+    await this.storage.useAccount(username);
+    this.#identity = null;
+    this.logout();
+  }
+
+  /**
+   * Forget ONE account on this device: removes its stored identity (and
+   * re-points the active account if it was the one). Returns the username so
+   * callers can also wipe that account's message data.
+   */
+  async removeStoredAccount(username) {
+    const ul = String(username).toLowerCase();
+    if (this.storage.removeAccount) await this.storage.removeAccount(ul);
+    else {
+      const cur = await this.storage.loadIdentity();
+      if (cur && String(cur.username).toLowerCase() === ul) await this.forget();
+      else return ul;
+    }
+    if (this.#identity && String(this.#identity.username).toLowerCase() === ul) {
+      this.#identity = null;
+      this.logout();
+    } else if (this.storage.loadIdentity) {
+      // Active account changed under us (pointer re-point): reload lazily.
+      this.#identity = null;
+    }
+    return ul;
   }
 
   async #unlock(identity) {
@@ -233,16 +303,9 @@ export class CoconoClient extends Emitter {
     if (this.#identity || this.#pendingPairing) {
       throw new CoconoError('This device already holds or is pairing an identity.', 'identity_exists');
     }
-    const usePasskey = passkeyAvailable();
-    const device = await this.#generateDevicePayload(username, { extractable: usePasskey });
-    let sealed = null;
-    if (usePasskey) {
-      try {
-        sealed = await sealDevice(device.username, device);
-      } catch (err) {
-        this.logger.warn('passkey sealing failed, falling back to key-handle storage:', err?.message ?? err);
-      }
-    }
+    const canSeal = passkeyAvailable() || iosLike();
+    const device = await this.#generateDevicePayload(username, { extractable: canSeal });
+    const sealed = await this.#sealStrategy(device);
     const { code, enrollId, expiresInSec } = await this.api.enrollDevice(device.payload);
     this.#pendingPairing = { ...device, sealed, enrollId, expiresAt: Date.now() + expiresInSec * 1000 };
     this.logger.info(`pairing requested for @${username}, code ${code}`);

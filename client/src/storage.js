@@ -32,6 +32,30 @@ export class MemoryStorage {
   async listIdentities() {
     return [...this.#records.values()];
   }
+
+  /** Stored accounts: {username, deviceId, current} per record. */
+  async listAccounts() {
+    return [...this.#records.entries()].map(([ul, rec]) => ({
+      username: ul,
+      deviceId: rec.deviceId,
+      current: ul === this.#current,
+    }));
+  }
+
+  /** Make a stored account the active one (no key material touched). */
+  async useAccount(username) {
+    const ul = String(username).toLowerCase();
+    if (!this.#records.has(ul)) throw new Error(`no stored account "${ul}"`);
+    this.#current = ul;
+  }
+
+  /** Delete one account's stored identity; re-points 'current' if needed. */
+  async removeAccount(username) {
+    const ul = String(username).toLowerCase();
+    const removed = this.#records.delete(ul);
+    if (this.#current === ul) this.#current = this.#records.keys().next().value ?? null;
+    return removed;
+  }
 }
 
 // Browser adapter: IndexedDB, structured-clone (CryptoKey-safe). Identity
@@ -114,5 +138,39 @@ export class IdbStorage {
   async listIdentities() {
     const recs = await this.#withStore('readonly', (s) => s.getAll());
     return recs.filter((r) => r && typeof r === 'object' && r.username);
+  }
+
+  /** Stored accounts: {username, deviceId, current} per record. */
+  async listAccounts() {
+    const [recs, current] = await Promise.all([
+      this.listIdentities(),
+      this.#withStore('readonly', (s) => s.get(IdbStorage.CURRENT)),
+    ]);
+    return recs.map((r) => ({
+      username: String(r.username).toLowerCase(),
+      deviceId: r.deviceId,
+      current: String(r.username).toLowerCase() === current,
+    }));
+  }
+
+  /** Make a stored account the active one. */
+  async useAccount(username) {
+    const ul = String(username).toLowerCase();
+    const rec = await this.#withStore('readonly', (s) => s.get(IdbStorage.keyFor(ul)));
+    if (!rec) throw new Error(`no stored account "${ul}"`);
+    await this.#withStore('readwrite', (s) => s.put(ul, IdbStorage.CURRENT));
+  }
+
+  /** Delete one account's stored identity; re-points 'current' if needed. */
+  async removeAccount(username) {
+    const ul = String(username).toLowerCase();
+    await this.#withStore('readwrite', (s) => s.delete(IdbStorage.keyFor(ul)));
+    const current = await this.#withStore('readonly', (s) => s.get(IdbStorage.CURRENT));
+    if (current === ul) {
+      const rest = await this.listAccounts();
+      await this.#withStore('readwrite', (s) =>
+        rest.length ? s.put(rest[0].username, IdbStorage.CURRENT) : s.delete(IdbStorage.CURRENT));
+    }
+    return true;
   }
 }

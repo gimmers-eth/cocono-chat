@@ -29,6 +29,47 @@ export function createAuth({ client, onLoggedIn }) {
         : `Log in as @${identity.username.toLowerCase()}`;
     }
     setStatus(els.status, '');
+    renderAccounts();
+  }
+
+  // Accounts stored on THIS device: switch between them, or remove one
+  // (identity + its local message data). Removal never touches the server —
+  // the account survives on the other devices.
+  async function renderAccounts() {
+    const block = $('accounts-block');
+    const list = $('account-list');
+    if (!block || !list || !client.storedAccounts) return;
+    let accounts = [];
+    try {
+      accounts = await client.storedAccounts();
+    } catch { /* adapter without multi-account support */ }
+    block.hidden = accounts.length === 0; // always show when anything is stored —
+    // even a single (possibly server-deleted) account must be removable here.
+    list.replaceChildren(...accounts.map((a) => {
+      const row = document.createElement('li');
+      const who = document.createElement('span');
+      who.append(document.createTextNode(`@${a.username}`));
+      const dev = document.createElement('span');
+      dev.className = 'dim small';
+      dev.textContent = ` ${String(a.deviceId).slice(0, 8)}…${a.current ? ' (active)' : ''}`;
+      who.append(dev);
+      const actions = document.createElement('span');
+      actions.className = 'row-actions';
+      if (!a.current) {
+        const use = document.createElement('button');
+        use.className = 'tiny';
+        use.textContent = 'use';
+        use.dataset.useAccount = a.username;
+        actions.append(use);
+      }
+      const del = document.createElement('button');
+      del.className = 'danger tiny';
+      del.textContent = 'remove';
+      del.dataset.removeAccount = a.username;
+      actions.append(del);
+      row.append(who, actions);
+      return row;
+    }));
   }
 
   function showMode(mode) {
@@ -117,16 +158,44 @@ export function createAuth({ client, onLoggedIn }) {
 
     $('btn-forget').addEventListener('click', () =>
       guard(async () => {
-        // Capture the account BEFORE the identity is destroyed — the local
-        // message cache is scoped per username and must be wiped with it.
-        const identity = await client.storage.loadIdentity();
-        await client.forget();
-        if (identity?.username) await deleteAccountData(identity.username);
+        // "Clear this browser": remove EVERY account identity stored here
+        // plus each account's local message data. Servers keep the accounts —
+        // they can be paired/used from other devices again later.
+        const accounts = await client.storedAccounts();
+        for (const a of accounts) {
+          await client.removeStoredAccount(a.username);
+          await deleteAccountData(a.username);
+        }
         applyIdentity(null);
         showMode('signup');
-        setStatus(els.status, 'This device forgot its keys and deleted all local message data.');
+        setStatus(els.status, accounts.length
+          ? `Removed ${accounts.length} stored account${accounts.length > 1 ? 's' : ''} and all local data from this browser.`
+          : 'This browser is clean — nothing was stored.');
       }),
     );
+
+    // Per-account use / remove (delegated; list re-renders after each action).
+    $('account-list').addEventListener('click', (e) => {
+      const useName = e.target.closest('[data-use-account]')?.dataset.useAccount;
+      if (useName) {
+        return guard(async () => {
+          await client.useStoredAccount(useName);
+          setStatus(els.status, 'Signing in…');
+          const token = await client.login();
+          await onLoggedIn({ token });
+        });
+      }
+      const removeName = e.target.closest('[data-remove-account]')?.dataset.removeAccount;
+      if (removeName) {
+        return guard(async () => {
+          await client.removeStoredAccount(removeName);
+          await deleteAccountData(removeName);
+          const next = await client.storage.loadIdentity();
+          applyIdentity(next); // re-renders the list and the login button
+          if (!next) { showMode('signup'); setStatus(els.status, `@${removeName} removed from this browser.`); }
+        });
+      }
+    });
   }
 
   return { wire, applyIdentity, showMode };

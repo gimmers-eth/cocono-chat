@@ -18,11 +18,55 @@
 // The passkey is origin-bound: a different hostname = different credential =
 // different wrap key. Losing the passkey (OS passkey deletion) loses the
 // sealed identity — server-side backup/recovery is the planned counterweight.
+//
+// Every ceremony step is recorded in a trace buffer; the app's "Send
+// diagnostics" uploads it, so unsupported PRF failures are explainable
+// remotely (which accessor returned what, PRF errors per output, etc.).
 
 import { b64uEncode, b64uDecode, utf8 } from './encoding.js';
 import * as c from './crypto.js';
 
 const WRAP_INFO = 'cocono-prf-wrap-v1';
+
+// --- trace buffer ----------------------------------------------------------
+
+const trace = [];
+const TRACE_CAP = 60;
+
+function traceIt(stage, info) {
+  trace.push(`${new Date().toISOString().slice(11, 23)} ${stage}: ${
+    typeof info === 'string' ? info : JSON.stringify(info)
+  }`.slice(0, 300));
+  if (trace.length > TRACE_CAP) trace.shift();
+}
+
+export function passkeyTrace() {
+  return trace.join('\n') || '(empty — no passkey ceremony this session)';
+}
+
+function describeExtensions(response, label) {
+  const exts = response?.extensions ?? response?.getClientExtensionResults?.() ?? null;
+  const keys = exts ? Object.keys(exts) : [];
+  if (!keys.length) {
+    // Distinguish "browser ignored the extension" from "we read the wrong
+    // place": log whether the engine exposes any extension surface at all.
+    const proto = response ? (Object.getPrototypeOf(response) ?? {}) : {};
+    const members = Object.getOwnPropertyNames(proto).slice(0, 24).join(',');
+    traceIt(label, `no extension results (accessor=${exts ? 'returned {}' : 'missing'}; ` +
+      `response members=[${members}])`);
+    return null;
+  }
+  const prf = exts.prf;
+  if (!prf) {
+    traceIt(label, `extensions present but no prf: [${keys.join(',')}]`);
+    return null;
+  }
+  const outs = Object.keys(prf).filter((k) => prf[k] instanceof ArrayBuffer || prf[k] instanceof Uint8Array);
+  const errs = prf.errors ? Object.entries(prf.errors).map(([k, v]) => `${k}=${v}`).join(',') : '';
+  traceIt(label, `prf outputs=[${outs.join(',')}]${errs ? ` errors{${errs}}` : ''}`);
+  if (!prf.first || !prf.second) return null;
+  return { first: new Uint8Array(prf.first), second: new Uint8Array(prf.second) };
+}
 
 export function passkeyAvailable() {
   return typeof globalThis.PublicKeyCredential !== 'undefined'
@@ -30,19 +74,23 @@ export function passkeyAvailable() {
     && !!navigator.credentials?.create;
 }
 
-function prfOutputs(response) {
-  // Shipped API is response.extensions?.prf; a couple of engines exposed a
-  // getter instead. Accept either, require both outputs.
-  const prf = response?.extensions?.prf ?? response?.getExtensions?.()?.prf;
-  if (!prf?.first || !prf?.second) return null;
-  return { first: new Uint8Array(prf.first), second: new Uint8Array(prf.second) };
+/** What this browser can actually do — surfaced in Storage diagnostics. */
+export async function passkeyStatus() {
+  if (!passkeyAvailable()) return 'webauthn-unavailable';
+  try {
+    const platform = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+    return `platform-authenticator=${platform}`;
+  } catch (err) {
+    return `probe failed: ${err?.name}: ${err?.message}`;
+  }
 }
 
 // Registration-time ceremony — MUST run inside a user gesture (the sign-up /
-// pair button click). Throws if WebAuthn or the PRF extension is unavailable.
+// pair button click). Throws with a precise reason if PRF is unavailable.
 export async function createPasskey(username) {
-  const firstOut = crypto.getRandomValues(new Uint8Array(32));
-  const secondOut = crypto.getRandomValues(new Uint8Array(32));
+  traceIt('create:start', `rp=${location.hostname} user=${username}`);
+  const firstInput = crypto.getRandomValues(new Uint8Array(32));
+  const secondInput = crypto.getRandomValues(new Uint8Array(32));
   const cred = await navigator.credentials.create({
     publicKey: {
       challenge: crypto.getRandomValues(new Uint8Array(32)),
@@ -59,22 +107,48 @@ export async function createPasskey(username) {
       ],
       authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
       attestation: 'none',
-      // Evaluate the PRF at creation too: proves the authenticator actually
-      // returns outputs before we ever trust it with the identity.
-      extensions: { prf: { eval: { firstOut, secondOut } } },
+      // PRF eval INPUTS are `first`/`second` (WebAuthn L3 IDL). Engines that
+      // do not return create-time outputs fall through to the get() below.
+      extensions: { prf: { eval: { first: firstInput, second: secondInput } } },
     },
   });
-  const secrets = prfOutputs(cred?.response);
-  if (!cred || !secrets) throw new Error('passkey-prf-unavailable');
+  if (!cred) throw new Error('passkey ceremony cancelled');
+  traceIt('create:ok', `credId=${b64uEncode(new Uint8Array(cred.rawId)).slice(0, 12)}… aaguid=${cred.response?.getAuthenticatorData?.().slice(37, 53) ? 'yes' : 'n/a'}`);
+  let secrets = describeExtensions(cred.response, 'create:ext');
+  if (!secrets) {
+    // Documented path: evaluate the PRF via an assertion right after creation
+    // (same user activation). Also proves the authenticator can produce PRF
+    // outputs before we trust it with the identity.
+    traceIt('verify-get:start', 'create returned no usable PRF outputs — evaluating via assertion');
+    const assertion = await navigator.credentials.get({
+      publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        rpId: location.hostname,
+        allowCredentials: [{ type: 'public-key', id: new Uint8Array(cred.rawId) }],
+        userVerification: 'required',
+        extensions: { prf: { eval: { first: firstInput, second: secondInput } } },
+      },
+    });
+    if (!assertion) throw new Error('passkey verification cancelled');
+    secrets = describeExtensions(assertion.response, 'verify-get:ext');
+  }
+  if (!secrets) {
+    throw new Error(
+      'this browser/authenticator created a passkey but returned no PRF outputs — '
+      + 'see the passkey trace in diagnostics for details',
+    );
+  }
+  traceIt('seal:prf-ok', 'both PRF outputs available');
   return {
     credId: b64uEncode(new Uint8Array(cred.rawId)),
-    prfEval: { firstOut: b64uEncode(firstOut), secondOut: b64uEncode(secondOut) },
+    prfEval: { first: b64uEncode(firstInput), second: b64uEncode(secondInput) },
     secrets,
   };
 }
 
 // Unlock ceremony — MUST run inside a user gesture (the Unlock button tap).
 export async function evaluatePasskey(credId, prfEval) {
+  traceIt('unlock:start', `credId=${String(credId).slice(0, 12)}…`);
   const assertion = await navigator.credentials.get({
     publicKey: {
       challenge: crypto.getRandomValues(new Uint8Array(32)),
@@ -83,14 +157,16 @@ export async function evaluatePasskey(credId, prfEval) {
       userVerification: 'required',
       extensions: { prf: {
         eval: {
-          firstOut: b64uDecode(prfEval.firstOut),
-          secondOut: b64uDecode(prfEval.secondOut),
+          first: b64uDecode(prfEval.first),
+          second: b64uDecode(prfEval.second),
         },
       } },
     },
   });
-  const secrets = prfOutputs(assertion?.response);
-  if (!assertion || !secrets) throw new Error('passkey-prf-unavailable');
+  if (!assertion) throw new Error('passkey unlock cancelled');
+  const secrets = describeExtensions(assertion.response, 'unlock:ext');
+  if (!secrets) throw new Error('passkey unlock returned no PRF outputs');
+  traceIt('unlock:prf-ok', 'identity unsealed');
   return secrets;
 }
 

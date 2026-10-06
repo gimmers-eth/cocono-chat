@@ -23,7 +23,11 @@
 
       <section id="auth-login" hidden>
         <button id="btn-login" class="btn btn-primary btn-block"></button>
-        <button id="btn-forget" class="btn btn-ghost btn-block">Forget this device</button>
+        <div id="accounts-block" hidden>
+          <p class="muted small">Accounts stored on this device:</p>
+          <ul id="account-list" class="account-list"></ul>
+        </div>
+        <button id="btn-forget" class="btn btn-ghost btn-block">Clear this browser</button>
       </section>
 
       <section id="auth-signup" hidden>

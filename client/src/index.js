@@ -5,4 +5,5 @@ export { CoconoClient } from './client.js';
 export { MemoryStorage, IdbStorage } from './storage.js';
 export { CoconoError, CoconoApiError } from './errors.js';
 export { canonical, b64uEncode, b64uDecode } from './encoding.js';
+export { passkeyAvailable, passkeyStatus, passkeyTrace } from './passkey.js';
 export * as crypto from './crypto.js';

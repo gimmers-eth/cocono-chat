@@ -58,3 +58,48 @@ test('passkey: wrap key is deterministic from PRF secrets', async () => {
   const other = await deriveWrapKey({ ...secrets, first: crypto.getRandomValues(new Uint8Array(32)) });
   await assert.rejects(() => crypto.subtle.decrypt({ name: 'AES-GCM', iv }, other, new Uint8Array(ct)));
 });
+
+// --- local seal (format 4): the iOS-without-PRF path -----------------------
+
+import { localSeal, localUnseal } from '../src/localseal.js';
+
+test('localseal: seal/unseal roundtrip yields equivalent non-extractable handles', async () => {
+  const keyPair = await c.generateIdentityKeyPair(true);
+  const xPair = await c.generateX25519KeyPair(true);
+  const aesRaw = await c.exportRawAesKey(await c.generateAesKey());
+  const pubRaw = await c.exportRawPublicKey(keyPair.publicKey);
+  const device = { keyPair, xPair, aesRaw, pubRaw, deviceId: 'device-000001' };
+
+  const { bundle, runtime } = await localSeal('mike1', device);
+  assert.equal(bundle.format, 4);
+  assert.equal(runtime.priv.extractable, false, 'runtime handle non-extractable');
+  assert.ok(bundle.wrapped.iv && bundle.wrapped.ct);
+  assert.ok(!JSON.stringify(bundle).includes('MC4EE'), 'no plaintext pkcs8 header in stored form');
+
+  const record = { ...bundle, username: 'mike1', deviceId: device.deviceId, pubRaw };
+  const back = await localUnseal(record);
+  // Ed25519 signatures are deterministic: same key material => same signature.
+  assert.equal(await c.sign(back.priv, 'probe'), await c.sign(keyPair.privateKey, 'probe'));
+
+  // Wrong identifiers => wrong wrap key => auth-tag failure (no silent garbage).
+  await assert.rejects(() => localUnseal({ ...record, username: 'someone-else' }));
+});
+
+test('storage: multi-account list / use / remove', async () => {
+  const s = new (await import('../src/storage.js')).MemoryStorage();
+  await s.saveIdentity({ username: 'alice', deviceId: 'd1' });
+  await s.saveIdentity({ username: 'bob', deviceId: 'd2' });
+
+  const list = await s.listAccounts();
+  assert.deepEqual(list.map((a) => a.username).sort(), ['alice', 'bob']);
+  assert.equal(list.find((a) => a.current).username, 'bob', 'last saved is active');
+
+  await s.useAccount('alice');
+  assert.equal((await s.loadIdentity()).deviceId, 'd1');
+
+  await s.removeAccount('alice');
+  assert.equal((await s.loadIdentity()).deviceId, 'd2', 'pointer re-pointed to a survivor');
+  await s.removeAccount('bob');
+  assert.equal(await s.loadIdentity(), null);
+  assert.deepEqual(await s.listAccounts(), []);
+});
