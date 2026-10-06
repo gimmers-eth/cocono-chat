@@ -61,13 +61,23 @@ function title() {
 // the freshest one, or null. Throws on any protocol/crypto failure so the
 // caller can fall back.
 async function enrichFromServer() {
-  const storageMod = await import('/sdk/index.js');
-  const storeMod = await import('/js/store.js');
+  let storageMod; let storeMod;
+  try {
+    [storageMod, storeMod] = await Promise.all([
+      import('/sdk/index.js'), import('/js/store.js'),
+    ]);
+  } catch (err) {
+    throw new Error(`import failed: ${err?.name}: ${err?.message}`);
+  }
   const storage = new storageMod.IdbStorage();
   if (!(await storage.loadIdentity())) return null; // no account on this device
 
   const client = new storageMod.CoconoClient({ baseUrl: '', storage, logging: false });
-  await client.login(); // fully silent now (no passkey gesture paths)
+  try {
+    await client.login(); // fully silent now (no passkey gesture paths)
+  } catch (err) {
+    throw new Error(`login failed: ${err?.message ?? err}`);
+  }
   storeMod.setScope(client.username);
 
   const first = { message: null, count: 0 };
@@ -86,7 +96,10 @@ async function enrichFromServer() {
     client.connect();
   });
 
-  await received;
+  await Promise.race([
+    received,
+    new Promise((_, rej) => setTimeout(() => rej(new Error('ws never opened')), 6000)),
+  ]);
   client.disconnect();
   if (!first.message) return null;
   return { ...first.message, extra: first.count - 1 };
@@ -112,13 +125,17 @@ self.addEventListener('push', (event) => {
     if (type !== 'msg') return;
     try {
       const rich = await withBudget(enrichFromServer(), ENRICH_BUDGET_MS);
-      if (!rich) return;
+      if (!rich) return; // nothing (yet) — the generic notification stands
       const snippet = (rich.text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
       const more = rich.extra > 0 ? ` (+${rich.extra} more)` : '';
       await showNotification(name, `@${rich.peer}: ${snippet || '(message)'}${more}`, 'msg');
     } catch (err) {
-      // generic notification already shown; nothing more to do
-      console.warn('[sw] enrich failed:', err?.message ?? err);
+      // Surface the failure in place (and server-side): debugging a worker on
+      // an iPhone has no other window into this path.
+      const why = String(err?.message ?? err).slice(0, 160);
+      console.warn('[sw] enrich failed:', why);
+      reportSwFailure(why);
+      await showNotification(name, `New message — preview failed: ${why}`, 'msg');
     }
   })());
 });
@@ -159,6 +176,44 @@ self.addEventListener('fetch', (event) => {
       return res;
     } catch {
       return (await caches.match(req)) ?? Response.error();
+    }
+  })());
+});
+
+// Best-effort server-side reporting of preview failures (rate-limited by the
+// diagnostics endpoint itself; failure to report is itself silent).
+function reportSwFailure(why) {
+  try {
+    fetch('/api/diagnostics', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ report: `[sw-preview-failure] ${why} | ua=${navigator.userAgent.slice(0, 90)}` }),
+    }).catch(() => {});
+  } catch { /* offline etc. */ }
+}
+
+// APNs/FCM rotate subscriptions occasionally (epoch changes) — without this
+// handler the device silently stops receiving pushes until a page loads.
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil((async () => {
+    try {
+      const { CoconoClient, IdbStorage } = await import('/sdk/index.js');
+      const storage = new IdbStorage();
+      if (!(await storage.loadIdentity())) return;
+      const client = new CoconoClient({ baseUrl: '', storage, logging: false });
+      await client.login();
+      const info = await (await fetch('/api/app-info')).json();
+      if (!info?.vapidPublicKey) return;
+      const old = await self.registration.pushManager.getSubscription();
+      const sub = await old?.subscriptionOptions?.() ?? {};
+      const fresh = await self.registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: sub.applicationServerKey ?? info.vapidPublicKey,
+      });
+      const j = fresh.toJSON();
+      await client.api?.setPushSubscription?.(client.token, { endpoint: j.endpoint, keys: j.keys });
+    } catch (err) {
+      reportSwFailure(`pushsubscriptionchange failed: ${err?.message ?? err}`);
     }
   })());
 });

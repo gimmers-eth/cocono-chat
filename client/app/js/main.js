@@ -54,7 +54,12 @@ window.addEventListener('offline', () => {
 });
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch(() => {});
+  navigator.serviceWorker.register('/sw.js').then(
+    // iOS may serve a day-old worker; nudge it to re-check bytes on every
+    // page load so instrumented/fixed workers land promptly.
+    (r) => r.update?.().catch(() => {}),
+    () => {},
+  );
   navigator.serviceWorker.addEventListener('message', (e) => {
     // Tapping a notification: refresh the conversation list when the app is
     // open and signed in (content itself arrives via the normal channels).
