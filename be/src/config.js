@@ -100,9 +100,9 @@ export const config = {
 
   // Diagnostics upload ('Send diagnostics' button) — payload size-capped and
   // TTL-expired server-side; the per-IP limit is the spam gate.
-  diagIpLimit: numOf(env.DIAG_IP_LIMIT, 10),
+  diagIpLimit: numOf(env.DIAG_IP_LIMIT, 30),
   diagIpWindowSec: numOf(env.DIAG_IP_WINDOW_SEC, 3600),
-  diagAccountLimit: numOf(env.DIAG_ACCOUNT_LIMIT, 10),
+  diagAccountLimit: numOf(env.DIAG_ACCOUNT_LIMIT, 30),
   diagAccountWindowSec: numOf(env.DIAG_ACCOUNT_WINDOW_SEC, 24 * 3600),
   wsHeartbeatSec: numOf(env.WS_HEARTBEAT_SEC, 30),
 };
