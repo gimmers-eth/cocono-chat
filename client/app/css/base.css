@@ -142,7 +142,7 @@ img.logo { object-fit: cover; background: none; }
 
 .side-status { padding: 0 1rem; flex: none; }
 
-.new-chat { display: flex; gap: .5rem; padding: .6rem 1rem; flex: none; }
+.new-chat { display: flex; gap: .5rem; padding: .6rem 1rem; flex: none; position: relative; }
 .new-chat .btn { flex: none; }
 
 .device-list li {
@@ -269,6 +269,15 @@ img.logo { object-fit: cover; background: none; }
 }
 .peer-list button:hover { background: var(--panel-raised); }
 .peer-list .avatar { width: 28px; height: 28px; font-size: .8rem; }
+
+/* Floating variant: dropdown OVER the content (anchor: .new-chat), fully
+   opaque + shadowed so nothing shows through the gaps between rows. */
+.peer-list.floating {
+  position: absolute; left: 1rem; right: 1rem; top: calc(100% - .15rem);
+  z-index: 25; margin: 0;
+  background: var(--panel-raised); box-shadow: var(--shadow);
+}
+.peer-list.floating button:hover { background: var(--panel); }
 
 .composer {
   flex: none; display: flex; gap: .6rem; align-items: center;

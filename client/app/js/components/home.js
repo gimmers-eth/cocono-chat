@@ -185,7 +185,7 @@ export function createHome({ client, chat, onLogout }) {
     // 'New chat' shows the users known on this device, filtered by typing;
     // tapping one opens that conversation directly.
     const peerInput = $('chat-peer-name');
-    const newChat = createPeerSuggestions($('chat-peer-suggestions'));
+    const newChat = createPeerSuggestions($('chat-peer-suggestions'), { max: 3, floating: true });
     newChat.wireInput(peerInput, (p) => {
       peerInput.value = '';
       newChat.paint();
@@ -211,7 +211,7 @@ export function createHome({ client, chat, onLogout }) {
       if (username.length < 5) return setStatus($('home-status'), 'Username must be at least 5 characters.', true);
       await chat.openChat(username);
       input.value = '';
-      newChat.paint();
+      newChat.dismiss(); // Enter/button both collapse the dropdown
     };
     $('btn-new-chat').addEventListener('click', openNew);
     $('chat-peer-name').addEventListener('keydown', (e) => {
