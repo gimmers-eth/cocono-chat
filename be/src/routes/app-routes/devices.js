@@ -226,4 +226,42 @@ export default async function deviceRoutes(app, { users, redis, config, messages
     }
     return { removed: deviceId, devices: user.devices.length };
   });
+
+  // PUT /api/devices/push-subscription — store this device's Web Push
+  // subscription (blind notifications; endpoint is an https URL at a push
+  // service, keys are the browser-generated P-256/p256dh pair). The push
+  // subscription is device-scoped and sent over the device's own JWT, so it
+  // can only ever overwrite the caller's device.
+  app.put('/api/devices/push-subscription', async (request, reply) => {
+    const denied = requireAuth(request, reply);
+    if (denied) return denied;
+
+    const { endpoint, keys } = request.body ?? {};
+    if (
+      typeof endpoint !== 'string' || !endpoint.startsWith('https://') || endpoint.length > 2048 ||
+      typeof keys?.p256dh !== 'string' || keys.p256dh.length > 1024 ||
+      typeof keys.auth !== 'string' || keys.auth.length > 1024
+    ) {
+      return fail(reply, 'invalid_subscription', 'endpoint (https) and keys {p256dh, auth} are required', 400);
+    }
+
+    const res = await users.updateOne(
+      { ul: request.auth.sub, 'devices.id': request.auth.d },
+      { $set: { 'devices.$.push': { endpoint, keys: { p256dh: keys.p256dh, auth: keys.auth }, updatedAt: new Date() } } },
+    );
+    if (res.matchedCount === 0) return fail(reply, 'unknown_device', 'No such device on this account', 404);
+    return { subscribed: true };
+  });
+
+  // DELETE /api/devices/push-subscription — stop pushing to this device
+  // (also what a 'gone' push-service response triggers server-side).
+  app.delete('/api/devices/push-subscription', async (request, reply) => {
+    const denied = requireAuth(request, reply);
+    if (denied) return denied;
+    await users.updateOne(
+      { ul: request.auth.sub, 'devices.id': request.auth.d },
+      { $unset: { 'devices.$.push': '' } },
+    );
+    return { subscribed: false };
+  });
 }

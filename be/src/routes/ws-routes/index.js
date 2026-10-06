@@ -31,6 +31,7 @@ import { createClient } from 'redis';
 import fastifyWebsocket from '@fastify/websocket';
 import { verifyJwt } from '../../lib/jwt.js';
 import { MAX_FRAME_BYTES, sendJson } from './protocol.js';
+import { presenceKey } from '../../lib/push.js';
 import { createHandlers } from './handlers.js';
 
 export default async function wsRoutes(app, { users, redis, config, messages }) {
@@ -62,6 +63,10 @@ export default async function wsRoutes(app, { users, redis, config, messages }) 
       }
       socket.isAlive = false;
       socket.ping();
+      // Refresh presence (TTL outlives one missed heartbeat cycle; a dead
+      // node's keys expire and the device looks offline = push territory).
+      const [ul, dv] = key.split(':');
+      redis.set(presenceKey(ul, dv), '1', { EX: config.wsHeartbeatSec * 2 + 5 }).catch(() => {});
     }
   }, config.wsHeartbeatSec * 1000);
   heartbeat.unref?.();
@@ -99,6 +104,7 @@ export default async function wsRoutes(app, { users, redis, config, messages }) 
     if (prev && prev !== socket) prev.close(4000, 'replaced');
     local.set(key, socket);
     socket.isAlive = true;
+    await redis.set(presenceKey(ul, dv), '1', { EX: config.wsHeartbeatSec * 2 + 5 });
     socket.on('pong', () => {
       socket.isAlive = true;
     });
@@ -125,7 +131,12 @@ export default async function wsRoutes(app, { users, redis, config, messages }) 
     });
 
     socket.on('close', () => {
-      if (local.get(key) === socket) local.delete(key);
+      if (local.get(key) === socket) {
+        local.delete(key);
+        // Only clear if this socket is still the one that owns the presence
+        // key (a reconnect may already have replaced it).
+        redis.del(presenceKey(ul, dv)).catch(() => {});
+      }
     });
   });
 }

@@ -25,9 +25,23 @@ export const client = new CoconoClient({
 
 const chat = createChat({ client, onHomeRefresh: () => home.renderConversationList() });
 const home = createHome({ client, chat, onLogout: () => showAuth() });
-const auth = createAuth({ client, onLoggedIn: () => enterApp() });
+const auth = createAuth({ client, onLoggedIn: () => enterApp({ gesture: true }) });
 
-async function enterApp() {
+// Phase 1 push: service worker (registered eagerly; permission is only asked
+// for after a login click). iOS additionally requires the app to be added to
+// the Home Screen before push notifications can arrive at all.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    // Tapping a notification: refresh the conversation list when the app is
+    // open and signed in (content itself arrives via the normal channels).
+    if (e.data?.from === 'sw' && e.data.type === 'notification-click' && client.token) {
+      home.renderConversationList().catch(() => {});
+    }
+  });
+}
+
+async function enterApp({ gesture = false } = {}) {
   // Durability: ask the browser to keep our IndexedDB (identity + message
   // store) out of eviction under storage pressure. Best-effort: Chrome/
   // Android honours it (reported as persistent=true in Storage
@@ -45,6 +59,15 @@ async function enterApp() {
   home.paintConnection(client.connectionState);
   client.connect();
   await home.renderConversationList();
+
+  // OS notifications: from a gesture (login/signup button) this may prompt
+  // for permission; on silent boot-resume it only re-registers a
+  // subscription if permission was already granted. Both are best-effort.
+  client.enablePush({ prompt: gesture }).then((r) => {
+    if (r.state !== 'enabled' && r.state !== 'needs-prompt' && r.state !== 'unsupported') {
+      client.logger.debug(`push not enabled: ${r.state} (${r.permission ?? 'n/a'})`);
+    }
+  }).catch(() => {});
 }
 
 async function showAuth() {

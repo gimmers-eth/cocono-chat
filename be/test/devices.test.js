@@ -457,3 +457,51 @@ test('device removal: detaching the LAST device deletes the account outright', a
     await teardown();
   }
 });
+
+// --- push subscriptions (Phase 1 notifications) ---
+
+test('push subscription: PUT stores on the calling device, DELETE clears', async () => {
+  const { app, mongo, teardown } = await setupApp(LIMITS);
+  const users = mongo.db.collection('users');
+  try {
+    const u = 'alice';
+    const d = 'main-device-0001';
+    const main = makeClient();
+    await signupUser(app, main, u, d);
+    const token = await getToken(app, main, u, d);
+    const auth = { authorization: `Bearer ${token}` };
+    const sub = {
+      endpoint: 'https://push.example.com/subscription/abc',
+      keys: { p256dh: 'BFpubkey...', auth: 'secret123' },
+    };
+
+    const put = await app.inject({ method: 'PUT', url: '/api/devices/push-subscription', payload: sub, headers: auth });
+    assert.equal(put.statusCode, 200);
+    assert.deepEqual(put.json(), { subscribed: true });
+    let doc = await users.findOne({ ul: u });
+    assert.equal(doc.devices[0].push.endpoint, sub.endpoint);
+    assert.ok(doc.devices[0].push.updatedAt instanceof Date);
+
+    // Validation: http endpoint / missing keys rejected.
+    for (const bad of [
+      { endpoint: 'http://insecure/', keys: sub.keys },
+      { endpoint: sub.endpoint, keys: { p256dh: 'x' } },
+      { endpoint: 42, keys: sub.keys },
+    ]) {
+      const r = await app.inject({ method: 'PUT', url: '/api/devices/push-subscription', payload: bad, headers: auth });
+      assert.equal(r.statusCode, 400);
+      assert.equal(r.json().error, 'invalid_subscription');
+    }
+
+    // Unauthenticated: 401.
+    const anon = await app.inject({ method: 'PUT', url: '/api/devices/push-subscription', payload: sub });
+    assert.equal(anon.statusCode, 401);
+
+    const del = await app.inject({ method: 'DELETE', url: '/api/devices/push-subscription', headers: auth });
+    assert.deepEqual(del.json(), { subscribed: false });
+    doc = await users.findOne({ ul: u });
+    assert.equal(doc.devices[0].push, undefined);
+  } finally {
+    await teardown();
+  }
+});

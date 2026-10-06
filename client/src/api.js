@@ -42,6 +42,18 @@ export class Api {
     return this.#request('/api/me', { token });
   }
 
+  appInfo() {
+    return this.#request('/api/app-info');
+  }
+
+  setPushSubscription(token, subscription) {
+    return this.#request('/api/devices/push-subscription', { method: 'PUT', body: subscription, token });
+  }
+
+  deletePushSubscription(token) {
+    return this.#request('/api/devices/push-subscription', { method: 'DELETE', token });
+  }
+
   sendDiagnostics(report, token) {
     return this.#request('/api/diagnostics', { method: 'POST', body: { report }, token });
   }

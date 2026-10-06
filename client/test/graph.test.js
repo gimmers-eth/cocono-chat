@@ -22,6 +22,7 @@ function walk(dir) {
 const files = [
   ...walk(path.join(ROOT, 'src')),
   ...walk(path.join(ROOT, 'app', 'js')),
+  path.join(ROOT, 'app', 'sw.js'),
 ];
 
 test('FE/SDK: every module parses (node --check)', () => {

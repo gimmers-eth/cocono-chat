@@ -16,6 +16,6 @@ export default async function appInfoRoutes(app, { redis, config, settings }) {
   app.get('/api/app-info', async (request, reply) => {
     const rl = await rateLimit(redis, `rl:appinfo:${request.ip}`, 120, 600);
     if (!rl.ok) return limited(reply, rl);
-    return { name: await resolveAppName(settings, config) };
+    return { name: await resolveAppName(settings, config), vapidPublicKey: config.vapidPublicKey || null };
   });
 }

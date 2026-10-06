@@ -282,6 +282,52 @@ export class CoconoClient extends Emitter {
   }
 
   /**
+   * Enable OS notifications for this device (Web Push, Phase 1 = blind
+   * 'activity' pings — content never crosses the push service). Ask from a
+   * user-gesture context (login/signup button); `prompt:false` re-registers
+   * an already-granted subscription silently.
+   * @returns {Promise<{state: 'enabled'|'denied'|'needs-prompt'|'unsupported'|'unconfigured', permission?: string}>}
+   */
+  async enablePush({ prompt = true } = {}) {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)
+      || typeof PushManager === 'undefined' || typeof Notification === 'undefined') {
+      return { state: 'unsupported' };
+    }
+    let permission = Notification.permission;
+    if (permission === 'default') {
+      if (!prompt) return { state: 'needs-prompt' };
+      permission = await Notification.requestPermission();
+    }
+    if (permission !== 'granted') return { state: 'denied', permission };
+    const info = await this.api.appInfo();
+    if (!info?.vapidPublicKey) return { state: 'unconfigured', permission };
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: info.vapidPublicKey,
+      });
+    }
+    const j = sub.toJSON();
+    await this.api.setPushSubscription(this.#requireToken(), { endpoint: j.endpoint, keys: j.keys });
+    this.logger.info('push subscription registered');
+    return { state: 'enabled', permission };
+  }
+
+  /** Unsubscribe this device from push (OS subscription + server record). */
+  async disablePush() {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) await sub.unsubscribe();
+    } catch { /* best effort */ }
+    try { await this.api.deletePushSubscription(this.#requireToken()); } catch { /* best effort */ }
+    this.logger.info('push subscription removed');
+    return { state: 'disabled' };
+  }
+
+  /**
    * Upload a plain-text diagnostics report (see the app's Storage
    * diagnostics panel). Works before login too; attaches the token when
    * logged in so the report can be linked to the account.

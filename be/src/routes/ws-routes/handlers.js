@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { rateLimit } from '../../lib/rateLimit.js';
 import { verifyEnvelope } from './envelope.js';
 import { devKey, sendJson, PENDING_BATCH } from './protocol.js';
+import { sendBlindPush, presenceKey } from '../../lib/push.js';
 
 export function createHandlers({ users, redis, pub, config, messages }) {
   async function handleSend(socket, request, body, auth) {
@@ -34,8 +35,9 @@ export function createHandlers({ users, redis, pub, config, messages }) {
 
     // Recipient account + device must exist.
     const rul = m.u.toLowerCase();
-    const recipient = await users.findOne({ ul: rul }, { projection: { 'devices.id': 1 } });
-    if (!recipient || !recipient.devices.some((dev) => dev.id === m.dv)) {
+    const recipient = await users.findOne({ ul: rul }, { projection: { devices: 1 } });
+    const recipientDevice = recipient?.devices.find((dev) => dev.id === m.dv);
+    if (!recipient || !recipientDevice) {
       return ack(false, 'unknown_recipient');
     }
 
@@ -56,6 +58,23 @@ export function createHandlers({ users, redis, pub, config, messages }) {
     }
 
     await pub.publish(devKey(rul, m.dv), JSON.stringify({ type: 'msg', id: doc.mid, ts: doc.ts.getTime(), env }));
+
+    // Phase 1 notifications: push ONLY when the recipient device is offline
+    // (no live WS). Blind payload — event type, nothing else. Never push to
+    // the sender's own device (self-chat echo arrives via its live WS anyway).
+    if (recipientDevice.push && m.d !== auth.d) {
+      const online = await redis.exists(presenceKey(rul, m.dv));
+      if (!online) {
+        const outcome = await sendBlindPush(config, recipientDevice.push, 'msg');
+        if (outcome === 'gone') {
+          // Push service says subscription is dead: clear it, nothing else.
+          await users.updateOne(
+            { ul: rul, 'devices.id': m.dv, 'devices.push.endpoint': recipientDevice.push.endpoint },
+            { $unset: { 'devices.$.push': '' } },
+          );
+        }
+      }
+    }
     return ack(true);
   }
 

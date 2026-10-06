@@ -32,6 +32,12 @@ export const config = {
   trustProxy: parseTrustProxy(env.TRUST_PROXY),
 
   mongoUrl: env.MONGO_URL ?? 'mongodb://127.0.0.1:27017/cocono-chat',
+
+  // Web Push (Phase 1, blind notifications). Generate keys once:
+  //   node -e "console.log(require('web-push').generateVAPIDKeys())"
+  vapidPublicKey: env.VAPID_PUBLIC_KEY ?? '',
+  vapidPrivateKey: env.VAPID_PRIVATE_KEY ?? '',
+  vapidSubject: env.VAPID_SUBJECT ?? 'mailto:unknown',
   redisUrl: env.REDIS_URL ?? 'redis://127.0.0.1:6379/0',
 
   // Native TLS: when BOTH paths are set the server speaks https/wss directly
