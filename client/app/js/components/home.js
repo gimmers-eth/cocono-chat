@@ -205,7 +205,7 @@ export function createHome({ client, chat, onLogout }) {
     });
 
     // Detach another device (lost phone, old laptop) from this account.
-    $('device-list').addEventListener('click', (e) => {
+    $('device-list').addEventListener('click', async (e) => {
       const deviceId = e.target.closest('[data-remove-device]')?.dataset.removeDevice;
       if (!deviceId) return;
       const ok = await confirmModal({
