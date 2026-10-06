@@ -94,6 +94,24 @@ export function messagesWith(peer) {
   return withStore('readonly', (s) => s.index('byPeer').getAll(IDBKeyRange.only(peer)));
 }
 
+// Local-only delete (this device): peers and the user's other devices keep
+// their copies by design. store.delete() accepts a key OR a range, so the
+// per-peer clear is one request in one transaction.
+export function deleteMessage(id) {
+  return withStore('readwrite', (s) => s.delete(id));
+}
+
+export function clearMessages(peer) {
+  return withStore('readwrite', (s) => s.delete(IDBKeyRange.only(String(peer).toLowerCase())));
+}
+
+// Usernames known ON THIS DEVICE (peers we hold messages with). No server
+// contact — this is what the UI surfaces as "local users".
+export async function knownPeers() {
+  const all = await allMessages();
+  return [...new Set(all.map((m) => String(m.peer).toLowerCase()))].sort();
+}
+
 export function allMessages() {
   return withStore('readonly', (s) => s.getAll());
 }

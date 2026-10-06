@@ -35,7 +35,7 @@ import { createClient } from 'redis';
 import fastifyWebsocket from '@fastify/websocket';
 import { verifyJwt } from '../../lib/jwt.js';
 import { MAX_FRAME_BYTES, sendJson } from './protocol.js';
-import { presenceKey } from '../../lib/push.js';
+import { presenceKey, pushSentPattern } from '../../lib/push.js';
 import { createHandlers } from './handlers.js';
 
 export default async function wsRoutes(app, { users, redis, config, messages }) {
@@ -111,6 +111,14 @@ export default async function wsRoutes(app, { users, redis, config, messages }) 
     local.set(key, socket);
     socket.isAlive = true;
     await redis.set(presenceKey(ul, dv), '1', { EX: config.wsHeartbeatSec + 10 });
+    // The device is back: any queued backlog is being delivered over this
+    // socket RIGHT NOW, so every 'recently pushed' gate for it is spent —
+    // drop them so the NEXT offline message notifies immediately instead of
+    // silently landing inside a stale coalescing window.
+    try {
+      const gates = await redis.keys(pushSentPattern(ul, dv));
+      if (gates?.length) await redis.del(gates);
+    } catch { /* best-effort: keys also expire on their own */ }
     socket.on('pong', () => {
       socket.isAlive = true;
     });

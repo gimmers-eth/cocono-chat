@@ -102,6 +102,7 @@
                maxlength="64" spellcheck="false" autocomplete="off" />
         <button id="btn-new-chat" class="btn btn-accent">Chat</button>
       </div>
+      <ul id="chat-peer-suggestions" class="peer-list" hidden></ul>
 
       <p id="home-status" class="status side-status" role="status"></p>
 
@@ -128,6 +129,7 @@
             <span id="chat-peer" class="chat-peer-name"></span>
             <span id="chat-sub" class="muted small"></span>
           </div>
+          <button id="btn-chat-menu" class="icon-btn chat-menu-btn" title="Chat options" aria-haspopup="true">⋮</button>
         </header>
         <ul id="chat-messages" class="messages"></ul>
         <footer class="composer">
@@ -204,6 +206,56 @@
     <p id="confirm-body" class="muted"></p>
     <div class="row-actions">
       <button id="btn-confirm-ok" class="btn btn-primary"></button>
+    </div>
+  </section>
+
+  <!-- Message modal (tap a bubble): the full message in a scrollable area,
+       actions FIXED underneath (copy / forward / delete-local). -->
+  <div id="msg-overlay" class="overlay" hidden></div>
+  <section id="msg-modal" class="diag-modal" role="dialog" aria-modal="true" aria-labelledby="msg-modal-title" hidden>
+    <header class="drawer-head">
+      <h2 id="msg-modal-title">Message</h2>
+      <button id="btn-msg-close" class="icon-btn" title="Close">✕</button>
+    </header>
+    <p id="msg-modal-time" class="muted small"></p>
+    <div id="msg-modal-text" class="msg-modal-text" tabindex="0"></div>
+    <p id="msg-modal-status" class="status" role="status"></p>
+    <div class="row-actions msg-modal-actions">
+      <button id="btn-msg-copy" class="btn btn-small">📋 Copy</button>
+      <button id="btn-msg-fwd" class="btn btn-small">➦ Forward</button>
+      <button id="btn-msg-del" class="btn btn-small btn-danger">🗑 Delete</button>
+    </div>
+  </section>
+
+  <!-- Chat options modal (header ⋮). Report/block will join Clear here. -->
+  <div id="chatopts-overlay" class="overlay" hidden></div>
+  <section id="chatopts-modal" class="diag-modal" role="dialog" aria-modal="true" aria-labelledby="chatopts-title" hidden>
+    <header class="drawer-head">
+      <h2 id="chatopts-title">Chat options</h2>
+      <button id="btn-chatopts-close" class="icon-btn" title="Close">✕</button>
+    </header>
+    <div class="row-actions msg-modal-actions">
+      <button id="btn-chat-clear" class="btn btn-danger btn-block">🗑 Clear messages in this chat</button>
+    </div>
+  </section>
+
+  <!-- Forward dialog: plaintext preview of the message being forwarded.
+       Sends the SAME text to another peer through the normal E2EE path. -->
+  <div id="forward-overlay" class="overlay" hidden></div>
+  <section id="forward-modal" class="diag-modal" role="dialog" aria-modal="true" aria-labelledby="forward-title" hidden>
+    <header class="drawer-head">
+      <h2 id="forward-title">Forward message</h2>
+      <button id="btn-forward-cancel" class="icon-btn" title="Cancel">✕</button>
+    </header>
+    <p id="forward-preview" class="msg-modal-text"></p>
+    <label class="field">
+      <input id="forward-username" type="text" placeholder="Send to username" maxlength="64"
+             spellcheck="false" autocomplete="off" />
+    </label>
+    <ul id="forward-peers" class="peer-list" hidden></ul>
+    <div class="row-actions">
+      <button id="btn-forward-send" class="btn btn-primary">Send</button>
+      <span id="forward-status" class="status" role="status"></span>
     </div>
   </section>
 

@@ -112,7 +112,7 @@ info   = "cocono-conv-v1|" + sorted([ "<senderUl>:<senderDv>", "<peerUl>:<peerDv
 key    = HKDF-SHA256( salt = ∅, ikm = shared, info = info, len = 32 )
 ```
 
-Notes (`fe/js/crypto.js`, mirrored in `be/test/messaging.test.js`):
+Notes (`client/src/crypto.js`, mirrored in `be/test/messaging.test.js`):
 
 - The info string sorts the `ul:deviceId` identifiers, so both endpoints derive
   the same key without coordinating who is "a" and who is "b".
@@ -143,7 +143,7 @@ ws://127.0.0.1:3000/ws?token=<JWT>        # wss:// in production (nginx TLS)
   automatically.
 - Incoming frames are capped at 64 KB (`4413 frame too large` closes the
   connection).
-- FE reconnect policy (`fe/js/ws.js`): exponential backoff `min(1000·2^n, 30 s)`
+- FE reconnect policy (`client/src/transport.js`): exponential backoff `min(1000·2^n, 30 s)`
   + up to 1 s jitter, plus immediate reconnect on `visibilitychange → visible`
   and `navigator.onLine`.
 
@@ -180,7 +180,7 @@ never trusted for ordering.
 }
 ```
 
-Building `h` (client side, `fe/js/components/chat.js` + `crypto.js`):
+Building `h` (client side, `client/src/client.js` + `crypto.js`):
 
 ```javascript
 const m = { d, u: 'bobby', dv: bobDevice.d, f: 'alice', fd: myDeviceId, cid, t };
@@ -274,7 +274,7 @@ the message as outgoing.
 ### 2.7 Multi-device delivery
 
 Delivery is per **device**, not per account. Concretely, when Alice (on device
-`A1`) sends "hi" to Bob who has devices `B1` and `B2` (`fe/js/components/chat.js`):
+`A1`) sends "hi" to Bob who has devices `B1` and `B2` (`client/src/client.js`):
 
 ```javascript
 for (const dev of peer.devices) {                      // [B1, B2]

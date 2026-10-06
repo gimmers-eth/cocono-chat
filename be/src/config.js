@@ -38,6 +38,15 @@ export const config = {
   vapidPublicKey: env.VAPID_PUBLIC_KEY ?? '',
   vapidPrivateKey: env.VAPID_PRIVATE_KEY ?? '',
   vapidSubject: env.VAPID_SUBJECT ?? 'mailto:unknown',
+  // Push coalescing: a device that is offline (app closed) gets AT MOST ONE
+  // blind push per this window — the missed messages stay queued and the
+  // worker's peek reports '(+N more)'. Without it, every queued message
+  // becomes a push the push service replays as a burst when Chrome restarts.
+  pushCoalesceSec: numOf(env.PUSH_COALESCE_SEC, 90),
+  // Web Push TTL: how long the push service may keep an undelivered
+  // notification (web-push's own default is ~40 min). Bounds how stale the
+  // wake-up can be; the messages themselves live in our queue, not here.
+  pushTtlSec: numOf(env.PUSH_TTL_SEC, 6 * 3600),
   redisUrl: env.REDIS_URL ?? 'redis://127.0.0.1:6379/0',
 
   // Native TLS: when BOTH paths are set the server speaks https/wss directly

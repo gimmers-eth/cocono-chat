@@ -7,9 +7,11 @@ section links here.
 
 **Docs layout (since 2026-10-06):** every document lives in `docs/`
 (`DESIGN/QUESTIONS/ANSWERS/PROJECT_STATUS/CLIENT_SDK/MESSAGES/SIGNUP/
-BE_TECH/FE_LEGACY_TECH/THEMES`, audits in `docs/audits/`). Only
-`README.md` files stay beside code (root + `be/`, `client/`, `fe/`) and
-they point into `docs/`.
+BE_TECH/THEMES`, audits in `docs/audits/`). Only
+`README.md` files stay beside code (root + `be/`, `client/`) and
+they point into `docs/`. The legacy `fe/` PWA and its
+`FE_LEGACY_TECH.md` doc were **deleted 2026-10-06** — `client/app`
+is the only FE (audits mentioning `fe/` are historical).
 
 ## Milestones
 
@@ -56,11 +58,41 @@ they point into `docs/`.
   OPEN app silently deaf while push (fresh silent-login per event) kept
   working — "decodes when closed, not when open" — 4401/4403 are now
   permanent: token dropped, authFailed surfaced as a re-login prompt (3c6120d).
+- **Push coalescing (wake-up flood fix)**: Windows Chrome often defers
+  real-time delivery when fully closed — FCM queues the pushes and replays them as a
+  burst on next start (symptom: 'nothing while closed, many at once when
+  opened'). Layers: (1) Redis NX gate = one push per **(device,
+  conversation)** per `PUSH_COALESCE_SEC` (90) while offline — messages in
+  OTHER chats still notify, and a device reconnect (backlog delivered over
+  the live WS) **clears all its gates**, so the next offline message always
+  notifies. (An over-aggressive per-device gate that never reset on
+  reconnect caused a 'notifications mostly missing' regression — fixed by
+  design, not tuning.); (2) `TTL` (`PUSH_TTL_SEC`, 6 h) + RFC 8030
+  per-conversation **`Topic`** (hashed sender — cleartext usernames never
+  reach the push service) so the push service collapses backlog per chat;
+  (3) the worker batches a replayed burst (2 s window → one login, one peek,
+  one notification with '+N more'); (4) in-app banners treat messages within
+  3 s of WS 'open' as catch-up (list + dots cover them, no pill storm).
 - **Offline shell**: network-first SW caching of statics; app boots offline
   into read-only mode from IndexedDB (login failure w/ network error enters
   the app); online event promotes to live session.
 - **Versioning**: `/api/app-info` returns name + VAPID + git sha (30s TTL);
   sidebar footer badge; diagnostics compare page vs server build.
+- **Message actions (local, modal-based)**: tapping/clicking a bubble opens a
+  **message modal** — full text in a scrollable area, actions fixed underneath:
+  📋 Copy (clipboard w/ execCommand fallback), ➦ Forward (dialog, sends the
+  plaintext via the normal E2EE path) and 🗑 Delete (this device only).
+  Username inputs (forward dialog AND sidebar 'New chat') surface **local
+  users** — message-store peers via `store.knownPeers()` — in suggestion lists
+  (`components/peers.js`) that filter while typing; tapping one forwards /
+  opens directly. No server contact.
+  Header ⋮ opens a **chat-options modal** with **Clear messages** (whole
+  conversation, this device only, confirm-guarded); report/block will join
+  there later. Modals (not dropdown/focus classes) on purpose: an early
+  in-bubble actions design was killed by the click-triggered catchUp
+  re-render wiping the focus state mid-gesture — overlay DOM survives
+  render(). Store: `deleteMessage(id)` + `clearMessages(peer)` in
+  `client/app/js/store.js`.
 - **Storage scoping**: per-account IndexedDB (identity records keyed
   `identity:<ul>` + `current` pointer; `cocono-app:<ul>` message DB), no
   cross-account bleed; 'remove account' wipes local data.

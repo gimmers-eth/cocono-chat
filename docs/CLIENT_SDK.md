@@ -174,7 +174,7 @@ N acks + up to N delivered receipts (N = recipient device count). Dedupe by
 **`localId`**, never by `cid`/`mid`:
 
 ```js
-const store = new Map();                       // or IndexedDB, see fe/js/db.js
+const store = new Map();                       // or IndexedDB, see client/src/storage.js
 const { localId } = await client.sendMessage(peer, text);
 store.set(localId, { text, state: 'sending' });
 

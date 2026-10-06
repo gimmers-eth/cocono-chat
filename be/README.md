@@ -2,8 +2,8 @@
 
 Node.js backend for cocono-chat: a Fastify REST API backed by MongoDB (long-term
 persistence) and Redis (nonces, rate limiting; pub/sub fan-out comes with messaging).
-It also serves the front end (`fe/`) as static files, so the whole app runs from one
-origin.
+It also serves the front end (from `client/app`, with the SDK at `/sdk/`) as static
+files, so the whole app runs from one origin.
 
 Current milestone scope: **accounts** — signup, passwordless challenge-response login,
 JWT-authenticated REST. WebSockets and messaging arrive in later milestones.

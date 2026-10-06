@@ -34,8 +34,7 @@ pnpm monorepo:
 | Path | Description | Docs |
 | ---- | ----------- | ---- |
 | `be/` | Node.js backend — Fastify REST API, MongoDB, Redis; serves the FE as static files | [README](./be/README.md) · [Technical](./docs/BE_TECH.md) · [OpenAPI](./be/openapi.yaml) |
-| `fe/` | Legacy PWA (kept for reference; no longer served) | [README](./fe/README.md) · [Technical](./docs/FE_LEGACY_TECH.md) |
-| `client/` | `@cocono/client` — event-driven JS SDK (register, login, pairing, E2EE messaging) **+ the new themeable FE** in `client/app` (WhatsApp-style, responsive, served at `/` with the SDK mounted at `/sdk/`) | [README](./client/README.md) · [SDK docs](./docs/CLIENT_SDK.md) · [Themes](./docs/THEMES.md) |
+| `client/` | `@cocono/client` — event-driven JS SDK (register, login, pairing, E2EE messaging) **+ the themeable FE** in `client/app` (WhatsApp-style, responsive, served at `/` with the SDK mounted at `/sdk/`) | [README](./client/README.md) · [SDK docs](./docs/CLIENT_SDK.md) · [Themes](./docs/THEMES.md) |
 
 ## Quickstart
 

@@ -2,9 +2,19 @@
 // through the SDK; this component only moves between store <-> DOM. Renders
 // are atomic (DocumentFragment + replaceChildren) so concurrent events can
 // never interleave a clear/append and double-paint bubbles.
+//
+// Message interactions are MODAL-BASED on purpose: tapping a bubble opens a
+// message modal (scrollable text + fixed actions), and the header ⋮ opens a
+// chat-options modal. Modal state lives in overlay DOM that render() never
+// touches — unlike the earlier "focus class on a bubble" attempt, which the
+// click-triggered catchUp re-render wiped within the same gesture.
 
-import { $, setStatus, setChatOpen, fmtTime } from '../ui.js';
-import { saveMessage, updateMessage, messagesWith, markRead, allMessages } from '../store.js';
+import { $, setStatus, setChatOpen, fmtTime, confirmModal } from '../ui.js';
+import { createPeerSuggestions } from './peers.js';
+import {
+  saveMessage, updateMessage, messagesWith, markRead, allMessages,
+  getMessage, deleteMessage, clearMessages,
+} from '../store.js';
 
 // In-app banner (visible-but-other-chat) + OS notification (app hidden or
 // unfocused) for LIVE messages. Push covers closed-app devices server-side;
@@ -41,7 +51,10 @@ export function createChat({ client, onHomeRefresh }) {
     // survived), ask the server to replay our still-retained copies.
     // Dedup is inherent: message ids are server-assigned mids.
     let resynced = false;
+    let lastOpenAt = 0; // banner-suppression anchor: the drain right after
+    // 'open' is CATCH-UP (queued backlog), not live arrivals — no per-message pills
     client.on('state', async ({ state }) => {
+      if (state === 'open') lastOpenAt = Date.now();
       if (state !== 'open' || resynced) return;
       resynced = true;
       if ((await allMessages()).length === 0) client.requestResync();
@@ -65,9 +78,12 @@ export function createChat({ client, onHomeRefresh }) {
       // Focused app: in-app pill (unless this very chat is open). NOT
       // focused: stay quiet — presence was opted out the moment we blurred,
       // so the SERVER push is the OS notification now (single source, and
-      // it works even when the page's JS is frozen).
+      // it works even when the page's JS is frozen). Messages landing in
+      // the first seconds after 'open' are the drained queue: the list and
+      // unread dots cover them — pill only the tail that arrives 'live'.
       const viewingThis = currentPeer && currentPeer.toLowerCase() === m.peer.toLowerCase();
-      if (windowActive() && !viewingThis) {
+      const catchUp = Date.now() - lastOpenAt < 3000;
+      if (windowActive() && !viewingThis && !catchUp) {
         const snippet = (m.text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
         showBanner(`@${m.peer}: ${snippet || '(message)'}`, m.peer);
       }
@@ -136,6 +152,7 @@ export function createChat({ client, onHomeRefresh }) {
     for (const m of msgs) {
       const li = document.createElement('li');
       li.className = `msg ${m.dir}`;
+      li.dataset.id = m.id; // tap -> openMsgModal (delegated listener)
       const body = document.createElement('span');
       body.textContent = m.text;
       const meta = document.createElement('span');
@@ -147,6 +164,138 @@ export function createChat({ client, onHomeRefresh }) {
     list.replaceChildren(frag);
     list.scrollTop = list.scrollHeight;
     return msgs[msgs.length - 1]; // newest displayed message, for the read marker
+  }
+
+  // --- message modal (tap a bubble): readable scrollable text + fixed actions ---
+
+  let msgId = null; // message currently shown in the modal
+
+  function openMsgModal(rec) {
+    msgId = rec.id;
+    $('msg-modal-title').textContent = rec.dir === 'out' ? 'Sent message' : 'Message';
+    $('msg-modal-time').textContent = `@${rec.peer} · ${new Date(rec.ts).toLocaleString()}`;
+    const textEl = $('msg-modal-text');
+    textEl.textContent = rec.text;
+    textEl.scrollTop = 0;
+    setStatus($('msg-modal-status'), '');
+    $('msg-overlay').hidden = false;
+    $('msg-modal').hidden = false;
+    $('btn-msg-close').focus?.();
+  }
+
+  function msgModalOpen() {
+    return !$('msg-modal').hidden;
+  }
+
+  function closeMsgModal() {
+    msgId = null;
+    $('msg-overlay').hidden = true;
+    $('msg-modal').hidden = true;
+  }
+
+  async function copyMessageText() {
+    const text = $('msg-modal-text').textContent ?? '';
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(text); // standard path (secure context)
+      ok = true;
+    } catch {
+      // Fallback (denied / older engine): off-screen textarea + execCommand.
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.className = 'copy-helper';
+      document.body.appendChild(ta);
+      ta.select();
+      try { ok = document.execCommand('copy'); } catch { ok = false; }
+      ta.remove();
+    }
+    setStatus(
+      $('msg-modal-status'),
+      ok ? 'Copied ✓' : 'Copy failed — select the text and copy manually.',
+      !ok,
+    );
+  }
+
+  async function deleteCurrentMsg() {
+    if (!msgId) return;
+    await deleteMessage(msgId);
+    closeMsgModal();
+    await render();
+    onHomeRefresh?.();
+  }
+
+  function forwardCurrentMsg() {
+    if (!msgId) return;
+    const id = msgId; // capture BEFORE close: closeMsgModal() nulls the state
+    const text = $('msg-modal-text').textContent ?? '';
+    closeMsgModal();
+    openForward(id, text);
+  }
+
+  // --- chat-options modal (header ⋮): clear chat today; report/block land
+  //     here later. Modal (not dropdown) so it survives any re-render and
+  //     needs no outside-click machinery. ---
+
+  function openChatOpts() {
+    if (!currentPeer) return;
+    $('chatopts-title').textContent = `Chat options — @${currentPeer}`;
+    $('chatopts-overlay').hidden = false;
+    $('chatopts-modal').hidden = false;
+    $('btn-chatopts-close').focus?.();
+  }
+
+  function closeChatOpts() {
+    $('chatopts-overlay').hidden = true;
+    $('chatopts-modal').hidden = true;
+  }
+
+  // --- forward dialog ---
+
+  let forwardId = null;
+  const forwardSuggestions = createPeerSuggestions($('forward-peers'));
+
+  async function openForward(id, text) {
+    forwardId = id;
+    $('forward-preview').textContent = text;
+    setStatus($('forward-status'), '');
+    $('forward-username').value = '';
+    $('forward-overlay').hidden = false;
+    $('forward-modal').hidden = false;
+    await forwardSuggestions.refresh(); // local users, filtered as you type
+    $('forward-username').focus?.();
+  }
+
+  function closeForward() {
+    forwardId = null;
+    $('forward-overlay').hidden = true;
+    $('forward-modal').hidden = true;
+  }
+
+  function forwardOpen() {
+    return !$('forward-modal').hidden;
+  }
+
+  async function sendForward(targetArg) {
+    const status = $('forward-status');
+    const target = String(targetArg ?? $('forward-username').value).trim().toLowerCase();
+    if (!target) { setStatus(status, 'Enter a username to forward to.', true); return; }
+    const rec = forwardId && (await getMessage(forwardId));
+    if (!rec) { closeForward(); return; }
+    const btn = $('btn-forward-send');
+    btn.disabled = true;
+    try {
+      const { localId } = await client.sendMessage(target, rec.text);
+      await saveMessage({ id: `out:${localId}`, peer: target, dir: 'out', text: rec.text, ts: Date.now(), state: 'sending' });
+      closeForward();
+      setStatus($('chat-status'), `Forwarded to @${target}`);
+      onHomeRefresh?.();
+      if (currentPeer === target) await render();
+    } catch (err) {
+      setStatus(status, err.message ?? String(err), true);
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   // --- opening ---
@@ -199,12 +348,66 @@ export function createChat({ client, onHomeRefresh }) {
       setChatOpen(false);
       $('chat-view').hidden = true;
       $('chat-empty').hidden = false;
+      closeMsgModal();
+      closeChatOpts();
+      closeForward();
       onHomeRefresh?.();
     };
     $('btn-chat-back').addEventListener('click', closeChatPane);
-    // Escape closes the open conversation (desktop "close" gesture).
+    // Escape: dismiss the top-most layer first (forward > message > options
+    // > conversation). Desktop "close" gesture otherwise.
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && document.body.classList.contains('chat-open')) closeChatPane();
+      if (e.key !== 'Escape') return;
+      if (forwardOpen()) { closeForward(); return; }
+      if (msgModalOpen()) { closeMsgModal(); return; }
+      if (!$('chatopts-modal').hidden) { closeChatOpts(); return; }
+      if (document.body.classList.contains('chat-open')) closeChatPane();
+    });
+
+    // Tap/click a bubble -> message modal (delegated: bubbles re-render
+    // atomically, so the listener lives on the list itself).
+    $('chat-messages').addEventListener('click', (e) => {
+      const li = e.target.closest('li.msg');
+      if (!li) return;
+      getMessage(li.dataset.id).then((rec) => {
+        if (rec && rec.id === li.dataset.id) openMsgModal(rec);
+      });
+    });
+
+    // Message modal controls.
+    $('btn-msg-close').addEventListener('click', closeMsgModal);
+    $('msg-overlay').addEventListener('click', closeMsgModal);
+    $('btn-msg-copy').addEventListener('click', copyMessageText);
+    $('btn-msg-fwd').addEventListener('click', forwardCurrentMsg);
+    $('btn-msg-del').addEventListener('click', deleteCurrentMsg);
+
+    // Chat options modal.
+    $('btn-chat-menu').addEventListener('click', openChatOpts);
+    $('btn-chatopts-close').addEventListener('click', closeChatOpts);
+    $('chatopts-overlay').addEventListener('click', closeChatOpts);
+    $('btn-chat-clear').addEventListener('click', async () => {
+      closeChatOpts();
+      if (!currentPeer) return;
+      const ok = await confirmModal({
+        title: 'Clear messages',
+        body: `Delete all messages with @${currentPeer} on this device? Other devices and the other user keep their copies.`,
+        okLabel: 'Clear', danger: true,
+      });
+      if (!ok || !currentPeer) return;
+      await clearMessages(currentPeer);
+      await render();
+      onHomeRefresh?.();
+    });
+
+    // Forward dialog. NB: reference forwardCurrentMsg/sendForward at CALL
+    // time (not wire time) — a const binding defined further down the
+    // closure would sit in the TDZ and throw during boot.
+    forwardSuggestions.wireInput($('forward-username'), (p) => sendForward(p));
+    $('btn-forward-cancel').addEventListener('click', closeForward);
+    $('forward-overlay').addEventListener('click', closeForward);
+    $('btn-forward-send').addEventListener('click', () => sendForward());
+    $('forward-username').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') sendForward();
     });
 
     // Catch up on attention: when the window becomes visible/focused (or the

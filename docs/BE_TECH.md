@@ -153,7 +153,7 @@ Body `{ u, p, x, a, d, t, s }`:
   replayable
 
 Canonical JSON (sorted keys, no whitespace) is implemented identically in
-`src/lib/canon.js` and `fe/js/util.js` — they must stay in sync.
+`src/lib/canon.js` and `client/src/encoding.js` — they must stay in sync.
 
 Node has no raw Ed25519 import, so keys are imported via JWK
 (`{ kty: 'OKP', crv: 'Ed25519', x: <b64u> }`).

@@ -404,4 +404,5 @@ Monorepo managed with pnpm workspaces:
 - `be/` — Node.js backend (Fastify REST API; also serves the FE as static files).
   `pnpm dev` runs a persistent mongodb-memory-server (data in `be/.data/`) plus the
   server with auto-reload; `pnpm test` runs unit + integration tests (node:test).
-- `fe/` — the PWA (plain JS ES modules, no build step).
+- `client/` — `@cocono/client` JS SDK (plain JS ES modules, no build step) plus the
+  themeable PWA FE in `client/app` (served by the backend at `/`).

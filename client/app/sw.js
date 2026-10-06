@@ -122,48 +122,65 @@ async function upgradeContent() {
 // iOS). Every path ends with >=1 notification, so Chrome's "upgraded in
 // the background" consolation toast can never trigger either.
 const UP_BUDGET_MS = 8000;
+// Chrome replays the pushes queued while the browser/app was closed as a
+// burst of near-simultaneous events. Collapse the burst: wait briefly, then
+// do ONE silent login + ONE peek (its '+N more' counts the rest) and show
+// ONE notification — instead of N of each.
+const MSG_COALESCE_MS = 2000;
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+
+let msgBatch = null; // in-flight burst task (promise), or null
+
+async function showMsgNotification() {
+  let shown = false;
+  const showOnce = async (titleText, body) => {
+    if (shown) return;
+    shown = true;
+    await showNotification(titleText, body, 'msg');
+  };
+  const generic = () => showOnce(cachedTitle, 'You have new messages');
+
+  const upgrade = (async () => {
+    const rich = await upgradeContent();
+    if (!rich) { await generic(); return; } // queue raced empty: cover it
+    try { cachedTitle = await appTitle(); } catch { /* keep cache */ }
+    const snippet = (rich.text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    const more = rich.extra > 0 ? ` (+${rich.extra} more)` : '';
+    pendingPeerTag = rich.peer;
+    await showOnce(cachedTitle, `@${rich.peer}: ${snippet || '(message)'}${more}`);
+  })().catch(async (err) => {
+    const why = String(err?.message ?? err).slice(0, 160);
+    console.warn('[sw] enrich failed:', why);
+    reportSwFailure(why);
+    await generic();
+  });
+
+  // budget: if the peek stalls (no network, suspended radio), the generic
+  // covers; a rich result arriving after that is SUPPRESSED by the latch —
+  // one banner, always.
+  await Promise.race([upgrade, sleep(UP_BUDGET_MS).then(generic)]);
+  await upgrade.catch(() => {});
+}
 
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { /* blind */ }
   const type = data.t || 'activity';
 
-  event.waitUntil((async () => {
-    let shown = false;
-    const showOnce = async (titleText, body) => {
-      if (shown) return;
-      shown = true;
-      await showNotification(titleText, body, type);
-    };
-    const generic = () => showOnce(
-      cachedTitle,
-      type === 'msg' ? 'You have a new message' : 'New activity — open to see',
-    );
+  if (type !== 'msg') {
+    event.waitUntil(showNotification(cachedTitle, 'New activity — open to see', type));
+    return;
+  }
 
-    if (type !== 'msg') { await generic(); return; }
-
-    const upgrade = (async () => {
-      const rich = await upgradeContent();
-      if (!rich) { await generic(); return; } // queue raced empty: cover it
-      try { cachedTitle = await appTitle(); } catch { /* keep cache */ }
-      const snippet = (rich.text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
-      const more = rich.extra > 0 ? ` (+${rich.extra} more)` : '';
-      pendingPeerTag = rich.peer;
-      await showOnce(cachedTitle, `@${rich.peer}: ${snippet || '(message)'}${more}`);
-    })().catch(async (err) => {
-      const why = String(err?.message ?? err).slice(0, 160);
-      console.warn('[sw] enrich failed:', why);
-      reportSwFailure(why);
-      await generic();
-    });
-
-    // budget: if the peek stalls (no network, suspended radio), the generic
-    // covers at 8s; a rich result arriving after that is SUPPRESSED by the
-    // latch — one banner, always.
-    await Promise.race([upgrade, sleep(UP_BUDGET_MS).then(generic)]);
-    await upgrade.catch(() => {});
-  })());
+  // All events of the burst await the SAME task (joiner's waitUntil is
+  // satisfied by the leader's notification); later pushes get a new batch.
+  if (!msgBatch) {
+    msgBatch = (async () => {
+      await sleep(MSG_COALESCE_MS); // absorb the replayed burst
+      await showMsgNotification();
+    })().finally(() => { msgBatch = null; });
+  }
+  event.waitUntil(msgBatch);
 });
 
 self.addEventListener('notificationclick', (event) => {

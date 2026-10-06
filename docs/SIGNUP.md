@@ -102,7 +102,7 @@ Conventions that apply to every signed payload:
 - **Canonical JSON** — keys sorted lexicographically, no whitespace. The object
   signed at signup/enroll is `canonical({ a, d, p, t, u, x })` →
   `{"a":…,"d":…,"p":…,"t":…,"u":…,"x":…}`. Implemented identically in
-  `be/src/lib/canon.js` and `fe/js/util.js`.
+  `be/src/lib/canon.js` and `client/src/encoding.js`.
 - **Freshness + replay**: `t` is checked against server time, and the signature
   `s` itself is de-duplicated in Redis (`sigseen:<sha256(s)>`, TTL = 2× the
   freshness window) — a captured payload can be neither re-sent late nor
@@ -121,7 +121,7 @@ Storage (MongoDB `users` collection, per account):
 
 ### 2.2 Device-side key generation (WebCrypto)
 
-From `fe/js/crypto.js` / `fe/js/components/auth.js`:
+From the client SDK (`client/src/crypto.js`, used by `client.js` register/enroll):
 
 ```javascript
 const keyPair = await crypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify']); // private key non-exportable

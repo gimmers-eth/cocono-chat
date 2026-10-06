@@ -1,6 +1,5 @@
 // Chat WebSocket transport: connect, auto-reconnect (exponential backoff +
-// jitter), browser-visibility kick, and event emission. Mirrors the strategy
-// in fe/js/ws.js but exposes events instead of callbacks.
+// jitter), browser-visibility kick, and event emission.
 
 import { Emitter } from './emitter.js';
 

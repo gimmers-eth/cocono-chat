@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { rateLimit } from '../../lib/rateLimit.js';
 import { verifyEnvelope } from './envelope.js';
 import { devKey, sendJson, PENDING_BATCH } from './protocol.js';
-import { sendBlindPush, presenceKey } from '../../lib/push.js';
+import { sendBlindPush, presenceKey, pushSentKey } from '../../lib/push.js';
 
 export function createHandlers({ users, redis, pub, config, messages }) {
   async function handleSend(socket, request, body, auth) {
@@ -71,14 +71,24 @@ export function createHandlers({ users, redis, pub, config, messages }) {
         const online = await redis.exists(presenceKey(rul, m.dv));
         if (online) request.log.info(`[push] skip ${rul}/${m.dv.slice(0, 8)}: device online (live WS)`);
         if (!online) {
-          const outcome = await sendBlindPush(config, recipientDevice.push, 'msg');
-          request.log.info(`[push] ${rul}/${m.dv.slice(0, 8)} -> ${outcome}`);
-          if (outcome === 'gone') {
-            // Push service says subscription is dead: clear it, nothing else.
-            await users.updateOne(
-              { ul: rul, 'devices.id': m.dv, 'devices.push.endpoint': recipientDevice.push.endpoint },
-              { $unset: { 'devices.$.push': '' } },
-            );
+          // Coalesce PER CONVERSATION: while a push for this (device, sender)
+          // is recent, that sender's backlog is covered by the notification
+          // already shown (the worker's peek counts '+N more'). Other chats
+          // and the device's next connect (which clears the gates) still
+          // notify — this keeps every genuine new event one push away.
+          const fresh = await redis.set(pushSentKey(rul, m.dv, auth.ul), '1', { NX: true, EX: config.pushCoalesceSec });
+          if (!fresh) {
+            request.log.info(`[push] coalesce ${rul}/${m.dv.slice(0, 8)} from ${auth.ul} (within ${config.pushCoalesceSec}s)`);
+          } else {
+            const outcome = await sendBlindPush(config, recipientDevice.push, 'msg', auth.ul);
+            request.log.info(`[push] ${rul}/${m.dv.slice(0, 8)} -> ${outcome}`);
+            if (outcome === 'gone') {
+              // Push service says subscription is dead: clear it, nothing else.
+              await users.updateOne(
+                { ul: rul, 'devices.id': m.dv, 'devices.push.endpoint': recipientDevice.push.endpoint },
+                { $unset: { 'devices.$.push': '' } },
+              );
+            }
           }
         }
       } catch (err) {
