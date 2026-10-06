@@ -11,6 +11,7 @@ import { createHome } from './components/home.js';
 import { createChat } from './components/chat.js';
 import { setScope } from './store.js';
 import { mountDiagnostics } from './diag.js';
+import { initInstallAndNotify } from './install.js';
 
 // Debug console logging: flip localStorage.setItem('cocono.debug','1') or use
 // ?debug=1 before load.
@@ -96,6 +97,7 @@ async function showAuth() {
 startSingleTabGuard();
 await initTheme(); // dark fallback already linked in index.html
 mountDiagnostics({ client });
+initInstallAndNotify({ client });
 
 // Branding: the admin-configurable app name (see /api/app-info) fills every
 // [data-app-name] slot and the document title. The baked-in defaults keep

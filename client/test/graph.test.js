@@ -47,6 +47,7 @@ test('FE/SDK: every relative import resolves', () => {
         target = path.join(ROOT, 'src', spec.slice('/sdk/'.length));
       } else if (spec.startsWith('/')) {
         target = path.join(ROOT, 'app', spec.slice(1)); // app-root absolute
+
       } else if (spec.startsWith('.')) {
         target = path.resolve(path.dirname(file), spec);
       } else {

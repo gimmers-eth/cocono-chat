@@ -4,6 +4,7 @@
 
 import { $, setStatus, fmtTime, confirmModal } from '../ui.js';
 import { allMessages, isUnread } from '../store.js';
+import { refreshSettingsUI } from '../install.js';
 import { loadRegistry, applyTheme, savedTheme, wireThemeSelect } from '../theme.js';
 
 const MSG_STATE_MARK = { sending: '⏳', sent: '✓', delivered: '✓✓', failed: '!' };
@@ -17,6 +18,7 @@ export function createHome({ client, chat, onLogout }) {
     $('drawer-overlay').hidden = false;
     $('settings-drawer').hidden = false;
     renderDevices();
+    refreshSettingsUI();
     wireThemePicker();
     $('btn-settings-close').focus?.();
   }

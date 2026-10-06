@@ -317,3 +317,13 @@ body[data-view="blocked"] .page-footer { display: none; }
 .btn-danger { background: var(--danger); border-color: var(--danger); color: #14161a; }
 .btn-danger:hover:not(:disabled) { filter: brightness(1.1); }
 #confirm-body { margin: .4rem 0 .8rem; line-height: 1.45; }
+
+/* Install nudge (auth card, default-visible) + settings rows */
+.install-hint {
+  display: flex; gap: .6rem; align-items: center; justify-content: space-between;
+  border: 1px solid var(--accent); border-radius: 12px;
+  padding: .6rem .8rem; margin-bottom: .9rem; font-size: .9rem;
+}
+.install-hint em { font-style: normal; font-weight: 600; }
+.ih-actions { display: flex; gap: .5rem; align-items: center; flex-shrink: 0; }
+.switch-row { display: flex; gap: .6rem; align-items: center; cursor: pointer; }

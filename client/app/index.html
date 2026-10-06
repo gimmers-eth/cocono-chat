@@ -8,6 +8,8 @@
   <link rel="manifest" href="/manifest.webmanifest" />
   <!-- base.css: structure + default tokens. The theme stylesheet (loaded by
        js/theme.js) overrides the CSS custom properties per theme. -->
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
   <link rel="stylesheet" href="/css/base.css" />
   <link rel="stylesheet" id="theme-link" href="/themes/dark/theme.css" />
 </head>
@@ -19,6 +21,21 @@
         <div class="logo" aria-hidden="true">◍</div>
         <h1 data-app-name>co.co.no</h1>
         <p class="muted">Passwordless · End-to-end encrypted</p>
+      </div>
+
+      <!-- Install nudge: default UI, visible whenever this browser can act
+           on it (native prompt, or the iOS recipe needed for push). -->
+      <div id="install-hint" class="install-hint" hidden>
+        <div class="ih-text">
+          <strong>Install <span data-app-name>co.co.no</span></strong>
+          <span class="install-native"> for one-tap access and OS notifications for new messages.</span>
+          <span class="install-ios"> — tap <em>Share → Add to Home Screen</em> to enable OS notifications (iPhone requires the installed app).</span>
+          <span class="install-soft"> for one-tap access and OS notifications — choose “Install” in your browser menu.</span>
+        </div>
+        <div class="ih-actions">
+          <button id="btn-install" class="btn btn-small btn-primary" hidden>Install</button>
+          <button id="btn-install-dismiss" class="linkish" title="Not now">Not now</button>
+        </div>
       </div>
 
       <section id="auth-login" hidden>
@@ -148,6 +165,19 @@
 
       <h3>Appearance</h3>
       <select id="theme-select" class="select" aria-label="Theme"></select>
+
+      <h3>App</h3>
+      <div class="row-actions">
+        <button id="btn-install-drawer" class="btn btn-small" hidden>Install app</button>
+        <span id="install-state" class="muted small"></span>
+      </div>
+
+      <h3>Notifications</h3>
+      <label class="switch-row">
+        <input id="notify-toggle" type="checkbox" />
+        <span>Push notifications on this device</span>
+      </label>
+      <p id="notify-hint" class="muted small"></p>
 
       <h3>Diagnostics</h3>
       <button id="btn-diag-send-drawer" class="btn btn-small">Send diagnostics</button>
