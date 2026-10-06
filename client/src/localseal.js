@@ -1,6 +1,8 @@
-// Local-wrap seal (identity format 4) — the fallback for WebKit browsers that
-// can neither persist CryptoKey HANDLES (format 2 breaks on iOS reload) nor
-// evaluate WebAuthn PRF (so format 3 is impossible).
+// Local-wrap seal (identity format 4) — for WebKit browsers (iOS) that
+// cannot persist CryptoKey HANDLES (format 2 breaks on reload). The earlier
+// format-3 passkey-PRF scheme was retired: devices lacking PRF littered the
+// OS vault with dead credentials, and where the OS already authenticates the
+// user the marginal protection over this scheme is small.
 //
 // The identity bytes are AES-GCM encrypted under a key derived via HKDF from
 // the record's PUBLIC identifiers. Be clear about what that is: domain
@@ -10,9 +12,7 @@
 // is the iOS per-app data encryption behind the device passcode. The crucial
 // property: everything stored is PLAIN BYTES, which iOS persists correctly —
 // unlike CryptoKey handles, which it corrupts on reload.
-//
-// When passkey PRF becomes available (Apple shipped WebAuthn PRF support in
-// later releases), format 3 is attempted first and this path never runs.
+
 
 import { b64uEncode, b64uDecode, utf8 } from './encoding.js';
 import * as c from './crypto.js';

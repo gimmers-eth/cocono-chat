@@ -128,13 +128,11 @@ try {
       setStatus($('auth-status'), 'Recovered the stored identity after a lost pointer.');
     }
   }
-  if (identity && identity.format !== 3) {
+  if (identity) {
     // Silent resume: challenge/response with the stored (non-extractable) keys.
     await client.login();
     await enterApp();
   } else {
-    // No identity, or a passkey-sealed one: unsealing needs a user gesture,
-    // so show the auth view (“Unlock with passkey” button).
     await showAuth();
   }
 } catch (err) {

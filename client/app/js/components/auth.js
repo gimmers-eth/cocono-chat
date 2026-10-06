@@ -21,13 +21,7 @@ export function createAuth({ client, onLoggedIn }) {
     els.waiting.hidden = true;
     $('btn-show-pair').hidden = Boolean(identity);
     $('btn-show-signup').hidden = Boolean(identity);
-    // Passkey-sealed identities need an explicit tap to unlock (WebAuthn
-    // requires a user gesture); label the button accordingly.
-    if (identity) {
-      els.btnLogin.textContent = identity.format === 3
-        ? 'Unlock with passkey'
-        : `Log in as @${identity.username.toLowerCase()}`;
-    }
+    if (identity) els.btnLogin.textContent = `Log in as @${identity.username.toLowerCase()}`;
     setStatus(els.status, '');
     renderAccounts();
   }
@@ -111,7 +105,6 @@ export function createAuth({ client, onLoggedIn }) {
         if (username.length < 5) throw new Error('Username must be at least 5 characters.');
         setStatus(els.status, 'Creating account and keys on this device…');
         const res = await client.register(username);
-        await explainKeyStorage(res.keyStorage);
         await onLoggedIn(res);
       }),
     );
@@ -142,7 +135,6 @@ export function createAuth({ client, onLoggedIn }) {
 
         // Resolves once an existing device approves the code.
         const res = await client.completePairing({ pollIntervalMs: 2000 });
-        await explainKeyStorage(res.keyStorage);
         await onLoggedIn(res);
       }).catch(() => {}),
     );
@@ -180,24 +172,6 @@ export function createAuth({ client, onLoggedIn }) {
   // KEEPING the session so a confirmed removal can detach this device on the
   // server right away. count=null => account unreachable (deleted
   // server-side: a local zombie record). Caller must logOutRestore regardless.
-  // With passkey sealing OFF (the default) browser storage is the intended
-  // outcome — stay silent. When the user opted in (Settings → Passkey
-  // protection) and the device could not honour PRF, be explicit: including
-  // the one unused vault entry the attempt may have left behind.
-  async function explainKeyStorage(keyStorage) {
-    if (keyStorage === 'passkey') return;
-    const wanted = localStorage.getItem('cocono.passkeyPref') === '1';
-    if (!wanted) return;
-    await confirmModal({
-      title: 'Passkey not available on this device',
-      body: 'You enabled passkey sealing, but this device did not provide WebAuthn PRF, '
-        + `so keys were stored as "${keyStorage}" instead. A passkey entry may have been `
-        + 'created that will never be used — delete it in your system password settings if '
-        + 'present, or turn the option off in Settings to stop being asked.',
-      okLabel: 'Got it',
-    });
-  }
-
   async function probeAccount(username) {
     const accounts = await client.storedAccounts();
     const prev = accounts.find((a) => a.current)?.username ?? null;

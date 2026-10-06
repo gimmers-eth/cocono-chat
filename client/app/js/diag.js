@@ -5,7 +5,6 @@
 // report their condition, visibly and on purpose.
 
 import { $ } from './ui.js';
-import { passkeyStatus, passkeyTrace } from '/sdk/index.js';
 
 const idb = (req) =>
   new Promise((resolve, reject) => {
@@ -55,8 +54,6 @@ export async function collectDiagnostics() {
   lines.push(`--- ${new Date().toISOString()} ---`);
   lines.push(`origin: ${location.origin}`);
   lines.push(`ua: ${trunc(navigator.userAgent)}`);
-  await attempt('passkeys', passkeyStatus);
-  await attempt('passkey-trace', async () => `\n${passkeyTrace()}`);
   await attempt('indexeddb', async () => {
     const dbs = indexedDB.databases ? await indexedDB.databases() : [];
     return dbs.length

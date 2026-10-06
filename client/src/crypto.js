@@ -1,9 +1,9 @@
 // All WebCrypto used by the SDK. Requires a secure context (https/localhost)
 // in browsers; Node >= 22.9 exposes crypto.subtle with Ed25519 + X25519.
 // Private keys are non-extractable at runtime. They are persisted either as
-// CryptoKey handles (legacy, unreliable on iOS WebKit) or — when a passkey is
-// available — as PKCS8 bytes sealed under a passkey-derived key (passkey.js);
-// the raw bytes only ever exist transiently between generate/export/wrap and
+// CryptoKey handles (fine on most engines, unreliable on iOS WebKit) or, on
+// iOS, as PKCS8 bytes sealed under a device-derived key (localseal.js); the
+// raw bytes only ever exist transiently between generate/export/wrap and
 // unwrap/import, always in memory.
 
 import { b64uEncode, b64uDecode, utf8 } from './encoding.js';
@@ -26,7 +26,7 @@ export async function exportRawX25519(key) {
   return b64uEncode(new Uint8Array(raw));
 }
 
-// --- PKCS8 export/import for passkey sealing (see passkey.js) ---
+// --- PKCS8 export/import for key sealing (see localseal.js) ---
 
 export async function exportPkcs8b64u(privateKey) {
   return b64uEncode(new Uint8Array(await crypto.subtle.exportKey('pkcs8', privateKey)));
