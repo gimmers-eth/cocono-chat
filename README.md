@@ -5,8 +5,8 @@ run on any system.
 
 Messages are end-to-end encrypted: every conversation has its own AES key (WhatsApp-style),
 accounts have no passwords — ownership is proven with Ed25519 keys that never leave the
-device. See [DESIGN.md](./DESIGN.md) for the full design (resolved via
-[QUESTIONS.md](./QUESTIONS.md) / [ANSWERS.md](./ANSWERS.md)).
+device. See [docs/DESIGN.md](./docs/DESIGN.md) for the full design (resolved via
+[docs/QUESTIONS.md](./docs/QUESTIONS.md) / [docs/ANSWERS.md](./docs/ANSWERS.md)).
 
 ## Status
 
@@ -33,9 +33,9 @@ pnpm monorepo:
 
 | Path | Description | Docs |
 | ---- | ----------- | ---- |
-| `be/` | Node.js backend — Fastify REST API, MongoDB, Redis; serves the FE as static files | [README](./be/README.md) · [Technical](./be/README_TECH.md) · [OpenAPI](./be/openapi.yaml) |
-| `fe/` | Legacy PWA (kept for reference; no longer served) | [README](./fe/README.md) · [Technical](./fe/README_TECH.md) |
-| `client/` | `@cocono/client` — event-driven JS SDK (register, login, pairing, E2EE messaging) **+ the new themeable FE** in `client/app` (WhatsApp-style, responsive, served at `/` with the SDK mounted at `/sdk/`) | [README](./client/README.md) · [SDK docs](./docs/CLIENT_SDK.md) · [Themes](./client/app/themes/README.md) |
+| `be/` | Node.js backend — Fastify REST API, MongoDB, Redis; serves the FE as static files | [README](./be/README.md) · [Technical](./docs/BE_TECH.md) · [OpenAPI](./be/openapi.yaml) |
+| `fe/` | Legacy PWA (kept for reference; no longer served) | [README](./fe/README.md) · [Technical](./docs/FE_LEGACY_TECH.md) |
+| `client/` | `@cocono/client` — event-driven JS SDK (register, login, pairing, E2EE messaging) **+ the new themeable FE** in `client/app` (WhatsApp-style, responsive, served at `/` with the SDK mounted at `/sdk/`) | [README](./client/README.md) · [SDK docs](./docs/CLIENT_SDK.md) · [Themes](./docs/THEMES.md) |
 
 ## Quickstart
 
@@ -74,10 +74,11 @@ example and adjust when needed.
 ## Documentation
 
 - [docs/PROJECT_STATUS.md](./docs/PROJECT_STATUS.md) — current state, security notes, ops, next steps (read first)
-- [DESIGN.md](./DESIGN.md) — architecture, encryption model, delivery, milestones
+- [docs/DESIGN.md](./docs/DESIGN.md) — architecture, encryption model, delivery, milestones
 - [docs/CLIENT_SDK.md](./docs/CLIENT_SDK.md) — client SDK: usage, events, pairing, storage, logging
-- [client/app/themes/README.md](./client/app/themes/README.md) — bootstrapping FE themes
+- [docs/THEMES.md](./docs/THEMES.md) — bootstrapping FE themes
 - [docs/SIGNUP.md](./docs/SIGNUP.md) — signup, passwordless login and multi-device pairing (with API examples)
 - [docs/MESSAGES.md](./docs/MESSAGES.md) — message sending & delivery: online, offline, multi-device (with protocol examples)
-- [QUESTIONS.md](./QUESTIONS.md) / [ANSWERS.md](./ANSWERS.md) — design decisions log
+- [docs/QUESTIONS.md](./docs/QUESTIONS.md) / [docs/ANSWERS.md](./docs/ANSWERS.md) — design decisions log
+- [docs/audits/](./docs/audits/) — security audit reports + fix verification
 - [be/openapi.yaml](./be/openapi.yaml) — REST API specification

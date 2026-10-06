@@ -5,6 +5,12 @@ known-broken or deliberately unsafe, and what's next. Keep this file current whe
 milestones, security posture, or ops change. The [README](../README.md) Status
 section links here.
 
+**Docs layout (since 2026-10-06):** every document lives in `docs/`
+(`DESIGN/QUESTIONS/ANSWERS/PROJECT_STATUS/CLIENT_SDK/MESSAGES/SIGNUP/
+BE_TECH/FE_LEGACY_TECH/THEMES`, audits in `docs/audits/`). Only
+`README.md` files stay beside code (root + `be/`, `client/`, `fe/`) and
+they point into `docs/`.
+
 ## Milestones
 
 | # | Milestone | State |

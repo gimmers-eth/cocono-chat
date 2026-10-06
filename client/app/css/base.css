@@ -2,7 +2,7 @@
    cocono-chat — structural stylesheet.
    Never hard-codes colors: everything visual comes from the theme tokens
    below (defaults = Dark). A theme file (themes/<id>/theme.css) overrides
-   these custom properties; see themes/README.md.
+   these custom properties; see docs/THEMES.md.
    ========================================================================== */
 
 :root {

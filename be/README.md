@@ -9,7 +9,7 @@ Current milestone scope: **accounts** — signup, passwordless challenge-respons
 JWT-authenticated REST. WebSockets and messaging arrive in later milestones.
 
 For internals (storage schema, crypto, auth flow details), see
-[README_TECH.md](./README_TECH.md). The REST API contract is specified in
+[docs/BE_TECH.md](../docs/BE_TECH.md). The REST API contract is specified in
 [openapi.yaml](./openapi.yaml).
 
 ## Running

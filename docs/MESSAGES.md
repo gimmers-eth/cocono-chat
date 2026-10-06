@@ -5,7 +5,7 @@ and across multiple devices. Overview first, then the wire protocol, envelope
 format and API/frame examples.
 
 Related: [SIGNUP.md](./SIGNUP.md) (accounts, keys, devices) ·
-[DESIGN.md](../DESIGN.md) · [be/README_TECH.md](../be/README_TECH.md)
+[DESIGN.md](./DESIGN.md) · [BE_TECH.md](./BE_TECH.md)
 
 ---
 
@@ -308,7 +308,7 @@ Resulting guarantees (asserted in `be/test/multidev-repro.test.js`):
 ### 2.8 Retention & cleanup
 
 - Copies are deleted on confirmed pull (see §2.6).
-- **Planned, not yet implemented** (tracked in `be/README_TECH.md` roadmap):
+- **Planned, not yet implemented** (tracked in `docs/BE_TECH.md` roadmap):
   undelivered-message sweep (delete copies older than X days), and removal of
   non-main devices inactive ≥14 days together with their pending messages
   (DESIGN.md rule).

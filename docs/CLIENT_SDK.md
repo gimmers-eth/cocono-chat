@@ -14,7 +14,7 @@ to the API directly.
   `IdbStorage` (browser IndexedDB) or your own adapter.
 - **Console logging is off by default**, toggled with one option.
 
-Protocol background: [../DESIGN.md](../DESIGN.md),
+Protocol background: [DESIGN.md](./DESIGN.md),
 [SIGNUP.md](./SIGNUP.md), [MESSAGES.md](./MESSAGES.md),
 [be/openapi.yaml](../be/openapi.yaml).
 

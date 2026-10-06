@@ -4,8 +4,8 @@ How accounts are created, how users log in, and how additional devices join an
 account. Covers the high-level flow first, then the technical details with API
 call examples.
 
-Related: [DESIGN.md](../DESIGN.md) · [be/openapi.yaml](../be/openapi.yaml) ·
-[be/README_TECH.md](../be/README_TECH.md)
+Related: [DESIGN.md](./DESIGN.md) · [be/openapi.yaml](../be/openapi.yaml) ·
+[BE_TECH.md](./BE_TECH.md)
 
 ---
 

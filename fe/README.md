@@ -8,7 +8,7 @@ device) and log in without a password by proving possession of the device's priv
 Messaging arrives in later milestones.
 
 For internals (crypto model, IndexedDB layout, module map), see
-[README_TECH.md](./README_TECH.md).
+[docs/FE_LEGACY_TECH.md](../docs/FE_LEGACY_TECH.md).
 
 ## Running
 
