@@ -234,7 +234,7 @@ export function createAuth({ client, onLoggedIn }) {
         await client.detachCurrentDevice();
       } catch (err) {
         setStatus(els.status, `Removed locally, but the server detach failed: ${err?.message ?? err} `
-          + '— the device stays listed until removed from another device's Settings.');
+          + '\u2014 the device stays listed until removed from another device\u2019s Settings.');
       }
     }
     await client.removeStoredAccount(removeName);

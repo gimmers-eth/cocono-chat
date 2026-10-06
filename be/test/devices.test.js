@@ -413,7 +413,7 @@ test('device removal: another device can detach a lost phone, queues swept', asy
       method: 'DELETE', url: `/api/devices/${dSecond}`, headers: { authorization: `Bearer ${tokenMain}` },
     });
     assert.equal(res.statusCode, 200);
-    assert.deepEqual(res.json(), { removed: dSecond, devices: 1, orphaned: false });
+    assert.deepEqual(res.json(), { removed: dSecond, devices: 1 });
     assert.equal(await mongo.db.collection('messages').countDocuments({ 'to.dv': dSecond }), 0);
 
     // Removed device's token is dead (bearer hook re-checks membership).
@@ -427,7 +427,7 @@ test('device removal: another device can detach a lost phone, queues swept', asy
   }
 });
 
-test('device removal: last device leaves the account orphaned but reserved', async () => {
+test('device removal: detaching the LAST device deletes the account outright', async () => {
   const { app, mongo, teardown } = await setupApp(LIMITS);
   const users = mongo.db.collection('users');
   try {
@@ -441,31 +441,18 @@ test('device removal: last device leaves the account orphaned but reserved', asy
       method: 'DELETE', url: `/api/devices/${d1}`, headers: { authorization: `Bearer ${token}` },
     });
     assert.equal(res.statusCode, 200);
-    assert.equal(res.json().orphaned, true);
+    assert.equal(res.json().accountDeleted, true);
+    assert.equal(res.json().devices, 0);
 
-    // Doc survives with no devices; the username stays taken.
-    const doc = await users.findOne({ ul: u });
-    assert.ok(doc);
-    assert.equal(doc.devices.length, 0);
-    const dup = await signupUser(app, makeClient(), u, 'device-other-99');
-    assert.equal(dup.statusCode, 409);
+    // No orphans: doc gone, queues swept, username released for re-registration.
+    assert.equal(await users.findOne({ ul: u }), null);
+    assert.equal(await mongo.db.collection('messages').countDocuments({}), 0);
+    const re = await signupUser(app, makeClient(), u, 'device-fresh-001');
+    assert.equal(re.statusCode, 201, 'username free again');
 
-    // The detached device's own token is dead immediately (the bearer hook
-    // re-checks device membership; this request carried the removed id).
-    const selfAgain = await app.inject({
-      method: 'DELETE', url: `/api/devices/${d1}`, headers: { authorization: `Bearer ${token}` },
-    });
-    assert.equal(selfAgain.statusCode, 401);
-
-    // No path back in: verify for the orphan's detached device fails.
-    const { n } = (await app.inject({
-      method: 'POST', url: '/api/auth/challenge', payload: { u, d: d1 },
-    })).json();
-    const ve = await app.inject({
-      method: 'POST', url: '/api/auth/verify',
-      payload: { u, d: d1, n, s: c1.signBytes(Buffer.from(n, 'utf8')) },
-    });
-    assert.equal(ve.statusCode, 401); // bad_signature: device no longer on file
+    // The old JWT is dead (account gone -> membership re-check).
+    const me = await app.inject({ method: 'GET', url: '/api/me', headers: { authorization: `Bearer ${token}` } });
+    assert.equal(me.statusCode, 401);
   } finally {
     await teardown();
   }

@@ -195,11 +195,9 @@ export default async function deviceRoutes(app, { users, redis, config, messages
 
   // DELETE /api/devices/:deviceId — detach one device from the account.
   // Callable by any signed-in device, INCLUDING the device itself ("remove
-  // this browser" on the login screen). Removing the LAST device is allowed:
-  // the account doc stays (username reserved), becomes inaccessible
-  // ('orphaned' in the admin panel) — and unrecoverable, since pairing
-  // needs an existing device to approve. Queued copies for the device are
-  // dropped; other devices' queues are untouched.
+  // this browser" on the login screen). Removing the LAST device deletes the
+  // account outright (doc, queues, Redis state) — no orphan rows, and the
+  // username becomes free again.
   app.delete('/api/devices/:deviceId', async (request, reply) => {
     const denied = requireAuth(request, reply);
     if (denied) return denied;

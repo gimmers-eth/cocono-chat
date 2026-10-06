@@ -126,13 +126,9 @@ test('admin device removal cascades: detaching the last device deletes the accou
     assert.equal(res.statusCode, 200);
     const body = res.json();
     assert.equal(body.devices, 0);
-    assert.equal(body.orphaned, true);
-
+    assert.equal(body.accountDeleted, true);
     // No orphan rows are kept: the account doc is gone and the username frees up.
     assert.equal(await users.findOne({ ul: 'alice' }), null);
-    // Bearer tokens die with the account (device-membership re-check).
-    const me = await admin.inject({ method: 'GET', url: '/api/me' });
-    void me; // app-side assertion lives in devices.test; admin panel just lists no user
   } finally {
     await teardown();
   }
