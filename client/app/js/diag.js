@@ -65,6 +65,14 @@ export async function collectDiagnostics() {
     const keys = Object.keys(localStorage).filter((k) => k.startsWith('cocono'));
     return keys.length ? keys.join(', ') : 'no cocono keys';
   });
+  await attempt('sw-log', () => {
+    const raw = localStorage.getItem('cocono.swlog');
+    if (!raw || raw === '[]') return 'no service-worker failures logged';
+    const arr = JSON.parse(raw);
+    return '\n' + arr.slice(-6)
+      .map((e) => `${e.ts.slice(11, 19)} ${e.kind}: ${e.msg}`)
+      .join('\n');
+  });
   await attempt('storage', async () => {
     const est = await navigator.storage.estimate();
     const persisted = navigator.storage.persisted ? await navigator.storage.persisted() : 'n/a';
