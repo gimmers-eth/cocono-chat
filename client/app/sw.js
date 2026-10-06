@@ -9,11 +9,11 @@
 //    still receives the messages normally when opened.
 //    WebKit forbids dynamic import()/modules in service workers, so the
 //    crypto/login/WS machinery lives in /sw-lib.js, a CLASSIC script loaded
-//    lazily via importScripts() inside handlers (never at evaluation time —
-//    a failed load must not break the worker itself). Every failure is
-//    surfaced three ways: the notification body, a localStorage ring buffer
-//    ('cocono.swlog', read by Settings -> Send diagnostics), and a POST to
-//    /api/diagnostics tagged [sw-preview-failure].
+//    via importScripts() at evaluation time (the only legal place), guarded.
+//    Every failure is surfaced three ways: the notification body, an
+//    IndexedDB ring buffer (workers have NO localStorage — that ReferenceError
+//    once silently ate every notification), and a POST to /api/diagnostics
+//    tagged [sw-preview-failure]. Settings -> Send diagnostics ships the ring.
 //
 // 2) OFFLINE APP SHELL. Network-first for navigations, static assets and
 //    sw-lib.js; cache fallback when offline. API traffic and the dynamic
@@ -25,25 +25,6 @@ const ENRICH_BUDGET_MS = 9000;
 const SETTLE_MS = 1500;
 
 self.addEventListener('install', () => self.skipWaiting());
-
-// any uncaught worker error -> diagnostics ring (page-side Send picks it up)
-self.addEventListener('error', (e) => {
-  try {
-    const arr = JSON.parse(localStorage.getItem('cocono.swlog') || '[]');
-    arr.push({ ts: new Date().toISOString(), kind: 'workererror', msg: `${e.message} @${e.filename ?? '?'}:${e.lineno ?? 0}`.slice(0, 240) });
-    while (arr.length > 25) arr.shift();
-    localStorage.setItem('cocono.swlog', JSON.stringify(arr));
-  } catch { /* best effort */ }
-});
-
-self.addEventListener('activate', (event) => {
-  event.waitUntil((async () => {
-    for (const key of await caches.keys()) {
-      if (key.startsWith('cocono-shell-') && key !== SHELL_CACHE) await caches.delete(key);
-    }
-    await self.clients.claim();
-  })());
-});
 
 // importScripts is only legal during script evaluation / the install event —
 // NOT lazily from handlers ("past installing state"). Load the classic lib
@@ -59,6 +40,31 @@ function swLib() {
   return self.SwLib;
 }
 
+// any uncaught worker error -> diagnostics ring via the classic lib (IDB:
+// workers have NO localStorage — that ReferenceError once ate every push)
+self.addEventListener('error', (e) => {
+  try {
+    swLib().swLog('workererror', `${e.message} @${e.filename ?? '?'}:${e.lineno ?? 0}`);
+  } catch { /* lib not loaded — nothing available to log with */ }
+});
+
+// In-memory title cache (zero-await requirement for the generic
+// notification); refreshed from IndexedDB in the background, and the page
+// writes the fresh value there on every boot.
+let cachedTitle = FALLBACK_TITLE;
+try {
+  swLib().kvGet('apptitle').then((t) => { if (t) cachedTitle = t; }).catch(() => {});
+} catch { /* lib absent: notifications fall back to FALLBACK_TITLE */ }
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil((async () => {
+    for (const key of await caches.keys()) {
+      if (key.startsWith('cocono-shell-') && key !== SHELL_CACHE) await caches.delete(key);
+    }
+    await self.clients.claim();
+  })());
+});
+
 async function showNotification(titleText, body, type) {
   await self.registration.showNotification(titleText, {
     body,
@@ -71,7 +77,11 @@ async function showNotification(titleText, body, type) {
 async function appTitle() {
   try {
     const res = await fetch('/api/app-info');
-    if (res.ok) return (await res.json()).name || FALLBACK_TITLE;
+    if (res.ok) {
+      const name = (await res.json()).name || FALLBACK_TITLE;
+      swLib().kvSet('apptitle', name);
+      return name;
+    }
   } catch { /* offline etc. */ }
   return FALLBACK_TITLE;
 }
@@ -105,12 +115,16 @@ self.addEventListener('push', (event) => {
   const type = data.t || 'activity';
 
   // Generic notification FIRST, synchronously: Chrome shows "this site has
-  // been upgraded in the background" whenever the handler dies before any
-  // showNotification — so nothing may sit in front of it (no fetches, no
-  // awaits). The app name comes from localStorage (page keeps it fresh).
-  const name = localStorage.getItem('cocono.apptitle') || FALLBACK_TITLE;
+  // been upgraded in the background" whenever the push handler dies before
+  // any showNotification — so nothing may sit in front of it: no fetches, no
+  // awaits, and no localStorage (workers have none — the ReferenceError ate
+  // every notification until this line changed). Title = in-memory cache.
+  const name = cachedTitle;
   event.waitUntil((async () => {
     await showNotification(name, type === 'msg' ? 'You have a new message' : 'New activity — open to see', type);
+    // keep the zero-await cache fresh for the next push (non-blocking style:
+    // awaited here, but AFTER the notification is already shown)
+    try { cachedTitle = await appTitle(); } catch { /* keep cache */ }
     if (type !== 'msg') return;
     try {
       const rich = await withBudget(upgradeContent(), ENRICH_BUDGET_MS);

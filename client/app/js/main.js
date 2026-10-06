@@ -12,6 +12,7 @@ import { createChat } from './components/chat.js';
 import { setScope } from './store.js';
 import { mountDiagnostics } from './diag.js';
 import { initInstallAndNotify } from './install.js';
+import { putAppTitle } from './swkv.js';
 
 // Debug console logging: flip localStorage.setItem('cocono.debug','1') or use
 // ?debug=1 before load.
@@ -136,7 +137,7 @@ fetch('/api/app-info')
   .then((info) => {
     if (!info?.name) return;
     document.title = info.name;
-    localStorage.setItem('cocono.apptitle', info.name); // service worker uses it synchronously
+    putAppTitle(info.name); // feeds the service worker's zero-await notifications (IDB, not localStorage)
     for (const el of document.querySelectorAll('[data-app-name]')) el.textContent = info.name;
     if (info.version) {
       localStorage.setItem('cocono.appversion', info.version); // what THIS page was served by

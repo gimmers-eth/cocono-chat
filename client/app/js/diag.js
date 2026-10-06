@@ -5,6 +5,7 @@
 // report their condition, visibly and on purpose.
 
 import { $ } from './ui.js';
+import { readSwLog } from './swkv.js';
 
 const idb = (req) =>
   new Promise((resolve, reject) => {
@@ -74,12 +75,11 @@ export async function collectDiagnostics() {
     } catch { /* offline */ }
     return `page ${cached} / server ${live}${cached === live ? '' : '  <-- MISMATCH (stale bundle?)'}`;
   });
-  await attempt('sw-log', () => {
-    const raw = localStorage.getItem('cocono.swlog');
-    if (!raw || raw === '[]') return 'no service-worker failures logged';
-    const arr = JSON.parse(raw);
-    return '\n' + arr.slice(-6)
-      .map((e) => `${e.ts.slice(11, 19)} ${e.kind}: ${e.msg}`)
+  await attempt('sw-log', async () => {
+    const arr = await readSwLog(8);
+    if (!arr.length) return 'no service-worker events logged';
+    return '\n' + arr
+      .map((e) => `${new Date(e.at).toISOString().slice(11, 19)} ${e.kind}: ${e.msg}`)
       .join('\n');
   });
   await attempt('storage', async () => {

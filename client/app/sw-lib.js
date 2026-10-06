@@ -24,15 +24,62 @@ self.SwLib = (function () {
   }
   const utf8 = (s) => new TextEncoder().encode(s);
 
-  function swLog(kind, msg) {
-    try {
-      const arr = JSON.parse(localStorage.getItem('cocono.swlog') || '[]');
-      arr.push({ ts: new Date().toISOString(), kind, msg: String(msg).slice(0, 240) });
-      while (arr.length > 25) arr.shift();
-      localStorage.setItem('cocono.swlog', JSON.stringify(arr));
-    } catch { /* storage best-effort */ }
+  // --- diagnostics sink: worker context has NO localStorage (spec!) —
+  // everything persistent here goes through IndexedDB, shared with the page.
+  // DB 'cocono-sw': store 'log' (ring, cap 25, key {id}), store 'kv'. ---
+
+  const RING_CAP = 25;
+  function swDb() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open('cocono-sw', 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('log')) db.createObjectStore('log', { keyPath: 'id', autoIncrement: true });
+        if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
   }
-  const lastSwLog = () => localStorage.getItem('cocono.swlog') || '[]';
+
+  async function swLog(kind, msg) {
+    try {
+      const db = await swDb();
+      const tx = db.transaction('log', 'readwrite');
+      const store = tx.objectStore('log');
+      store.add({ at: Date.now(), kind, msg: String(msg).slice(0, 240) });
+      const keys = await new Promise((res, rej) => {
+        const r = store.getAllKeys();
+        r.onsuccess = () => res(r.result);
+        r.onerror = () => rej(r.error);
+      });
+      while (keys.length > RING_CAP) store.delete(keys.shift());
+      await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+      db.close();
+    } catch { /* diagnostics must never break the feature it observes */ }
+  }
+
+  async function kvSet(key, value) {
+    try {
+      const db = await swDb();
+      const tx = db.transaction('kv', 'readwrite');
+      tx.objectStore('kv').put(String(value), key);
+      db.close();
+    } catch { /* best effort */ }
+  }
+
+  async function kvGet(key) {
+    try {
+      const db = await swDb();
+      const val = await new Promise((res, rej) => {
+        const r = db.transaction('kv', 'readonly').objectStore('kv').get(key);
+        r.onsuccess = () => res(r.result);
+        r.onerror = () => rej(r.error);
+      });
+      db.close();
+      return val ?? null;
+    } catch { return null; }
+  }
 
   // --- identity (mirrors storage.js + client.js silent resume) ---
 
@@ -160,5 +207,5 @@ self.SwLib = (function () {
     });
   }
 
-  return { loadIdentity, login, peek, swLog, lastSwLog, b64uBytes, bytesB64u };
+  return { loadIdentity, login, peek, swLog, kvSet, kvGet, b64uBytes, bytesB64u };
 })();
