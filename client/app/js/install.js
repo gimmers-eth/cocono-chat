@@ -11,6 +11,7 @@
 import { $ } from './ui.js';
 
 const DISMISS_KEY = 'cocon…t';
+export const PASSKEY_PREF_KEY = 'cocono…ref';
 let deferred = null; // captured native prompt event, if the browser offers one
 let clientRef = null;
 
@@ -137,13 +138,33 @@ export function initInstallAndNotify({ client }) {
     }
   });
 
+  $('btn-passkey')?.addEventListener('click', () => {
+    const on = localStorage.getItem(PASSKEY_PREF_KEY) === '1';
+    if (on) localStorage.removeItem(PASSKEY_PREF_KEY);
+    else localStorage.setItem(PASSKEY_PREF_KEY, '1');
+    renderPasskey();
+  });
+
   renderHint();
   renderDrawer();
+  renderPasskey();
   renderNotify(client).catch(() => {});
+}
+
+function renderPasskey() {
+  const btn = $('btn-passkey');
+  const state = $('passkey-state');
+  if (!btn || !state) return;
+  const on = localStorage.getItem(PASSKEY_PREF_KEY) === '1';
+  btn.textContent = on ? 'Turn off' : 'Turn on';
+  state.textContent = on
+    ? 'On — new accounts/devices will be sealed with a passkey (your device must support WebAuthn PRF; if it does not, you will be told and the browser fallback used).'
+    : 'Off — keys are stored by the browser (or sealed locally on iPhone). Enable to opt into biometric-sealed keys where supported.';
 }
 
 /** Refresh drawer state each time the Settings drawer opens (called by home.js). */
 export function refreshSettingsUI() {
   renderDrawer({ open: true });
+  renderPasskey();
   if (clientRef) renderNotify(clientRef).catch(() => {});
 }

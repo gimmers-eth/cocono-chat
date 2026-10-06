@@ -22,6 +22,12 @@ const iosLike = () =>
   /iPhone|iPad|iPod/.test(navigator.userAgent) &&
   (navigator.maxTouchPoints ?? 0) > 0;
 
+// Settings-driven opt-in for passkey-PRF sealing (see #sealStrategy).
+const passkeyWanted = () => {
+  try { return globalThis.localStorage?.getItem('cocono.passkeyPref') === '1'; }
+  catch { return false; }
+};
+
 // Human-readable name of the storage mode a sealed/kept identity ended up in.
 const keyStorageMode = (sealed) =>
   (sealed ? (sealed.bundle.format === 3 ? 'passkey' : 'local-seal') : 'browser-handles');
@@ -133,11 +139,14 @@ export class CoconoClient extends Emitter {
     return identity;
   }
 
-  // Seal strategy chain: passkey-PRF (v3) -> local wrap bytes (v4, iOS only) ->
-  // handle storage (v2, only where handles demonstrably persist). Never a
-  // silent v2 on iOS — that is the "account dies on refresh" bug.
+  // Seal strategy chain — passkey sealing is OPT-IN (Settings -> Passkey):
+  // creating a passkey that PRF then rejects leaves a dead credential in the
+  // user's password vault, so we never gamble with it unasked. Default is
+  // local wrap bytes on iOS (v4), handle storage on desktop (v2) — both
+  // durable. With the preference ON: v3 when PRF truly works; on failure we
+  // still land on v4/v2 and the FE explains the one extra vault entry.
   async #sealStrategy(device) {
-    if (passkeyAvailable()) {
+    if (passkeyWanted() && passkeyAvailable()) {
       try {
         return await sealDevice(device.username, device);
       } catch (err) {
@@ -176,7 +185,7 @@ export class CoconoClient extends Emitter {
    */
   async register(username) {
     if (this.#identity) throw new CoconoError('This device already holds an identity — log out or use a fresh client.', 'identity_exists');
-    const canSeal = passkeyAvailable() || iosLike();
+    const canSeal = (passkeyWanted() && passkeyAvailable()) || iosLike();
     const device = await this.#generateDevicePayload(username, { extractable: canSeal });
     // Seal BEFORE touching the server: a failure here must not leave a
     // half-created account we cannot safely key.
@@ -387,7 +396,7 @@ export class CoconoClient extends Emitter {
     if (this.#identity || this.#pendingPairing) {
       throw new CoconoError('This device already holds or is pairing an identity.', 'identity_exists');
     }
-    const canSeal = passkeyAvailable() || iosLike();
+    const canSeal = (passkeyWanted() && passkeyAvailable()) || iosLike();
     const device = await this.#generateDevicePayload(username, { extractable: canSeal });
     const sealed = await this.#sealStrategy(device);
     const { code, enrollId, expiresInSec } = await this.api.enrollDevice(device.payload);
