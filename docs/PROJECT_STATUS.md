@@ -53,36 +53,103 @@ section links here.
   `identity:<ul>` + `current` pointer; `cocono-app:<ul>` message DB), no
   cross-account bleed; 'remove account' wipes local data.
 
-## Security posture — honest list
+## Security posture — target: PUBLIC app
 
-### Currently UNSAFE by design (dev-only)
-- **Open registration on a LAN-reachable host.** `HOST=0.0.0.0` + any
-  internet client can create accounts (rate-limited signup per IP only).
-  Before real use: registration allowlist / invite gate, or bind to LAN-only.
-- **Admin panel**: loopback-only (`127.0.0.1:3001`) + `ADMIN_TOKEN`, but no
-  HTTPS for admin (tunnel via SSH). Never expose `ADMIN_HOST` beyond loopback
-  without a TLS story.
+The end-state is a public, internet-facing messaging service. Controls below are
+**verified in code** (2026-10-06); gaps are graded P0 = must fix before public
+launch, P1 = strongly before/soon after, P2 = roadmap.
 
-### Known gaps / TODO
-- **No account recovery.** Losing all devices' local identities = account
-  gone (removing the last device now deletes it outright). Recovery kit +
-  server-side sealed key backup is the next security milestone; until then
-  every destructive flow (last-device removal, forget) is irreversible —
-  confirmed via danger modals.
-- **Trust-on-first-use only.** Peer key changes (re-created account, new
-  device) are surfaced as a pill (`peerIdentityChanged`), but there are no
-  safety numbers / explicit key confirmation yet.
-- **Push privacy**: payloads are blind + padded, but push *timing* leaks
-  message-arrival metadata to the push service (accepted trade-off).
-- **v2 desktop identities**: CryptoKey handle storage is robust on
-  Chrome/Firefox, but a WebKit desktop (Safari on macOS) can rot like iOS.
-  Consider forcing local-seal on all WebKit.
-- **MongoDB is single-instance, unauthenticated (loopback only).** Nightly
-  dumps exist; no replica/HA.
-- **Message retention**: pulled copies live ≤30 days server-side (E2EE
-  envelopes; metadata visible to server). Sender copy deletion is local-only.
-- VAPID subject/private key live in `be/.env` (0600, uncommitted) — rotate if
-  the box is ever shared.
+### Controls in place today (verified)
+- **Transport**: native TLS (Let's Encrypt via DNS-01, acme.sh auto-renew), HTTPS+WSS only;
+  Mongo + Redis bind loopback; admin binds loopback.
+- **CSP** on every response (`be/src/routes/shared.js`): `default-src 'self'`, no
+  `unsafe-inline` anywhere, `frame-ancestors 'none'`, `base-uri 'self'`; plus
+  `nosniff`, `referrer-policy: no-referrer`. Client code uses **no innerHTML**
+  (admin does — custom escaping, loopback-only surface).
+- **Auth model**: passwordless Ed25519 device signatures; signup/enroll payloads have
+  freshness windows + **signature replay dedup**; JWT bearer (24 h) re-validated on
+  every request **against the live device registry** → detaching a device or deleting
+  the account kills its tokens instantly; no cookies ⇒ no CSRF surface.
+- **E2EE**: per-device-pair conversation keys (X25519 → HKDF → AES-GCM); relay
+  envelopes carry an HMAC keyed with the sender's transport key → the server cannot
+  forge or replay into a recipient; push payloads are **blind + padded** (event type
+  only; content/usernames never cross FCM/APNs).
+- **Enumeration care**: auth challenge always returns a nonce (no existence oracle);
+  peer key lookup requires a JWT. (Signup *does* reveal taken usernames — inherent to
+  username systems, accepted.)
+- **Rate limiting** matrix across signup/challenge/verify/enroll/msg/userKeys/diag
+  (env-tunable, per-IP + per-account layers; live sizes in `be/src/config.js`).
+- **Logs redact** WS tokens and enrollment capability URLs.
+- **Storage isolation**: per-account IndexedDB + identity records; removal detaches
+  server-side and wipes local data; last-device removal deletes the account (no orphans).
+- **Admin**: token-gated (constant-time compare + failed-attempt throttle), scoped to
+  its own routes (percent-encoding bypass fixed), loopback-bound, message/redis state
+  cleanup on deletes, limiter registry + per-IP clear.
+- **Diagnostics**: size-capped, IP+account limited, 30-day TTL; SW failures self-report
+  for fleet debugging without devtools.
+
+### Threat sketch (who can see what)
+| Adversary | Gets |
+|---|---|
+| Server operator | **metadata** (who↔whom, timing, sizes, IPs, UAs, push endpoints, retained E2EE envelopes) — never plaintext |
+| Network MITM | nothing (TLS 1.3, valid cert) |
+| Push services (Google/Apple/Mozilla) | padded blind blob + timing |
+| XSS on our origin | that device\'s session incl. message store (v4\'s local wrap is **domain separation, not an XSS boundary**) ⇒ CSP strictness is load-bearing |
+| Stolen locked device | OS data protection (passcode); keys sealed on iOS |
+| Logged-in stolen device | full access by design — remote detach from another device is the mitigation |
+
+### P0 — blockers before public launch
+1. **Registration abuse gate.** 10 signups/h/IP only stops naive scripts; a public
+   app needs invite codes / CAPTCHA / proof-of-work — else: botnet squatting, storage
+   squatting, push spam.
+2. **Queue DoS (unbounded storage).** Never-pulled message copies are retained
+   **forever** (by design for store-and-forward): mass-register garbage accounts +
+   spam = unbounded Mongo growth. Fix: per-recipient queue caps + queue-age policy.
+3. **`TRUST_PROXY` before any CDN/proxy.** Without it every rate limiter and ban
+   collapses onto the CDN\'s single IP (the .env comment warns; now it bites). Decide
+   direct-expose vs Cloudflare and set hops accordingly.
+4. **HSTS** missing on the HTTPS origin (one header line; also consider preload later).
+5. **Backups + secrets.** No backup job exists yet (ops trio); when it lands,
+   `.env`/DB bundles (JWT secret, VAPID, ADMIN_TOKEN) must be **encrypted at rest**
+   (age/gpg) before leaving the box, with a restore drill.
+6. **Abuse tooling.** No contact **block/report** exists — a public messenger without
+   one is a support fire. (FE-side block = hide + drop-queued? needs small protocol
+   thought: unsolicited E2EE messages can\'t be server-filtered by content, but the
+   server CAN refuse delivery to a recipient who blocked a sender — cheap protocol add.)
+7. **Content policy surface**: username reserved-list exists; no profanity/hate
+   filter (E2EE ⇒ only usernames + metadata are policed; document it plainly).
+
+### P1 — strongly recommended
+- WS upgrade **origin allowlist** (defence-in-depth; tokens are the real gate).
+- **Mongo auth + Redis requirepass** even on loopback (one box-compromise away from
+  total leak); app creds per-purpose.
+- Dependency audit in CI (`pnpm audit`, Dependabot) — CI itself is still missing (ops trio).
+- Rate-limit rebaseline for internet scale + **per-device** msg caps (CGNAT/office
+  shared-IP false positives — verify-ip already bumped to 50 for that reason).
+- **Safety numbers / explicit key-change verification** (pill exists; verification UI
+  does not — TOFU-only today; `peerIdentityChanged` is the hook).
+- JWT: add rotation runbook (swap `JWT_SECRET` ⇒ all sessions drop; acceptable, document
+  it), later consider per-device key derivation of tokens.
+- Decide publicly-exposed metadata honestly: `/api/app-info` reveals build sha + VAPID
+  (harmless/useful); keep.
+
+### P2 — roadmap (security-adjacent)
+- Recovery kit + sealed key backup (fixes "lost device = lost account" AND gives an
+  audited recovery path instead of hostage UX).
+- Media (M4): encrypted thumbnails, size/quota policy, virus-scan-on-upload is
+  pointless pre-decryption — client-side only.
+- Groups (M5): sender-key distribution = biggest new attack surface; plan a review.
+- Key transparency-ish peer directory (make stale-key MITM detectable across devices).
+
+### Accepted today (dev/LAN only — revisit at launch)
+open registration · 24 h JWTs with no server-side session list (device registry IS the
+revocation) · unsigned-but-loopback DBs · admin without TLS · v2-handle rot risk on
+macOS Safari (v4 migration prompt pending) · push timing metadata.
+
+### Security-relevant test coverage (current)
+replay dedup · envelope HMAC/sender-mismatch/unknown-recipient · auth flow happy+evil
+(challenge indistinguishability) · device detach revocation (H4) · removal cascade
+· admin clear-by-ip sweeps · graph parse test (blocks shipped worker syntax bugs).
 
 ## Deployment & ops (the devbox: 192.168.1.84, user `mike`)
 
@@ -126,13 +193,13 @@ section links here.
 
 ## Next up (agreed order)
 
-1. **Ops trio — NOT DONE YET, despite how tidy the section above looks**:
+1. **Ops trio — NOT DONE YET**:
    `update.sh` (pull → install → test → restart), backup cron
    (hourly `mongodump`, daily repo bundle), GitHub Actions CI (Node 22 +
    redis, both suites). No build step exists (client is unbundled ES
    modules; there is no `dist/`).
-2. **Backup & recovery** milestone (recovery kit, sealed-key backup, maybe
-   safety numbers) — the biggest security hole.
+2. **Public-launch P0 list** (see Security posture): registration gate, queue
+   caps, TRUST_PROXY/CDN decision, HSTS, encrypted backups, block/report.
 3. M4 files/media (DESIGN.md sketch exists).
 4. M5 groups, then M7 subgroups/tags.
 5. Small backlog: registration invite gate, offline outbox (queue unsent

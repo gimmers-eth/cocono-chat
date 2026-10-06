@@ -22,9 +22,10 @@ MVP milestones, in order:
    notifications, offline app shell, iOS local-sealed keys)
 7. Subgroups / tags
 
-> **📋 Full working state — deployment, security posture, known gaps, ops,
-> and next steps: [docs/PROJECT_STATUS.md](./docs/PROJECT_STATUS.md).**
-> Read that first when picking this project back up.
+> **📋 Full working state — deployment, security posture (public-launch P0/P1/P2),
+> known gaps, ops, next steps: [docs/PROJECT_STATUS.md](./docs/PROJECT_STATUS.md).**
+> Read that first when picking this project back up. **Public launch blockers are
+> tracked there — do not expose this app to the internet with P0 items open.**
 
 ## Repository layout
 
