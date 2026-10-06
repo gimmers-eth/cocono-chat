@@ -13,11 +13,11 @@ device. See [DESIGN.md](./DESIGN.md) for the full design (resolved via
 MVP milestones, in order:
 
 1. **Accounts** — done
-2. Multi-device — next
-3. 1:1 messages (text)
+2. **Multi-device** — done (pairing codes, per-device detach, orphan-free removal)
+3. **1:1 messages (text)** — done (E2EE, store-and-forward, retention/resync)
 4. Files/media (images etc.)
 5. Groups (with offline delivery)
-6. PWA polish (push, offline)
+6. **PWA polish** — done (installable, rich + blind push, offline app shell)
 7. Subgroups / tags
 
 ## Repository layout

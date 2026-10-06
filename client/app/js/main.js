@@ -31,6 +31,21 @@ const auth = createAuth({ client, onLoggedIn: () => enterApp({ gesture: true }) 
 // Phase 1 push: service worker (registered eagerly; permission is only asked
 // for after a login click). iOS additionally requires the app to be added to
 // the Home Screen before push notifications can arrive at all.
+// Offline affordance: banner + immediate WS retry / SW refresh when back.
+function paintOnline() {
+  const b = $('offline-banner');
+  if (b) b.hidden = navigator.onLine !== false;
+  if (navigator.onLine !== false && client.token) {
+    client.connect(); // Transport.kick semantics: safe while open
+    navigator.serviceWorker?.getRegistration?.()?.then?.((r) => r?.update?.());
+  }
+}
+window.addEventListener('online', paintOnline);
+window.addEventListener('offline', () => {
+  const b = $('offline-banner');
+  if (b) b.hidden = false;
+});
+
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
   navigator.serviceWorker.addEventListener('message', (e) => {
@@ -98,6 +113,7 @@ startSingleTabGuard();
 await initTheme(); // dark fallback already linked in index.html
 mountDiagnostics({ client });
 initInstallAndNotify({ client });
+paintOnline();
 
 // Branding: the admin-configurable app name (see /api/app-info) fills every
 // [data-app-name] slot and the document title. The baked-in defaults keep

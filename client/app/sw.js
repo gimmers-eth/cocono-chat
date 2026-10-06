@@ -1,47 +1,125 @@
-// co.co.no service worker — Phase 1: OS notifications from BLIND pushes.
+// co.co.no service worker — two jobs:
 //
-// The server only ever sends {t:'msg'|..., pad} — no content, no usernames
-// (E2EE contract: push traffic transits Google/Apple/Mozilla). So the
-// notification says *something happened*; tapping opens/focuses the app,
-// which fetches the real (decrypted) event over its own WS/REST channel.
+// 1) RICH PUSH NOTIFICATIONS. A push arrives blind (the server never puts
+//    content or usernames in the payload — E2EE contract). We show a
+//    generic notification IMMEDIATELY (the reliable floor), then race a
+//    short budget: silent-resume the SDK inside the worker, open a brief WS
+//    session, receive + decrypt queued messages, write them into the same
+//    per-account IndexedDB store the page uses, and REPLACE the notification
+//    with "sender: snippet". The SDK's normal pulled-ack marks copies
+//    server-side (retained for the resync window), so the page never
+//    duplicates them — they simply appear in the store. If anything fails
+//    (offline, iOS kills the worker, no identity) the generic notification
+//    stands.
 //
-// Registration happens after login (user-gesture context) from main.js.
+// 2) OFFLINE APP SHELL. Network-first for navigations and static assets,
+//    falling back to cache when offline — the app opens with real (stale-
+//    free-when-online) code and shows the locally stored transcript. API
+//    traffic and the dynamic manifest are never cached.
+//
+// Note: this worker runs classic and loads ESM via dynamic import(), which
+// keeps a single source of truth for store + SDK on both sides.
 
+const SHELL_CACHE = 'cocono-shell-v2';
 const FALLBACK_TITLE = 'co.co.no';
+const ENRICH_BUDGET_MS = 8000;
+const SETTLE_MS = 1200;
 
 self.addEventListener('install', () => self.skipWaiting());
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil((async () => {
+    for (const key of await caches.keys()) {
+      if (key.startsWith('cocono-shell-') && key !== SHELL_CACHE) await caches.delete(key);
+    }
+    await self.clients.claim();
+  })());
 });
 
-async function appTitle() {
-  try {
-    const res = await fetch('/api/app-info');
-    if (res.ok) {
-      const info = await res.json();
-      if (info?.name) return info.name;
-    }
-  } catch { /* offline / no server: fallback below */ }
-  return FALLBACK_TITLE;
+// ---------- notifications ----------
+
+async function showNotification(title, body, type) {
+  await self.registration.showNotification(title, {
+    body,
+    tag: 'cocono-activity', // replaces the earlier notification of the same tag
+    timestamp: Date.now(),
+    data: { type },
+  });
 }
+
+function title() {
+  return (async () => {
+    try {
+      const res = await fetch('/api/app-info');
+      if (res.ok) return (await res.json()).name || FALLBACK_TITLE;
+    } catch { /* offline etc. */ }
+    return FALLBACK_TITLE;
+  })();
+}
+
+// Pull + decrypt queued messages briefly; returns { peer, text, extra } for
+// the freshest one, or null. Throws on any protocol/crypto failure so the
+// caller can fall back.
+async function enrichFromServer() {
+  const storageMod = await import('/sdk/index.js');
+  const storeMod = await import('/js/store.js');
+  const storage = new storageMod.IdbStorage();
+  if (!(await storage.loadIdentity())) return null; // no account on this device
+
+  const client = new storageMod.CoconoClient({ baseUrl: '', storage, logging: false });
+  await client.login(); // fully silent now (no passkey gesture paths)
+  storeMod.setScope(client.username);
+
+  const first = { message: null, count: 0 };
+  const received = new Promise((resolve) => {
+    client.on('message', (m) => {
+      first.count += 1;
+      first.message ??= m;
+      storeMod.saveMessage({
+        id: `in:${m.mid}`, peer: m.peer, dir: 'in', text: m.text, ts: m.ts,
+        fromDeviceId: m.fromDeviceId,
+      }).catch(() => {});
+    });
+    client.on('state', ({ state }) => {
+      if (state === 'open') setTimeout(() => resolve(), SETTLE_MS);
+    });
+    client.connect();
+  });
+
+  await received;
+  client.disconnect();
+  if (!first.message) return null;
+  return { ...first.message, extra: first.count - 1 };
+}
+
+const withBudget = (promise, ms) =>
+  Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve(null), ms))]);
 
 self.addEventListener('push', (event) => {
   let data = {};
-  try { data = event.data ? event.data.json() : {}; } catch { /* blind or malformed — fine */ }
-  const body =
-    data.t === 'msg' ? 'You have a new message'
-    : data.t === 'pair' ? 'A device is waiting to pair with your account'
-    : 'New activity';
+  try { data = event.data ? event.data.json() : {}; } catch { /* blind */ }
+  const type = data.t || 'activity';
+
   event.waitUntil((async () => {
-    // tag: replace any un-dismissed notification instead of stacking one per
-    // message; the app shows the full list on open anyway.
-    return self.registration.showNotification(await appTitle(), {
-      body,
-      tag: 'cocono-activity',
-      timestamp: Date.now(),
-      data: { type: data.t || 'activity' },
-    });
+    const name = await title();
+    // 1. the reliable floor
+    await showNotification(
+      name,
+      type === 'msg' ? 'You have a new message' : 'New activity — open to see',
+      type,
+    );
+    // 2. the upgrade (best effort)
+    if (type !== 'msg') return;
+    try {
+      const rich = await withBudget(enrichFromServer(), ENRICH_BUDGET_MS);
+      if (!rich) return;
+      const snippet = (rich.text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+      const more = rich.extra > 0 ? ` (+${rich.extra} more)` : '';
+      await showNotification(name, `@${rich.peer}: ${snippet || '(message)'}${more}`, 'msg');
+    } catch (err) {
+      // generic notification already shown; nothing more to do
+      console.warn('[sw] enrich failed:', err?.message ?? err);
+    }
   })());
 });
 
@@ -51,11 +129,36 @@ self.addEventListener('notificationclick', (event) => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const client of windows) {
       if ('focus' in client) {
-        // Tell the app what happened so it can navigate straight to it.
         client.postMessage({ from: 'sw', type: 'notification-click', eventType: event.notification.data?.type });
         return client.focus();
       }
     }
     return self.clients.openWindow ? self.clients.openWindow('/') : null;
+  })());
+});
+
+// ---------- offline app shell ----------
+
+const SHELL_PREFIXES = ['/css/', '/js/', '/sdk/', '/themes/', '/icons/'];
+const isShell = (url) =>
+  url.origin === self.location.origin
+  && (url.pathname === '/' || SHELL_PREFIXES.some((p) => url.pathname.startsWith(p)));
+
+self.addEventListener('fetch', (event) => {
+  const req = event.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  if (!isShell(url)) return; // API, manifest, cross-origin: always network
+  event.respondWith((async () => {
+    try {
+      const res = await fetch(req);
+      if (res.ok) {
+        const cache = await caches.open(SHELL_CACHE);
+        cache.put(req, res.clone());
+      }
+      return res;
+    } catch {
+      return (await caches.match(req)) ?? Response.error();
+    }
   })());
 });

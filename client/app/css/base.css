@@ -327,3 +327,13 @@ body[data-view="blocked"] .page-footer { display: none; }
 .install-hint em { font-style: normal; font-weight: 600; }
 .ih-actions { display: flex; gap: .5rem; align-items: center; flex-shrink: 0; }
 .switch-row { display: flex; gap: .6rem; align-items: center; cursor: pointer; }
+
+/* Offline banner (app view) */
+.offline-banner {
+  position: fixed; left: 50%; bottom: calc(.75rem + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 35; background: var(--panel); color: var(--text);
+  border: 1px solid var(--accent); border-radius: 999px;
+  padding: .45rem 1rem; font-size: .85rem; box-shadow: var(--shadow);
+  max-width: calc(100vw - 2rem); text-align: center;
+}
