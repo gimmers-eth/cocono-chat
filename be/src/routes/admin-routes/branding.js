@@ -1,4 +1,5 @@
 import { fail } from '../shared.js';
+import { resolveVersion } from '../app-routes/appInfo.js';
 
 // Branding: read/write the app's display name. Empty/absent override falls
 // back to the APP_NAME env default; PATCH with appName:'' clears the
@@ -8,7 +9,7 @@ const NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,39}$/u;
 export default async function brandingRoutes(app, { config, settings }) {
   app.get('/api/admin/branding', async () => {
     const doc = await settings.findOne({ _id: 'branding' });
-    return { appName: doc?.appName ?? null, defaultName: config.appName };
+    return { appName: doc?.appName ?? null, defaultName: config.appName, version: resolveVersion() };
   });
 
   app.patch('/api/admin/branding', async (request, reply) => {

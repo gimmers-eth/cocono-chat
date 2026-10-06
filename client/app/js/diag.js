@@ -65,6 +65,15 @@ export async function collectDiagnostics() {
     const keys = Object.keys(localStorage).filter((k) => k.startsWith('cocono'));
     return keys.length ? keys.join(', ') : 'no cocono keys';
   });
+  await attempt('version', async () => {
+    const cached = localStorage.getItem('cocono.appversion') ?? 'never-loaded';
+    let live = '?';
+    try {
+      const r = await fetch('/api/app-info');
+      if (r.ok) live = (await r.json()).version ?? '?';
+    } catch { /* offline */ }
+    return `page ${cached} / server ${live}${cached === live ? '' : '  <-- MISMATCH (stale bundle?)'}`;
+  });
   await attempt('sw-log', () => {
     const raw = localStorage.getItem('cocono.swlog');
     if (!raw || raw === '[]') return 'no service-worker failures logged';

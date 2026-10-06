@@ -138,6 +138,11 @@ fetch('/api/app-info')
     document.title = info.name;
     localStorage.setItem('cocono.apptitle', info.name); // service worker uses it synchronously
     for (const el of document.querySelectorAll('[data-app-name]')) el.textContent = info.name;
+    if (info.version) {
+      localStorage.setItem('cocono.appversion', info.version); // what THIS page was served by
+      const v = $('client-version');
+      if (v) v.textContent = `v${info.version}`;
+    }
   })
   .catch(() => {});
 chat.wire();

@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
 import { rateLimit } from '../../lib/rateLimit.js';
 import { limited } from '../shared.js';
 
@@ -5,6 +7,24 @@ import { limited } from '../shared.js';
 // (persisted in the `settings` collection, `{_id:'branding', appName}`) and
 // falling back to the APP_NAME env default. The FE fetches this on boot and
 // rewrites every [data-app-name] element + document.title.
+// Build identity straight from git: '<sha> (<iso date>)'. With deploy == git
+// pull, the commit IS the version — nothing to maintain by hand.
+let cachedVersion = null;
+export function resolveVersion() {
+  if (cachedVersion) return cachedVersion;
+  try {
+    const out = execFileSync(
+      'git',
+      ['-C', path.resolve(import.meta.dirname, '..', '..', '..', '..'), 'log', '-1', '--format=%h (%cI)'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    ).trim();
+    cachedVersion = out || 'unknown';
+  } catch {
+    cachedVersion = 'unknown';
+  }
+  return cachedVersion;
+}
+
 export async function resolveAppName(settings, config) {
   const doc = await settings.findOne({ _id: 'branding' });
   return doc?.appName || config.appName;
@@ -16,6 +36,6 @@ export default async function appInfoRoutes(app, { redis, config, settings }) {
   app.get('/api/app-info', async (request, reply) => {
     const rl = await rateLimit(redis, `rl:appinfo:${request.ip}`, 120, 600);
     if (!rl.ok) return limited(reply, rl);
-    return { name: await resolveAppName(settings, config), vapidPublicKey: config.vapidPublicKey || null };
+    return { name: await resolveAppName(settings, config), vapidPublicKey: config.vapidPublicKey || null, version: resolveVersion() };
   });
 }

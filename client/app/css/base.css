@@ -335,3 +335,9 @@ body[data-view="blocked"] .page-footer { display: none; }
   padding: .45rem 1rem; font-size: .85rem; box-shadow: var(--shadow);
   max-width: calc(100vw - 2rem); text-align: center;
 }
+
+/* Sidebar footer: client build */
+.side-foot {
+  margin-top: auto; padding: .5rem .9rem calc(.5rem + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border); opacity: .75; user-select: none;
+}
