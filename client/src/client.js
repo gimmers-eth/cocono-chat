@@ -22,6 +22,10 @@ const iosLike = () =>
   /iPhone|iPad|iPod/.test(navigator.userAgent) &&
   (navigator.maxTouchPoints ?? 0) > 0;
 
+// Human-readable name of the storage mode a sealed/kept identity ended up in.
+const keyStorageMode = (sealed) =>
+  (sealed ? (sealed.bundle.format === 3 ? 'passkey' : 'local-seal') : 'browser-handles');
+
 export class CoconoClient extends Emitter {
   #identity = null; // loaded lazily from storage
   #transport = null;
@@ -179,7 +183,7 @@ export class CoconoClient extends Emitter {
     const sealed = await this.#sealStrategy(device);
     await this.api.signup(device.payload);
     const identity = await this.#persistIdentity(device, true, sealed);
-    return { username: identity.username, deviceId: identity.deviceId, token: this.token };
+    return { username: identity.username, deviceId: identity.deviceId, token: this.token, keyStorage: keyStorageMode(sealed) };
   }
 
   /** Log in with the identity stored on this device. @returns {Promise<string>} token */
@@ -376,7 +380,7 @@ export class CoconoClient extends Emitter {
     }
     const identity = await this.#persistIdentity(pending, true, pending.sealed);
     this.#pendingPairing = null;
-    return { username: identity.username, deviceId: identity.deviceId, token: this.token };
+    return { username: identity.username, deviceId: identity.deviceId, token: this.token, keyStorage: keyStorageMode(pending.sealed) };
   }
 
   /**

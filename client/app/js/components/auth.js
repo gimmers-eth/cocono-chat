@@ -111,6 +111,21 @@ export function createAuth({ client, onLoggedIn }) {
         if (username.length < 5) throw new Error('Username must be at least 5 characters.');
         setStatus(els.status, 'Creating account and keys on this device…');
         const res = await client.register(username);
+        if (res.keyStorage !== 'passkey') {
+          // Visibility into the silent downgrade: a cancelled/unsupported
+          // passkey ceremony must not look like success on a device that
+          // could have had biometric-protected keys.
+          await confirmModal({
+            title: 'No passkey created',
+            body: `Your keys were stored using "${res.keyStorage}" instead of a passkey. `
+              + (res.keyStorage === 'browser-handles'
+                ? 'This browser can keep them, but logins will not use biometrics. To get a '
+                + 'passkey, remove this account from this browser and sign up again without '
+                + 'cancelling the passkey prompt.'
+                : 'On iPhone, local sealing is durable — biometric unlock simply is not in use.'),
+            okLabel: 'Continue',
+          });
+        }
         await onLoggedIn(res);
       }),
     );
@@ -141,6 +156,14 @@ export function createAuth({ client, onLoggedIn }) {
 
         // Resolves once an existing device approves the code.
         const res = await client.completePairing({ pollIntervalMs: 2000 });
+        if (res.keyStorage !== 'passkey') {
+          await confirmModal({
+            title: 'No passkey created',
+            body: `This paired device stores its keys via "${res.keyStorage}" rather than a passkey. `
+              + 'Logins will not use biometrics on this device.',
+            okLabel: 'Continue',
+          });
+        }
         await onLoggedIn(res);
       }).catch(() => {}),
     );
