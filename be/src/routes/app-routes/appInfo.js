@@ -8,10 +8,14 @@ import { limited } from '../shared.js';
 // falling back to the APP_NAME env default. The FE fetches this on boot and
 // rewrites every [data-app-name] element + document.title.
 // Build identity straight from git: '<sha> (<iso date>)'. With deploy == git
-// pull, the commit IS the version — nothing to maintain by hand.
+// pull, the commit IS the version — nothing to maintain by hand. Cached with
+// a short TTL: deploys move HEAD without necessarily restarting this process
+// (file-watch only sees code changes), and a 10ms git call every 30s is cheap.
+const VERSION_TTL_MS = 30_000;
 let cachedVersion = null;
+let cachedAt = 0;
 export function resolveVersion() {
-  if (cachedVersion) return cachedVersion;
+  if (cachedVersion && Date.now() - cachedAt < VERSION_TTL_MS) return cachedVersion;
   try {
     const out = execFileSync(
       'git',
@@ -22,6 +26,7 @@ export function resolveVersion() {
   } catch {
     cachedVersion = 'unknown';
   }
+  cachedAt = Date.now();
   return cachedVersion;
 }
 
