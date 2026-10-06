@@ -40,6 +40,22 @@ function windowActive() {
   return document.visibilityState === 'visible' && document.hasFocus();
 }
 
+// OS notification FROM THE PAGE (open-but-unfocused case): the page owns
+// the content the moment it pulls the message, and the worker deliberately
+// stays quiet when the queue comes back empty (see sw.js). Same tag as the
+// worker's notifications -> a burst replaces into the latest one.
+function notifyOS(peer, text) {
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  const snippet = (text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  navigator.serviceWorker?.getRegistration?.()?.then((reg) => {
+    reg?.showNotification?.(document.title || 'co.co.no', {
+      body: `@${peer}: ${snippet || '(message)'}`,
+      tag: 'cocono-activity',
+      data: { type: 'msg', peer },
+    })?.catch?.(() => {});
+  }).catch(() => {});
+}
+
 export function createChat({ client, onHomeRefresh }) {
   let currentPeer = null; // display-cased
 
@@ -75,17 +91,21 @@ export function createChat({ client, onHomeRefresh }) {
       }
       onHomeRefresh?.();
 
-      // Focused app: in-app pill (unless this very chat is open). NOT
-      // focused: stay quiet — presence was opted out the moment we blurred,
-      // so the SERVER push is the OS notification now (single source, and
-      // it works even when the page's JS is frozen). Messages landing in
-      // the first seconds after 'open' are the drained queue: the list and
-      // unread dots cover them — pill only the tail that arrives 'live'.
+      // Where the notification comes from depends on ATTENTION, and every
+      // case now shows CONTENT:
+      //  - focused app, other chat -> in-app pill (the OS level is ours);
+      //  - app open but NOT focused/visible -> OS notification from THIS
+      //    page (we just pulled the copy; the worker's push peek will come
+      //    back empty and stays silent by design);
+      //  - app closed -> server push, worker peeks the still-queued copy
+      //    and shows the rich notification.
       const viewingThis = currentPeer && currentPeer.toLowerCase() === m.peer.toLowerCase();
       const catchUp = Date.now() - lastOpenAt < 3000;
       if (windowActive() && !viewingThis && !catchUp) {
         const snippet = (m.text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
         showBanner(`@${m.peer}: ${snippet || '(message)'}`, m.peer);
+      } else if (!windowActive()) {
+        notifyOS(m.peer, m.text);
       }
     });
 

@@ -115,12 +115,13 @@ async function upgradeContent() {
   return lib.peek(token, record, xPriv, SETTLE_MS);
 }
 
-// Exactly ONE banner per push EVENT: the rich path is shown when it wins;
-// the generic only ever appears as the failure/timeout/empty branch, and a
-// shown-latch makes a second banner for the same event structurally
-// impossible (that timer-vs-settle race is what kept producing two on
-// iOS). Every path ends with >=1 notification, so Chrome's "upgraded in
-// the background" consolation toast can never trigger either.
+// One banner per push BURST: the rich path is shown when it wins; the
+// generic covers genuine failures (login/peek broke) only — an EMPTY queue
+// means the open app pulled the messages and notifies itself, so we stay
+// silent rather than downgrade the notification. The shown-latch makes a
+// second banner for the same batch structurally impossible. Every path
+// where the WORKER still owes a signal ends with >=1 notification, so
+// Chrome's "upgraded in the background" consolation toast can never fire.
 const UP_BUDGET_MS = 8000;
 // Chrome replays the pushes queued while the browser/app was closed as a
 // burst of near-simultaneous events. Collapse the burst: wait briefly, then
@@ -142,7 +143,15 @@ async function showMsgNotification() {
 
   const upgrade = (async () => {
     const rich = await upgradeContent();
-    if (!rich) { await generic(); return; } // queue raced empty: cover it
+    if (!rich) {
+      // Queue empty at peek time: the OPEN APP already received and pulled
+      // this copy (blur releases presence, so a push may fire even while a
+      // live WS drains the same messages). The page shows the rich OS
+      // notification itself — a generic one from us would only replace it
+      // with LESS content. Stay silent; latch the budget fallback too.
+      shown = true;
+      return;
+    }
     try { cachedTitle = await appTitle(); } catch { /* keep cache */ }
     const snippet = (rich.text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
     const more = rich.extra > 0 ? ` (+${rich.extra} more)` : '';

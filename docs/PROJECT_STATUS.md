@@ -73,6 +73,17 @@ is the only FE (audits mentioning `fe/` are historical).
   (3) the worker batches a replayed burst (2 s window → one login, one peek,
   one notification with '+N more'); (4) in-app banners treat messages within
   3 s of WS 'open' as catch-up (list + dots cover them, no pill storm).
+- **Notification content by attention state (open-vs-closed fix)**: the
+  open app pulls messages instantly, so a push fired while blurred always
+  found an EMPTY queue at peek time and fell back to the content-less
+  generic banner ('shows no message when open, works when closed'). Now:
+  focused → in-app pill; open-but-unfocused → the PAGE shows the rich OS
+  notification via `registration.showNotification` (`notifyOS` in chat.js,
+  same tag → bursts replace into the latest); closed → worker peek finds
+  the still-queued copy and shows rich. The worker now STAYS SILENT on an
+  empty queue (the page owns that copy; generic-on-empty would only
+  downgrade the visible notification) — generic remains only for genuine
+  failures (login/peek errors, budget timeout).
 - **Offline shell**: network-first SW caching of statics; app boots offline
   into read-only mode from IndexedDB (login failure w/ network error enters
   the app); online event promotes to live session.
