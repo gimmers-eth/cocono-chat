@@ -66,7 +66,7 @@ export default async function wsRoutes(app, { users, redis, config, messages }) 
       // Refresh presence (TTL outlives one missed heartbeat cycle; a dead
       // node's keys expire and the device looks offline = push territory).
       const [ul, dv] = key.split(':');
-      redis.set(presenceKey(ul, dv), '1', { EX: config.wsHeartbeatSec * 2 + 5 }).catch(() => {});
+      redis.set(presenceKey(ul, dv), '1', { EX: config.wsHeartbeatSec + 10 }).catch(() => {});
     }
   }, config.wsHeartbeatSec * 1000);
   heartbeat.unref?.();
@@ -104,7 +104,7 @@ export default async function wsRoutes(app, { users, redis, config, messages }) 
     if (prev && prev !== socket) prev.close(4000, 'replaced');
     local.set(key, socket);
     socket.isAlive = true;
-    await redis.set(presenceKey(ul, dv), '1', { EX: config.wsHeartbeatSec * 2 + 5 });
+    await redis.set(presenceKey(ul, dv), '1', { EX: config.wsHeartbeatSec + 10 });
     socket.on('pong', () => {
       socket.isAlive = true;
     });

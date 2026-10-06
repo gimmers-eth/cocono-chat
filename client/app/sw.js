@@ -26,6 +26,16 @@ const SETTLE_MS = 1500;
 
 self.addEventListener('install', () => self.skipWaiting());
 
+// any uncaught worker error -> diagnostics ring (page-side Send picks it up)
+self.addEventListener('error', (e) => {
+  try {
+    const arr = JSON.parse(localStorage.getItem('cocono.swlog') || '[]');
+    arr.push({ ts: new Date().toISOString(), kind: 'workererror', msg: `${e.message} @${e.filename ?? '?'}:${e.lineno ?? 0}`.slice(0, 240) });
+    while (arr.length > 25) arr.shift();
+    localStorage.setItem('cocono.swlog', JSON.stringify(arr));
+  } catch { /* best effort */ }
+});
+
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     for (const key of await caches.keys()) {
@@ -35,8 +45,17 @@ self.addEventListener('activate', (event) => {
   })());
 });
 
+// importScripts is only legal during script evaluation / the install event —
+// NOT lazily from handlers ("past installing state"). Load the classic lib
+// up front, guarded: a failure must never stop the worker itself installing.
+try {
+  self.importScripts('/sw-lib.js');
+} catch (err) {
+  console.warn('[sw] sw-lib.js unavailable at evaluation:', err?.message ?? err);
+}
+
 function swLib() {
-  if (!self.SwLib) self.importScripts('/sw-lib.js');
+  if (!self.SwLib) throw new Error('sw-lib not loaded (offline worker start?)');
   return self.SwLib;
 }
 
@@ -85,8 +104,12 @@ self.addEventListener('push', (event) => {
   try { data = event.data ? event.data.json() : {}; } catch { /* blind */ }
   const type = data.t || 'activity';
 
+  // Generic notification FIRST, synchronously: Chrome shows "this site has
+  // been upgraded in the background" whenever the handler dies before any
+  // showNotification — so nothing may sit in front of it (no fetches, no
+  // awaits). The app name comes from localStorage (page keeps it fresh).
+  const name = localStorage.getItem('cocono.apptitle') || FALLBACK_TITLE;
   event.waitUntil((async () => {
-    const name = await appTitle();
     await showNotification(name, type === 'msg' ? 'You have a new message' : 'New activity — open to see', type);
     if (type !== 'msg') return;
     try {
@@ -94,12 +117,11 @@ self.addEventListener('push', (event) => {
       if (!rich) return; // nothing (yet) — the generic notification stands
       const snippet = (rich.text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
       const more = rich.extra > 0 ? ` (+${rich.extra} more)` : '';
-      await showNotification(name, `@${rich.peer}: ${snippet || '(message)'}${more}`, 'msg');
+      await showNotification(await appTitle(), `@${rich.peer}: ${snippet || '(message)'}${more}`, 'msg');
     } catch (err) {
       const why = String(err?.message ?? err).slice(0, 160);
       console.warn('[sw] enrich failed:', why);
       reportSwFailure(why);
-      await showNotification(name, `New message — preview failed: ${why}`, 'msg');
     }
   })());
 });

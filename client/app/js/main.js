@@ -136,6 +136,7 @@ fetch('/api/app-info')
   .then((info) => {
     if (!info?.name) return;
     document.title = info.name;
+    localStorage.setItem('cocono.apptitle', info.name); // service worker uses it synchronously
     for (const el of document.querySelectorAll('[data-app-name]')) el.textContent = info.name;
   })
   .catch(() => {});
