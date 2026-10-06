@@ -21,7 +21,7 @@
 
 const SHELL_CACHE = 'cocono-shell-v3';
 const FALLBACK_TITLE = 'co.co.no';
-const SETTLE_MS = 1500;
+const SETTLE_MS = 800;
 
 self.addEventListener('install', () => self.skipWaiting());
 
@@ -113,12 +113,13 @@ async function upgradeContent() {
   return lib.peek(token, record, xPriv, SETTLE_MS);
 }
 
-// Exactly ONE banner per push: try the rich path under a short grace window
-// (LAN upgrades land in well under a second); only show the generic if the
-// upgrade has not beaten the clock. If it fails outright, the generic still
-// covers — so the handler can never END without a notification, which is
-// what produced Chrome's "site has been upgraded in the background" toast.
-const GRACE_MS = 1500;
+// Exactly ONE banner per push EVENT: the rich path is shown when it wins;
+// the generic only ever appears as the failure/timeout/empty branch, and a
+// shown-latch makes a second banner for the same event structurally
+// impossible (that timer-vs-settle race is what kept producing two on
+// iOS). Every path ends with >=1 notification, so Chrome's "upgraded in
+// the background" consolation toast can never trigger either.
+const UP_BUDGET_MS = 8000;
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
 
 self.addEventListener('push', (event) => {
@@ -127,38 +128,38 @@ self.addEventListener('push', (event) => {
   const type = data.t || 'activity';
 
   event.waitUntil((async () => {
-    const name = cachedTitle;
     let shown = false;
-    const showGeneric = async () => {
+    const showOnce = async (titleText, body) => {
       if (shown) return;
       shown = true;
-      await showNotification(name, type === 'msg' ? 'You have a new message' : 'New activity — open to see', type);
+      await showNotification(titleText, body, type);
     };
+    const generic = () => showOnce(
+      cachedTitle,
+      type === 'msg' ? 'You have a new message' : 'New activity — open to see',
+    );
 
-    if (type !== 'msg') { await showGeneric(); return; }
+    if (type !== 'msg') { await generic(); return; }
 
-    const upgrade = upgradeContent().then(async (rich) => {
-      if (rich) {
-        try { cachedTitle = await appTitle(); } catch { /* keep cache */ }
-        const snippet = (rich.text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
-        const more = rich.extra > 0 ? ` (+${rich.extra} more)` : '';
-        if (shown) {
-          // generic already up: close+show upgrades it in place
-        }
-        shown = true;
-        await showNotification(cachedTitle, `@${rich.peer}: ${snippet || '(message)'}${more}`, 'msg');
-      } else {
-        await showGeneric(); // upgrade succeeded but queue was empty/raced
-      }
-    }).catch(async (err) => {
+    const upgrade = (async () => {
+      const rich = await upgradeContent();
+      if (!rich) { await generic(); return; } // queue raced empty: cover it
+      try { cachedTitle = await appTitle(); } catch { /* keep cache */ }
+      const snippet = (rich.text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+      const more = rich.extra > 0 ? ` (+${rich.extra} more)` : '';
+      await showOnce(cachedTitle, `@${rich.peer}: ${snippet || '(message)'}${more}`);
+    })().catch(async (err) => {
       const why = String(err?.message ?? err).slice(0, 160);
       console.warn('[sw] enrich failed:', why);
       reportSwFailure(why);
-      await showGeneric(); // degraded, but never silent
+      await generic();
     });
 
-    await Promise.race([upgrade, sleep(GRACE_MS).then(showGeneric)]);
-    await upgrade; // keep the worker alive until the peek settles
+    // budget: if the peek stalls (no network, suspended radio), the generic
+    // covers at 8s; a rich result arriving after that is SUPPRESSED by the
+    // latch — one banner, always.
+    await Promise.race([upgrade, sleep(UP_BUDGET_MS).then(generic)]);
+    await upgrade.catch(() => {});
   })());
 });
 
