@@ -5,6 +5,7 @@ import { importRawPublicKey, importRawX25519PublicKey, verifySignature } from '.
 import { rateLimit } from '../../lib/rateLimit.js';
 import { isValidUsername, isValidDeviceId } from '../../lib/username.js';
 import { fail, limited, requireAuth, isReplayedSignature, payloadTooOld } from '../shared.js';
+import { cleanupAccountState } from '../../lib/accountState.js';
 
 const AES_KEY_BYTES = new Set([16, 24, 32]);
 const CODE_RE = /^\d{6}$/;
@@ -217,10 +218,14 @@ export default async function deviceRoutes(app, { users, redis, config, messages
 
     await messages.deleteMany({ 'to.ul': ul, 'to.dv': deviceId });
     const user = await users.findOne({ ul }, { projection: { devices: 1 } });
-    return {
-      removed: deviceId,
-      devices: user.devices.length,
-      orphaned: user.devices.length === 0,
-    };
+    // Last device leaving => the account is deleted outright (no orphaned
+    // docs, no reserved usernames); its queues and Redis state are swept.
+    if (user.devices.length === 0) {
+      await users.deleteOne({ ul });
+      await cleanupAccountState(redis, ul);
+      await messages.deleteMany({ $or: [{ 'to.ul': ul }, { 'from.ul': ul }] });
+      return { removed: deviceId, devices: 0, accountDeleted: true };
+    }
+    return { removed: deviceId, devices: user.devices.length };
   });
 }

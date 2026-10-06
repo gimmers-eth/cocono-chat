@@ -252,7 +252,7 @@ export class CoconoClient extends Emitter {
     this.#requireToken();
     const res = await this.api.removeDevice(this.token, identity.deviceId);
     this.logout();
-    this.logger.info(`device ${identity.deviceId} detached from @${identity.username} (orphaned=${res.orphaned})`);
+    this.logger.info(`device ${identity.deviceId} detached from @${identity.username} (accountDeleted=${res.accountDeleted === true})`);
     return res;
   }
 

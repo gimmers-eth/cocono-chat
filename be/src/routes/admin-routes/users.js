@@ -1,35 +1,5 @@
 import { fail } from '../shared.js';
-
-// L9 fix: removing an account should also sweep its Redis state (login
-// nonces, pending/approved enrollments, per-account rate-limit counters)
-// instead of leaving it to TTL expiry.
-async function cleanupAccountState(redis, ul) {
-  await redis.del(`rl:verify:${ul}`, `rl:dapprove:${ul}`, `rl:dpending:${ul}`);
-
-  for await (const batch of redis.scanIterator({ MATCH: `denroll:c:${ul}:*`, COUNT: 100 })) {
-    for (const key of batch) {
-      const raw = await redis.getDel(key);
-      try {
-        const { enrollId } = JSON.parse(raw);
-        await redis.del(`denroll:p:${enrollId}`, `denroll:ok:${enrollId}`);
-      } catch {
-        // Not a enrollment record — ignore.
-      }
-    }
-  }
-
-  // Login nonces are keyed by the nonce itself; inspect the bound account.
-  for await (const batch of redis.scanIterator({ MATCH: 'auth:nonce:*', COUNT: 100 })) {
-    for (const key of batch) {
-      try {
-        const bound = JSON.parse(await redis.get(key));
-        if (bound?.ul === ul) await redis.del(key);
-      } catch {
-        // ignore
-      }
-    }
-  }
-}
+import { cleanupAccountState } from '../../lib/accountState.js';
 
 // Per-account device cap: 1..MAX_DEVICES_CAP. Raising it lets a user enroll
 // more devices; lowering it below the current device count is allowed (the
@@ -90,13 +60,18 @@ export default async function usersRoutes(app, { users, redis, messages }) {
     if (!user.devices.some((dev) => dev.id === deviceId)) {
       return fail(reply, 'unknown_device', 'No such device on this account', 404);
     }
-    // Removing the LAST device is allowed: the account doc survives with no
-    // devices (username stays reserved; shown as 'orphaned' in this panel).
-    // No explicit token revocation needed — the bearer hook re-checks device
-    // membership on every request.
     await users.updateOne({ ul }, { $pull: { devices: { id: deviceId } } });
     if (messages) await messages.deleteMany({ 'to.ul': ul, 'to.dv': deviceId });
     const after = await users.findOne({ ul }, { projection: { devices: 1 } });
-    return { removed: deviceId, devices: after.devices.length, orphaned: after.devices.length === 0 };
+    // Removing the LAST device deletes the account outright (no orphans, no
+    // reserved usernames). Bearer tokens need no explicit revocation — the
+    // hook re-checks membership and the account is gone.
+    if (after.devices.length === 0) {
+      await users.deleteOne({ ul });
+      await cleanupAccountState(redis, ul);
+      if (messages) await messages.deleteMany({ $or: [{ 'to.ul': ul }, { 'from.ul': ul }] });
+      return { removed: deviceId, devices: 0, accountDeleted: true };
+    }
+    return { removed: deviceId, devices: after.devices.length };
   });
 }

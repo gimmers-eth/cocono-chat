@@ -64,7 +64,7 @@ function renderUsers(users) {
   body.innerHTML = users
     .map(
       (u) => `<tr>
-        <td><strong>@${esc(u.u)}</strong>${u.devices.length === 0 ? ' <span class="badge orphan">orphaned — no devices</span>' : ''}<br /><span class="dim mono">${esc(u.ul)}</span></td>
+        <td><strong>@${esc(u.u)}</strong><br /><span class="dim mono">${esc(u.ul)}</span></td>
         <td>${fmtDate(u.createdAt)}</td>
         <td>
           <input type="number" min="1" max="1000" value="${u.maxDevices}" class="max-devices" data-max-for="${esc(u.ul)}" />
@@ -94,7 +94,7 @@ let lastUsers = [];
 function orphanNote(ul) {
   const u = lastUsers.find((x) => x.ul === ul);
   return u && u.devices.length <= 1
-    ? '\n\n⚠ This is the ONLY device: the account becomes ORPHANED — username reserved, but no device can sign in and there is no recovery yet.'
+    ? '\n\n⚠ This is the ONLY device — removing it DELETES the account (@' + ul + ') outright: all messages gone, username becomes free again.'
     : '';
 }
 

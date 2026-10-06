@@ -208,11 +208,11 @@ export function createAuth({ client, onLoggedIn }) {
       // Only device: detaching it server-side leaves the account ORPHANED —
       // username still reserved, but no device can sign in or approve
       // pairing, and there is no recovery yet.
-      title = `Orphan @${removeName}?`;
-      body = 'This browser is @' + removeName + "'s ONLY device. Removing it detaches the device "
-        + 'on the server too: the username stays reserved, but the account will have NO devices — '
-        + 'nothing can sign in or recover it, and its queued messages are deleted.';
-      okLabel = 'Remove and orphan the account';
+      title = `Delete @${removeName}?`;
+      body = 'This browser holds @' + removeName + "'s ONLY device. Removing it deletes the "
+        + 'account on the server as well (accounts with no devices are not kept): every message '
+        + 'is gone and the username becomes free to register again.';
+      okLabel = 'Remove and delete the account';
       danger = true;
     } else if (count === null) {
       body = `Could not reach @${removeName}'s account (it may already be deleted on the server). `
@@ -234,7 +234,7 @@ export function createAuth({ client, onLoggedIn }) {
         await client.detachCurrentDevice();
       } catch (err) {
         setStatus(els.status, `Removed locally, but the server detach failed: ${err?.message ?? err} `
-          + '— the device stays listed until removed from another device\u2019s settings.');
+          + '— the device stays listed until removed from another device's Settings.');
       }
     }
     await client.removeStoredAccount(removeName);
@@ -246,7 +246,7 @@ export function createAuth({ client, onLoggedIn }) {
       showMode('signup');
       if (!els.status.textContent) {
         setStatus(els.status, `@${removeName} removed from this browser`
-          + (count === 1 ? ' and orphaned on the server.' : '.'));
+          + (count === 1 ? ' and its account deleted on the server.' : '.'));
       }
     }
   }

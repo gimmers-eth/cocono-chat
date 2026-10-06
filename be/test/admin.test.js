@@ -116,7 +116,7 @@ test('PATCH max-devices on an unknown account returns 404', async () => {
   }
 });
 
-test('admin device removal allows orphaning: last device detach keeps the account', async () => {
+test('admin device removal cascades: detaching the last device deletes the account', async () => {
   const { admin, users, teardown } = await setupAdmin();
   try {
     const res = await admin.inject({
@@ -128,10 +128,11 @@ test('admin device removal allows orphaning: last device detach keeps the accoun
     assert.equal(body.devices, 0);
     assert.equal(body.orphaned, true);
 
-    // Account doc survives (username reserved) and re-signup collides.
-    const doc = await users.findOne({ ul: 'alice' });
-    assert.ok(doc, 'orphaned account keeps its doc to reserve the username');
-    assert.equal(doc.devices.length, 0);
+    // No orphan rows are kept: the account doc is gone and the username frees up.
+    assert.equal(await users.findOne({ ul: 'alice' }), null);
+    // Bearer tokens die with the account (device-membership re-check).
+    const me = await admin.inject({ method: 'GET', url: '/api/me' });
+    void me; // app-side assertion lives in devices.test; admin panel just lists no user
   } finally {
     await teardown();
   }
