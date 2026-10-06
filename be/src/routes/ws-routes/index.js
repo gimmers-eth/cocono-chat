@@ -7,6 +7,10 @@
 //                     { type: 'pulled', ids: [mid, ...] }
 //                     { type: 'resync' }   re-deliver own pulled copies
 //                                          (still inside the retention window)
+//                     { type: 'presence', online: bool }
+//                          attention opt-out: blurred/hidden client releases
+//                          its presence key so push (OS notification) takes
+//                          over immediately instead of after the TTL
 //   server -> client: { type: 'hello' }
 //                     { type: 'msg', id, ts, env }
 //                     { type: 'ack', cid, ok, error? }
@@ -63,10 +67,12 @@ export default async function wsRoutes(app, { users, redis, config, messages }) 
       }
       socket.isAlive = false;
       socket.ping();
-      // Refresh presence (TTL outlives one missed heartbeat cycle; a dead
-      // node's keys expire and the device looks offline = push territory).
-      const [ul, dv] = key.split(':');
-      redis.set(presenceKey(ul, dv), '1', { EX: config.wsHeartbeatSec + 10 }).catch(() => {});
+      // Refresh presence unless this client opted out (blurred/hidden):
+      // a dead node's keys still expire via TTL = push territory.
+      if (!socket.presenceOff) {
+        const [ul, dv] = key.split(':');
+        redis.set(presenceKey(ul, dv), '1', { EX: config.wsHeartbeatSec + 10 }).catch(() => {});
+      }
     }
   }, config.wsHeartbeatSec * 1000);
   heartbeat.unref?.();
@@ -124,6 +130,16 @@ export default async function wsRoutes(app, { users, redis, config, messages }) 
         if (body?.type === 'msg') await handleSend(socket, request, body, payload);
         else if (body?.type === 'pulled') await handlePulled(socket, body, payload);
         else if (body?.type === 'resync') await handleResync(socket, ul, dv);
+        else if (body?.type === 'presence') {
+          // Client honesty about attention: focused app = suppress push,
+          // blurred/hidden = release presence NOW so background messages
+          // go straight to the OS via push (instead of waiting for the
+          // presence TTL or a dead socket to be noticed).
+          const online = body.online === true;
+          socket.presenceOff = !online;
+          if (online) await redis.set(presenceKey(ul, dv), '1', { EX: config.wsHeartbeatSec + 10 });
+          else await redis.del(presenceKey(ul, dv));
+        }
       } catch (err) {
         app.log.error(err);
         sendJson(socket, { type: 'error', error: 'internal' });

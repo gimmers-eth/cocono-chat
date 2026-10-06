@@ -21,19 +21,6 @@ function showBanner(text, peer) {
   bannerTimer = setTimeout(() => { el.hidden = true; }, 4000);
 }
 
-async function notifyViaSw(body, peer) {
-  try {
-    const reg = await navigator.serviceWorker?.getRegistration?.();
-    if (reg?.showNotification) {
-      reg.showNotification(document.title || 'co.co.no', {
-        body, tag: 'cocono-live', data: { type: 'msg', peer },
-      });
-    } else {
-      showBanner(body, peer); // no SW notification channel: fall back to banner
-    }
-  } catch { showBanner(body, peer); }
-}
-
 const STATE_MARK = { sending: '⏳', sent: '✓', delivered: '✓✓', failed: '!' };
 
 // 'Read' means the user actually LOOKED at the conversation: the tab is
@@ -75,14 +62,14 @@ export function createChat({ client, onHomeRefresh }) {
       }
       onHomeRefresh?.();
 
-      // Surface it (banner or OS notification) unless the user is actively
-      // looking at THIS conversation, focused.
+      // Focused app: in-app pill (unless this very chat is open). NOT
+      // focused: stay quiet — presence was opted out the moment we blurred,
+      // so the SERVER push is the OS notification now (single source, and
+      // it works even when the page's JS is frozen).
       const viewingThis = currentPeer && currentPeer.toLowerCase() === m.peer.toLowerCase();
-      if (!(viewingThis && windowActive())) {
+      if (windowActive() && !viewingThis) {
         const snippet = (m.text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
-        const body = `@${m.peer}: ${snippet || '(message)'}`;
-        if (windowActive()) showBanner(body, m.peer);
-        else notifyViaSw(body, m.peer);
+        showBanner(`@${m.peer}: ${snippet || '(message)'}`, m.peer);
       }
     });
 

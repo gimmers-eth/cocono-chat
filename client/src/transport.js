@@ -20,11 +20,21 @@ export class Transport extends Emitter {
     this.logger = logger;
     // Re-attach listeners to reconnect on network restore / tab focus.
     if (typeof document !== 'undefined') {
+      const announcePresence = () => {
+        if (this.state !== 'open') return;
+        const focused = document.visibilityState === 'visible' && (document.hasFocus?.() ?? true);
+        try { this.send({ type: 'presence', online: focused }); } catch { /* transient */ }
+      };
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') this.kick();
+        announcePresence();
       });
-    }
-    if (typeof window !== 'undefined') {
+      if (typeof window !== 'undefined') {
+        window.addEventListener('focus', announcePresence);
+        window.addEventListener('blur', announcePresence);
+        window.addEventListener('online', () => this.kick());
+      }
+    } else if (typeof window !== 'undefined') {
       window.addEventListener('online', () => this.kick());
     }
   }

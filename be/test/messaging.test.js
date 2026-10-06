@@ -459,3 +459,26 @@ test('keys endpoint: returns device keys, guards auth and existence', async () =
     await ctx.teardown();
   }
 });
+
+test('ws presence frame: blur releases presence, focus restores it', async () => {
+  const ctx = await setupLive();
+  try {
+    const alice = await createUser(ctx, makeClient(), 'alice');
+    const key = `presence:alice:${alice.d}`;
+    const wsA = await connectWs(ctx.port, alice.token);
+    await wsA.waitFor((m) => m.type === 'hello');
+    assert.equal(await ctx.redis.exists(key), 1, 'presence set on connect');
+
+    wsA.send({ type: 'presence', online: false });
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(await ctx.redis.exists(key), 0, 'blur released presence -> push territory');
+
+    wsA.send({ type: 'presence', online: true });
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(await ctx.redis.exists(key), 1, 'focus restored presence');
+
+    wsA.ws.close();
+  } finally {
+    await ctx.teardown();
+  }
+});
