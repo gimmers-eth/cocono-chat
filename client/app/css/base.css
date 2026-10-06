@@ -111,6 +111,9 @@ ul { list-style: none; padding: 0; }
   background: var(--accent); color: var(--on-accent);
   display: grid; place-items: center; font-size: 1.8rem;
 }
+/* Icon variant (login + empty chat): the app icon PNG instead of the glyph.
+   Background off so nothing bleeds around non-square/transparent art. */
+img.logo { object-fit: cover; background: none; }
 .logo.big { width: 84px; height: 84px; font-size: 2.6rem; }
 .auth-links { display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap; }
 
