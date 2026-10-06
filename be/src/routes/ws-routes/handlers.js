@@ -65,6 +65,7 @@ export function createHandlers({ users, redis, pub, config, messages }) {
     if (recipientDevice.push && m.d !== auth.d) {
       try {
         const online = await redis.exists(presenceKey(rul, m.dv));
+        if (online) request.log.info(`[push] skip ${rul}/${m.dv.slice(0, 8)}: device online (live WS)`);
         if (!online) {
           const outcome = await sendBlindPush(config, recipientDevice.push, 'msg');
           request.log.info(`[push] ${rul}/${m.dv.slice(0, 8)} -> ${outcome}`);
@@ -80,6 +81,8 @@ export function createHandlers({ users, redis, pub, config, messages }) {
         // Push is best-effort: never let it break the send/ack path.
         request.log.warn(`[push] ${rul}/${m.dv.slice(0, 8)} failed: ${err?.message ?? err}`);
       }
+    } else if (m.d !== auth.d) {
+      request.log.info(`[push] skip ${rul}/${m.dv.slice(0, 8)}: no push subscription on this device`);
     }
     return ack(true);
   }
