@@ -65,6 +65,7 @@ if ('serviceWorker' in navigator) {
     // Tapping a notification: refresh the conversation list when the app is
     // open and signed in (content itself arrives via the normal channels).
     if (e.data?.from === 'sw' && e.data.type === 'notification-click' && client.token) {
+      if (e.data.peer) chat.openChat(e.data.peer).catch(() => {});
       home.renderConversationList().catch(() => {});
     }
   });

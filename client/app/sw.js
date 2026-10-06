@@ -64,6 +64,8 @@ self.addEventListener('activate', (event) => {
   })());
 });
 
+let pendingPeerTag = null; // peer associated with the next shown notification
+
 async function showNotification(titleText, body, type) {
   // Replace-in-place MUST be manual: Safari/WebKit does not honour tag
   // replacement in service workers, so the generic and the upgraded notice
@@ -77,7 +79,7 @@ async function showNotification(titleText, body, type) {
     body,
     tag: 'cocono-activity', // still dedupes on engines that honour it
     timestamp: Date.now(),
-    data: { type },
+    data: { type, peer: pendingPeerTag },
   });
 }
 
@@ -147,6 +149,7 @@ self.addEventListener('push', (event) => {
       try { cachedTitle = await appTitle(); } catch { /* keep cache */ }
       const snippet = (rich.text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
       const more = rich.extra > 0 ? ` (+${rich.extra} more)` : '';
+      pendingPeerTag = rich.peer;
       await showOnce(cachedTitle, `@${rich.peer}: ${snippet || '(message)'}${more}`);
     })().catch(async (err) => {
       const why = String(err?.message ?? err).slice(0, 160);
@@ -169,7 +172,7 @@ self.addEventListener('notificationclick', (event) => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const client of windows) {
       if ('focus' in client) {
-        client.postMessage({ from: 'sw', type: 'notification-click', eventType: event.notification.data?.type });
+        client.postMessage({ from: 'sw', type: 'notification-click', eventType: event.notification.data?.type, peer: event.notification.data?.peer });
         return client.focus();
       }
     }

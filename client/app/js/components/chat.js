@@ -6,6 +6,34 @@
 import { $, setStatus, setChatOpen, fmtTime } from '../ui.js';
 import { saveMessage, updateMessage, messagesWith, markRead, allMessages } from '../store.js';
 
+// In-app banner (visible-but-other-chat) + OS notification (app hidden or
+// unfocused) for LIVE messages. Push covers closed-app devices server-side;
+// this covers the open-but-not-looking case, mutually exclusive by focus.
+let bannerTimer = null;
+
+function showBanner(text, peer) {
+  const el = document.getElementById('notif-banner');
+  if (!el) return;
+  el.textContent = text;
+  el.dataset.peer = peer || '';
+  el.hidden = false;
+  clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(() => { el.hidden = true; }, 4000);
+}
+
+async function notifyViaSw(body, peer) {
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration?.();
+    if (reg?.showNotification) {
+      reg.showNotification(document.title || 'co.co.no', {
+        body, tag: 'cocono-live', data: { type: 'msg', peer },
+      });
+    } else {
+      showBanner(body, peer); // no SW notification channel: fall back to banner
+    }
+  } catch { showBanner(body, peer); }
+}
+
 const STATE_MARK = { sending: '⏳', sent: '✓', delivered: '✓✓', failed: '!' };
 
 // 'Read' means the user actually LOOKED at the conversation: the tab is
@@ -46,6 +74,16 @@ export function createChat({ client, onHomeRefresh }) {
         if (windowActive()) markRead(m.peer, m.ts);
       }
       onHomeRefresh?.();
+
+      // Surface it (banner or OS notification) unless the user is actively
+      // looking at THIS conversation, focused.
+      const viewingThis = currentPeer && currentPeer.toLowerCase() === m.peer.toLowerCase();
+      if (!(viewingThis && windowActive())) {
+        const snippet = (m.text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+        const body = `@${m.peer}: ${snippet || '(message)'}`;
+        if (windowActive()) showBanner(body, m.peer);
+        else notifyViaSw(body, m.peer);
+      }
     });
 
     client.on('ack', async ({ localId, ok, error }) => {
@@ -159,6 +197,12 @@ export function createChat({ client, onHomeRefresh }) {
     $('chat-input').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') sendCurrent();
     });
+    document.getElementById('notif-banner')?.addEventListener('click', (e) => {
+      const peer = e.target.dataset?.peer;
+      e.target.hidden = true;
+      if (peer) openChat(peer);
+    });
+
     const closeChatPane = () => {
       currentPeer = null;
       setChatOpen(false);

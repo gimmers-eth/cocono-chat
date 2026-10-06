@@ -341,3 +341,13 @@ body[data-view="blocked"] .page-footer { display: none; }
   margin-top: auto; padding: .5rem .9rem calc(.5rem + env(safe-area-inset-bottom));
   border-top: 1px solid var(--border); opacity: .75; user-select: none;
 }
+
+/* In-app incoming-message banner (open app, other conversation) */
+.notif-banner {
+  position: fixed; top: calc(.6rem + env(safe-area-inset-top)); left: 50%;
+  transform: translateX(-50%); z-index: 45; cursor: pointer;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--accent); border-radius: 999px;
+  padding: .45rem 1.1rem; font-size: .9rem; box-shadow: var(--shadow);
+  max-width: min(92vw, 480px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
