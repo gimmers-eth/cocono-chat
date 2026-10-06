@@ -50,6 +50,12 @@ they point into `docs/`.
   push**; focused app shows in-app pills; the focused chat marks read.
   Live-receive self-heals stale peer-key caches (refresh-and-retry +
   `peerIdentityChanged` pill). iOS requires Add-to-Home-Screen for any push.
+- **Two receive-path bugs found & fixed (Oct 6)**: (a) stale peer-key cache
+  stranded live messages while push decoded fine (refresh-and-retry, b564b7a);
+  (b) the transport blindly reconnected on 4401, so a dead session made an
+  OPEN app silently deaf while push (fresh silent-login per event) kept
+  working — "decodes when closed, not when open" — 4401/4403 are now
+  permanent: token dropped, authFailed surfaced as a re-login prompt (3c6120d).
 - **Offline shell**: network-first SW caching of statics; app boots offline
   into read-only mode from IndexedDB (login failure w/ network error enters
   the app); online event promotes to live session.
