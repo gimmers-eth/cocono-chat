@@ -19,11 +19,12 @@ export function pushEnabled(config) {
 
 function ensureInit(config) {
   if (!initialized && pushEnabled(config)) {
-    webpush.setVAPIDDetails({
-      publicKey: config.vapidPublicKey,
-      privateKey: config.vapidPrivateKey,
-      subject: config.vapidSubject || 'mailto:unknown',
-    });
+    // web-push API is positional: setVapidDetails(subject, publicKey, privateKey)
+    webpush.setVapidDetails(
+      config.vapidSubject || 'mailto:unknown@example.com',
+      config.vapidPublicKey,
+      config.vapidPrivateKey,
+    );
     initialized = true;
   }
 }

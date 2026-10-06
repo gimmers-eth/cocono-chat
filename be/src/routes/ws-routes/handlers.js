@@ -63,16 +63,22 @@ export function createHandlers({ users, redis, pub, config, messages }) {
     // (no live WS). Blind payload — event type, nothing else. Never push to
     // the sender's own device (self-chat echo arrives via its live WS anyway).
     if (recipientDevice.push && m.d !== auth.d) {
-      const online = await redis.exists(presenceKey(rul, m.dv));
-      if (!online) {
-        const outcome = await sendBlindPush(config, recipientDevice.push, 'msg');
-        if (outcome === 'gone') {
-          // Push service says subscription is dead: clear it, nothing else.
-          await users.updateOne(
-            { ul: rul, 'devices.id': m.dv, 'devices.push.endpoint': recipientDevice.push.endpoint },
-            { $unset: { 'devices.$.push': '' } },
-          );
+      try {
+        const online = await redis.exists(presenceKey(rul, m.dv));
+        if (!online) {
+          const outcome = await sendBlindPush(config, recipientDevice.push, 'msg');
+          request.log.info(`[push] ${rul}/${m.dv.slice(0, 8)} -> ${outcome}`);
+          if (outcome === 'gone') {
+            // Push service says subscription is dead: clear it, nothing else.
+            await users.updateOne(
+              { ul: rul, 'devices.id': m.dv, 'devices.push.endpoint': recipientDevice.push.endpoint },
+              { $unset: { 'devices.$.push': '' } },
+            );
+          }
         }
+      } catch (err) {
+        // Push is best-effort: never let it break the send/ack path.
+        request.log.warn(`[push] ${rul}/${m.dv.slice(0, 8)} failed: ${err?.message ?? err}`);
       }
     }
     return ack(true);
