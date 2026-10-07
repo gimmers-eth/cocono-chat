@@ -10,7 +10,8 @@ explainable, and hard to inflate silently.
 ```
 score  = (verifiedBy × 1) + (trustedBy × 3)
 Social: Trusted  ⇔  score > COCO_TRUST_THRESHOLD (10)
-                    AND account age > COCO_TRUST_MIN_AGE_DAYS (30)
+                    AND trustedBy ≥ COCO_TRUST_MIN_VOUCHERS (2)
+                    AND account age > COCO_TRUST_MIN_AGE_DAYS (30 days)
 otherwise → Social: Untrusted
 ```
 

@@ -536,13 +536,21 @@ export function createChat({ client, onHomeRefresh }) {
   // Third stage behind a deliberate warning (the server also requires the
   // verify stage — a key never confirmed can’t be "trusted").
   async function confirmTrust() {
+    // informed vouching: show the account's App status + Social reputation
+    // (live from the stats endpoint) right where the decision is made
+    let stats = null;
+    try { stats = await client.userStats(currentPeer); } catch { /* offline: unknown */ }
+    const app = !peerIdentityKnown ? 'App: unknown'
+      : peerIdentityVerified ? 'App: Verified' : 'App: UNVERIFIED';
+    const social = stats ? (stats.socialTrusted ? 'Social: Trusted' : 'Social: Untrusted') : 'Social: unknown';
     const ok = await confirmModal({
       title: `Trust ${currentPeer}?`,
-      body: 'Trusting someone is also vouching for them on this platform. '
-        + 'Verified users who trust scammer accounts put their own account at risk '
-        + 'of being banned — your vouch counts toward this profile’s reputation. '
-        + 'Only trust people you actually know, after comparing safety numbers.',
-      okLabel: 'I know and trust them', danger: false,
+      subline: `${app} · ${social}${stats ? ` · CoCo: ${stats.coco}` : ''}`,
+      body: 'Trusting someone is also vouching for them on this platform — your '
+        + 'vouch counts toward this profile’s reputation. Only trust people you '
+        + 'actually know, after comparing safety numbers.',
+      warning: 'Only trust people you know. Trusting scammers can get YOU banned.',
+      okLabel: 'I know and trust them', danger: true,
     });
     if (!ok) return;
     try {

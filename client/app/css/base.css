@@ -577,6 +577,15 @@ body[data-view="blocked"] .page-footer { display: none; }
 .btn-danger { background: var(--danger); border-color: var(--danger); color: #14161a; }
 .btn-danger:hover:not(:disabled) { filter: brightness(1.1); }
 #confirm-body { margin: .4rem 0 .8rem; line-height: 1.45; }
+.confirm-subline {
+  margin: .3rem 0 .1rem; font-size: .8rem; font-weight: 600; text-align: center;
+  color: var(--muted); background: rgba(127, 127, 127, 0.08);
+  border-radius: 8px; padding: .35rem .6rem;
+}
+.confirm-warning {
+  margin: -0.2rem 0 .8rem; line-height: 1.4; font-weight: 700;
+  color: var(--danger);
+}
 
 /* Install nudge (auth card, default-visible) + settings rows */
 .install-hint {

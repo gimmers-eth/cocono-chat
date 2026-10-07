@@ -133,6 +133,8 @@ export const config = {
   // threshold AND account older than the minimum age
   cocoTrustThreshold: numOf(env.COCO_TRUST_THRESHOLD, 10),
   cocoTrustMinAgeDays: numOf(env.COCO_TRUST_MIN_AGE_DAYS, 30),
+  // distinct trusted vouches required for Social: Trusted (1 is not a network)
+  cocoTrustMinVouchers: numOf(env.COCO_TRUST_MIN_VOUCHERS, 2),
   idDocMaxBytes: numOf(env.ID_DOC_MAX_BYTES, 5 * 1024 * 1024),
   // ID upload unlocks once at least one VERIFIED user has TRUSTED this
   // account (trusting = vouching on the platform; see friends trust stage)

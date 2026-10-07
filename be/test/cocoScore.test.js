@@ -30,6 +30,16 @@ test('young accounts never qualify, whatever the score', () => {
   assert.equal(res.trusted, false, 'Sybil cool-down: age gate wins');
 });
 
+test('one lone voucher never makes a profile Trusted, whatever the score', () => {
+  // 11 verified + 1 trusted => score 14 > threshold, old account… still not
+  // trusted: distinct TRUSTED vouchers are below COCO_TRUST_MIN_VOUCHERS
+  const res = cocoScore({ verifiedBy: 11, trustedBy: 1 }, oldAccount);
+  assert.ok(res.score > config.cocoTrustThreshold);
+  assert.equal(res.trusted, false, 'lone vouch is not a network');
+  // two trusted vouchers clear it
+  assert.equal(cocoScore({ verifiedBy: 11, trustedBy: 2 }, oldAccount).trusted, true);
+});
+
 test('clock is injectable for deterministic age checks', () => {
   const created = Date.now() - 10 * DAY;
   assert.equal(cocoScore({ verifiedBy: 0, trustedBy: 100 }, created, Date.now()).trusted, false);

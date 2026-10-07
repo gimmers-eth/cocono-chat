@@ -48,12 +48,22 @@ export function setBusy(busy) {
  * Promise-based confirm dialog: resolves true on confirm, false on cancel /
  * scrim / Escape. Falls back to window.confirm if the markup is missing.
  */
-export function confirmModal({ title, body, okLabel = 'Confirm', danger = false }) {
+export function confirmModal({ title, body, okLabel = 'Confirm', danger = false, warning = '', subline = '' }) {
   const overlay = $('confirm-overlay');
   const modal = $('confirm-modal');
   if (!modal || !overlay) return Promise.resolve(window.confirm(`${title}\n\n${body}`));
   $('confirm-title').textContent = title;
   $('confirm-body').textContent = body;
+  const warnEl = $('confirm-warning');
+  if (warnEl) {
+    warnEl.textContent = warning;
+    warnEl.hidden = !warning;
+  }
+  const subEl = $('confirm-subline');
+  if (subEl) {
+    subEl.textContent = subline;
+    subEl.hidden = !subline;
+  }
   const ok = $('btn-confirm-ok');
   ok.textContent = okLabel;
   ok.classList.toggle('btn-danger', danger);
