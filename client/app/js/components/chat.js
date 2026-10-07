@@ -645,8 +645,7 @@ export function createChat({ client, onHomeRefresh }) {
       let stats = null;
       try { stats = await client.userStats(currentPeer); } catch { /* offline: leave hidden */ }
       if (stats) {
-        rep.textContent = `Added by ${stats.addedBy} · Trusted by ${stats.trustedBy} · `
-          + `Trusted by verified users: ${stats.verifiedBy}`;
+        rep.textContent = `Added by ${stats.addedBy} · Verified by ${stats.verifiedBy} · Trusted by ${stats.trustedBy}`;
         rep.hidden = false;
       }
     }

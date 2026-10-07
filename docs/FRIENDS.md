@@ -97,7 +97,7 @@ orange warnings in the chat, no strip once trusted:
 
 Trust stage 3 doubles as **vouching**: a trust carries weight only once the
 truster is themselves ID-verified, profiles expose reputation COUNTS
-(`addedBy / trustedBy / verifiedBy` — never identities), and ID upload for a
+(`addedBy / verifiedBy / trustedBy` — exclusive vouch-stage buckets, never identities), and ID upload for a
 new account unlocks only after at least one VERIFIED user trusts it
 (`ID_UPLOAD_REQUIRES_TRUSTED_VERIFIER`). Trusting a scammer is therefore a
 reputational risk for the truster, and the trust modal says so.

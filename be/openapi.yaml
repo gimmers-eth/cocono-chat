@@ -334,7 +334,7 @@ paths:
         - bearerAuth: []
       responses:
         '200':
-          description: addedBy / trustedBy / verifiedBy (vouching weight).
+          description: Exclusive vouch-stage buckets: addedBy / verifiedBy / trustedBy.
         '404': { description: 'No such user.' }
 
   /api/me/verify-id:

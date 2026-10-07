@@ -217,7 +217,15 @@ test('ID upload requires a VERIFIED user to trust you first (vouching gate)', as
   }
 });
 
-test('user stats: added/trusted/verifiedBy counts (numbers only)', async () => {
+async function trustAndVerifyTargetStep2(app, carolToken) {
+  // carol vouches for bobby and verifies (but does NOT trust) -> bobby's
+  // verifiedBy bucket gets exactly 1
+  const h = { authorization: `Bearer ${carolToken}` };
+  await app.inject({ method: 'PUT', url: '/api/me/friends/bobby', headers: h });
+  await app.inject({ method: 'PUT', url: '/api/me/friends/bobby/verify', headers: h, payload: { verified: true } });
+}
+
+test('user stats: vouch counts are EXCLUSIVE stage buckets', async () => {
   const { app, mongo, teardown } = await setupApp(LIMITS);
   try {
     const alice = makeClient(); const bob = makeClient(); const carol = makeClient();
@@ -228,19 +236,21 @@ test('user stats: added/trusted/verifiedBy counts (numbers only)', async () => {
     const tC = await getToken(app, carol, 'carol', c.d);
     const hB = { authorization: `Bearer ${tB}` };
 
-    // bob adds + verifies + trusts carol (the only vouch in this scenario)
+    // bob adds + verifies + trusts carol: he alone is ONE trusted vouch,
+    // not one of each
     await trustAndVerifyTarget(app, 'carol', tB);
 
     const stats = await app.inject({ method: 'GET', url: '/api/users/carol/stats', headers: hB });
     assert.equal(stats.statusCode, 200);
-    assert.deepEqual(stats.json(), { u: 'carol', addedBy: 1, trustedBy: 1, verifiedBy: 0 });
+    assert.deepEqual(stats.json(), { u: 'carol', addedBy: 0, verifiedBy: 0, trustedBy: 1 });
 
-    // verifying bob makes his vouch count as a verifiedBy
-    await mongo.db.collection('users').updateOne({ ul: 'bobby' }, { $set: { verified: true } });
-    const stats2 = await app.inject({ method: 'GET', url: '/api/users/carol/stats', headers: { authorization: `Bearer ${tC}` } });
-    assert.equal(stats2.json().verifiedBy, 1);
+    // carol's own token works too, and stages stay exclusive when a second
+    // vouch sits mid-ladder (alice adds+verifies dave… use carol as voucher)
+    await trustAndVerifyTargetStep2(app, tC);
+    const bStats = await app.inject({ method: 'GET', url: '/api/users/bobby/stats', headers: { authorization: `Bearer ${tC}` } });
+    assert.deepEqual(bStats.json(), { u: 'bobby', addedBy: 0, verifiedBy: 1, trustedBy: 0 });
 
-    // unknown -> 404, self-stats fine, counts never expose WHO
+    // unknown -> 404, counts never expose WHO
     assert.equal((await app.inject({ method: 'GET', url: '/api/users/nosuchuser/stats', headers: hB })).statusCode, 404);
   } finally {
     await teardown();
