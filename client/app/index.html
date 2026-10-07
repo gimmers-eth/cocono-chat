@@ -154,7 +154,7 @@
 
   <!-- Settings drawer: slides down from the top over a semi-transparent scrim. -->
   <div id="drawer-overlay" class="overlay" hidden></div>
-  <section id="settings-drawer" class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" hidden>
+  <section id="settings-drawer" class="side-menu wide" role="dialog" aria-modal="true" aria-labelledby="drawer-title" hidden>
     <header class="drawer-head">
       <h2 id="drawer-title">Settings</h2>
       <button id="btn-settings-close" class="icon-btn" title="Close" data-icon="close"></button>
@@ -211,10 +211,10 @@
     </div>
   </section>
 
-  <!-- Message modal (tap a bubble): the full message in a scrollable area,
-       actions FIXED underneath (copy / forward / delete-local). -->
+  <!-- Message modal (tap a bubble): right-hand side menu — readable
+       scrollable text, actions fixed underneath. -->
   <div id="msg-overlay" class="overlay" hidden></div>
-  <section id="msg-modal" class="diag-modal" role="dialog" aria-modal="true" aria-labelledby="msg-modal-title" hidden>
+  <section id="msg-modal" class="side-menu" role="dialog" aria-modal="true" aria-labelledby="msg-modal-title" hidden>
     <header class="drawer-head">
       <h2 id="msg-modal-title">Message</h2>
       <button id="btn-msg-close" class="icon-btn" title="Close" data-icon="close"></button>

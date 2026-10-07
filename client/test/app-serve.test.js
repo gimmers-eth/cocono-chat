@@ -42,7 +42,7 @@ test('app shell and assets are served', async (t) => {
   assert.match(html, /id="theme-link"[^>]*themes\/dark\/theme\.css/);
   assert.match(html, /src="\/js\/main\.js"/);
   assert.match(html, /id="drawer-overlay" class="overlay"/);
-  assert.match(html, /id="settings-drawer" class="drawer"[^>]*aria-modal="true"/);
+  assert.match(html, /id="settings-drawer" class="side-menu wide"[^>]*aria-modal="true"/);
   // icons: FA stylesheet linked + placeholder mechanism present
   assert.match(html, /vendor\/fontawesome\/css\/all\.min\.css/);
   assert.match(html, /data-icon="send"/);

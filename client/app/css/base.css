@@ -191,24 +191,7 @@ img.logo { object-fit: cover; background: none; }
 }
 @keyframes overlay-in { from { opacity: 0; } to { opacity: 1; } }
 
-.drawer {
-  position: fixed; top: 0; left: 50%; z-index: 50;
-  transform: translateX(-50%);
-  width: min(560px, 100%);
-  max-height: min(80dvh, 640px);
-  overflow-y: auto;
-  background: var(--panel);
-  border: 1px solid var(--border); border-top: 0;
-  border-radius: 0 0 16px 16px;
-  box-shadow: var(--shadow);
-  padding: .4rem 1.2rem calc(1rem + env(safe-area-inset-bottom)) 1.2rem;
-  padding-top: calc(.4rem + env(safe-area-inset-top));
-  animation: drawer-down .22s cubic-bezier(.2, .8, .3, 1);
-}
-@keyframes drawer-down {
-  from { transform: translate(-50%, -100%); }
-  to   { transform: translate(-50%, 0); }
-}
+/* Settings content blocks (chrome now uses the shared .side-menu panel). */
 .drawer-head {
   position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between;
   background: var(--panel); padding: .5rem 0; z-index: 1;
@@ -216,8 +199,6 @@ img.logo { object-fit: cover; background: none; }
 .drawer-head h2 { font-size: 1.05rem; }
 .drawer-body { display: grid; gap: .6rem; }
 .drawer-body h3 { font-size: .85rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-top: .6rem; }
-.drawer .approve-code { display: flex; gap: .5rem; }
-.drawer .row-actions { display: flex; gap: .5rem; align-items: center; }
 
 .chat-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
@@ -259,6 +240,10 @@ img.logo { object-fit: cover; background: none; }
 }
 /* Message modal action row: link-style options (not pill buttons). */
 .msg-modal-actions { margin-top: .6rem; flex-wrap: wrap; gap: 1rem; padding: 0 .2rem .2rem; }
+/* As a side menu the text area fills the panel and the action row stays
+   fixed at the bottom (scoped: the forward dialog keeps its 45vh preview). */
+#msg-modal.side-menu { display: flex; flex-direction: column; }
+#msg-modal .msg-modal-text { flex: 1 1 auto; max-height: none; }
 .linkish.danger { color: var(--danger); }
 
 /* Off-screen selection helper for the clipboard fallback (never visible). */
@@ -294,6 +279,8 @@ img.logo { object-fit: cover; background: none; }
   padding: calc(1.1rem + env(safe-area-inset-top)) 1rem 1.2rem 1rem;
   animation: side-menu-in .22s cubic-bezier(.2, .8, .3, 1);
 }
+/* wide: settings — denser content needs more room */
+.side-menu.wide { width: min(440px, 94vw); padding-inline: 1.2rem; }
 @keyframes side-menu-in { from { transform: translateX(100%); } to { transform: none; } }
 .side-menu-title {
   display: flex; align-items: center; gap: .45rem;
