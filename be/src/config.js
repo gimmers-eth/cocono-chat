@@ -103,6 +103,13 @@ export const config = {
   userKeysIpLimit: numOf(env.USER_KEYS_IP_LIMIT, 60),
   userKeysIpWindowSec: numOf(env.USER_KEYS_IP_WINDOW_SEC, DEFAULT_TIME_WINDOW),
 
+  // Friends (one-way trust list, stored per account; devices sync via
+  // GET + E2EE system messages broadcast by the acting device).
+  friendsMax: numOf(env.FRIENDS_MAX, 500),
+  friendsIpLimit: numOf(env.FRIENDS_IP_LIMIT, 300),
+  friendsChangeIpLimit: numOf(env.FRIENDS_CHANGE_IP_LIMIT, 60),
+  friendsIpWindowSec: numOf(env.FRIENDS_IP_WINDOW_SEC, DEFAULT_TIME_WINDOW),
+
   // Self-service device removal (DELETE /api/devices/:id).
   deviceRemoveAccountLimit: numOf(env.DEVICE_REMOVE_ACCOUNT_LIMIT, 10),
   deviceRemoveWindowSec: numOf(env.DEVICE_REMOVE_WINDOW_SEC, 3600),

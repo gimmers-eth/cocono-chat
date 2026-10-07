@@ -57,7 +57,9 @@ tags:
   - name: auth
     description: Passwordless challenge-response login and session info
   - name: devices
-    description: Multi-device enrollment, approval and listing (milestone 2)
+    description: Multi-device enrollment
+  - name: friends
+    description: One-way trust list (server is the source of truth; devices sync via E2EE system messages), approval and listing (milestone 2)
 
 paths:
   /api/signup:
@@ -247,6 +249,62 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+
+  /api/me/friends:
+    get:
+      tags: [friends]
+      operationId: listFriends
+      summary: Friends list (one-way trust)
+      description: >
+        Server-side list is the source of truth; devices mirror it locally
+        and stay live via E2EE system messages broadcast by the acting
+        device (not by the server).
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Friends (lowercase usernames, sorted).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  friends:
+                    type: array
+                    items: { type: string }
+
+  /api/me/friends/{username}:
+    put:
+      tags: [friends]
+      operationId: addFriend
+      summary: Mark a user as trusted (one-way)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Updated friends list.
+        '400': { description: 'Invalid username or self-friending.' }
+        '404': { description: 'No such user.' }
+        '409': { description: 'Friends list full (FRIENDS_MAX).' }
+    delete:
+      tags: [friends]
+      operationId: removeFriend
+      summary: Revoke trust in a user
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Updated friends list.
 
   /api/devices/enroll:
     post:

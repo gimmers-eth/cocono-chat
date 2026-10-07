@@ -1,6 +1,7 @@
 import signup from './signup.js';
 import auth from './auth.js';
 import me from './me.js';
+import friends from './friends.js';
 import devices from './devices.js';
 import userKeys from './userKeys.js';
 import diagnostics from './diagnostics.js';
@@ -12,6 +13,7 @@ export default async function appRoutes(app, ctx) {
   await app.register(signup, ctx);
   await app.register(auth, ctx);
   await app.register(me, ctx);
+  await app.register(friends, ctx);
   await app.register(devices, ctx);
   await app.register(userKeys, ctx);
   await app.register(diagnostics, ctx);

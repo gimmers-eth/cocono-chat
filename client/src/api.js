@@ -42,6 +42,19 @@ export class Api {
     return this.#request('/api/me', { token });
   }
 
+  // --- friends (one-way trust list; server = source of truth) ---
+  listFriends(token) {
+    return this.#request('/api/me/friends', { token });
+  }
+
+  addFriend(token, ul) {
+    return this.#request(`/api/me/friends/${encodeURIComponent(ul)}`, { method: 'PUT', token });
+  }
+
+  removeFriend(token, ul) {
+    return this.#request(`/api/me/friends/${encodeURIComponent(ul)}`, { method: 'DELETE', token });
+  }
+
   appInfo() {
     return this.#request('/api/app-info');
   }

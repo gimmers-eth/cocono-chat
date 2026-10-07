@@ -357,6 +357,47 @@ export class CoconoClient extends Emitter {
     this.#peerCache.delete(username.toLowerCase());
   }
 
+  // --- friends (one-way trust; server list is the source of truth) ---
+
+  /** Full friends list from the server (new devices: call after login). */
+  async listFriends() {
+    const res = await this.api.listFriends(this.#requireToken());
+    return res.friends ?? [];
+  }
+
+  /**
+   * Mark a user as trusted (one-way). Server first (authority), then a
+   * best-effort E2EE system message to our OWN account's devices so open
+   * ones update live; offline ones reconcile via listFriends().
+   * @returns {Promise<string[]>} the authoritative friends list
+   */
+  async addFriend(username) {
+    const ul = String(username).toLowerCase();
+    const res = await this.api.addFriend(this.#requireToken(), ul);
+    this.#broadcastFriend('friend+', ul);
+    return res.friends ?? [];
+  }
+
+  async removeFriend(username) {
+    const ul = String(username).toLowerCase();
+    const res = await this.api.removeFriend(this.#requireToken(), ul);
+    this.#broadcastFriend('friend-', ul);
+    return res.friends ?? [];
+  }
+
+  // Friend events ride the NORMAL E2EE send path to self: an envelope our
+  // other devices decrypt with their existing conversation keys. The app
+  // recognises the {"sys":"friend+|friend-"} payload and keeps it out of
+  // the transcript. Server never sees this content and cannot forge it
+  // (relay HMAC is keyed with our transport key).
+  #broadcastFriend(kind, ul) {
+    const identity = this.#identity;
+    if (!identity || !this.#transport || this.#transport.state !== 'open') return;
+    this.sendMessage(identity.username, JSON.stringify({ sys: kind, ul })).catch((err) => {
+      this.logger.debug(`friend live-sync broadcast failed: ${err?.message ?? err}`);
+    });
+  }
+
   /**
    * Pairing, NEW-device side step 1: request to join an existing account.
    * Returns the 6-digit code to show the user; an already-paired device must
