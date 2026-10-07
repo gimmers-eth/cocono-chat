@@ -216,12 +216,15 @@ replay dedup · envelope HMAC/sender-mismatch/unknown-recipient · auth flow hap
   - `cocono-be.service` — `pnpm dev` (watch mode, in-memory-Mongo fallback
     NOT used since MONGO_URL is set in .env), HTTPS on :443
   - `cocono-admin.service` — admin panel on `127.0.0.1:3001`
-- **Updating the deployment**: edit files (or push to `origin/master`), then
-  `git pull --ff-only && pnpm install` on the box; the `--watch` process
-  restarts on `be/` changes automatically. Static FE/SDK files are read per
-  request. There is currently NO `update.sh` and NO backup cron — see
-  "Next up" (ops trio). Test entry points: `pnpm test`, `pnpm test:client`,
-  `pnpm test:all`.
+- **Updating the deployment**: use **`./update.sh`** (ops trio #1, done) —
+  fetch → fast-forward → install-if-manifest-changed → **full test gate
+  (auto-revert on failure)** → known-good bounce of `cocono-be` (plus
+  `cocono-admin` when `be/` changed) → verify `/api/app-info` serves the
+  deployed sha. `--dry-run` shows the plan. The `--watch` process still
+  restarts on `be/` edits during interactive development; static FE/SDK
+  files are read per request. There is still NO backup cron — see "Next up"
+  (ops trio). Test entry points: `pnpm test`, `pnpm test:client`,
+  `pnpm test:all` (update.sh runs the gate for you).
 - **DNS**: `dev.co.co.no` → 192.168.1.84 (EuroDNS hosts the zone; `co.no` is
   a CoDNS-operated public suffix — passkey-style grouping quirks on Apple
   came from there). Cert: LE via acme.sh DNS-01, cron renewal ~60d.
@@ -248,9 +251,11 @@ replay dedup · envelope HMAC/sender-mismatch/unknown-recipient · auth flow hap
 
 ## Next up (agreed order)
 
-1. **Ops trio — NOT DONE YET**:
-   `update.sh` (pull → install → test → restart), backup cron
-   (hourly `mongodump`, daily repo bundle), GitHub Actions CI (Node 22 +
+1. **Ops trio — 1 of 3 DONE**:
+   ✅ `update.sh` (pull → install → test-gate with auto-rollback → restart
+   → verify served sha; `--dry-run` supported).
+   ⬜ backup cron (hourly `mongodump`, daily repo bundle — **encrypted at
+   rest** per P0 #5, with a restore drill), ⬜ GitHub Actions CI (Node 22 +
    redis, both suites). No build step exists (client is unbundled ES
    modules; there is no `dist/`).
 2. **Public-launch P0 list** (see Security posture): registration gate, queue

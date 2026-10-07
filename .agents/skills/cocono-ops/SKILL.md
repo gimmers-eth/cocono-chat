@@ -50,25 +50,21 @@ A `cocono-be` restart is invisible to users beyond a brief WS reconnect, but
 **restart mongo/redis loses in-flight state** (queues live in Redis!) - prefer
 letting them run.
 
-## Deploy flow after updates
+## Deploying updates
 
-`cocono-be` runs under `node --watch`: edits to **`be/` sources restart it
-automatically**; static FE/SDK files (`client/app`, `client/src`) are read per
-request and need NO restart. Use a manual restart only when: watch got stuck
-in a crash loop, env/config changed, deps changed, or you want a clean
-known-good bounce.
+**Use `./update.sh`** — it IS the deploy flow: fetch → fast-forward →
+`pnpm install` (only if manifests changed) → **full test gate** (on failure
+it resets HEAD back to the pre-deploy commit and exits) → restart
+`cocono-be` (+ `cocono-admin` when `be/` changed) → verify `/api/app-info`
+serves the deployed sha. `./update.sh --dry-run` shows the plan without
+acting. It refuses to run with uncommitted changes or a diverged history —
+commit/stash or resolve first.
 
-When pulling from `origin/master` (or after committing locally):
-
-```bash
-cd /home/mike/cocono-chat
-git pull --ff-only
-pnpm install                # only if lockfile changed (safe to run anyway)
-pnpm test:all               # 54 backend + 27 client tests; fix BEFORE restarting
-systemctl --user restart cocono-be
-sleep 2 && systemctl --user is-active cocono-be
-curl -s https://dev.co.co.no/api/app-info | head -c 200   # verify new sha is served
-```
+`cocono-be` runs under `node --watch`: edits to **`be/` sources during
+development restart it automatically**; static FE/SDK files (`client/app`,
+`client/src`) are read per request and need NO restart. A manual
+`systemctl --user restart cocono-be` is for stuck crash loops or config
+changes only — update.sh does the clean known-good bounce itself.
 
 ## Gotchas
 
@@ -80,9 +76,9 @@ curl -s https://dev.co.co.no/api/app-info | head -c 200   # verify new sha is se
 - TLS certs renew via an acme.sh cron (DNS-01/EuroDNS, ~60 d). If HTTPS fails:
   `journalctl --user -u cocono-be | grep -i cert` and check the acme.sh cron
   log before touching anything.
-- There is **no `update.sh` and no backup cron yet** (tracked as the "ops
-  trio" in `docs/PROJECT_STATUS.md`) - do the steps above by hand and keep
-  this skill as the canonical checklist.
+- There is **no backup cron yet** (ops trio #2) and **no CI yet** (ops trio
+  #3) — `update.sh` covers deploys; keep this skill as the canonical ops
+  reference for the rest.
 - Never restart services as a *system* service - these are user units:
   always `systemctl --user ...` (running plain `systemctl status cocono-be`
   finds nothing and is misleading).
