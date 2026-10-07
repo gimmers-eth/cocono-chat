@@ -677,15 +677,16 @@ export function createChat({ client, onHomeRefresh }) {
     // show photo when present, else the initial circle
     const avatarEl = $('profile-avatar-img');
     const initialEl = $('profile-avatar');
+    const bioSec = $('profile-bio-section');
     const bioEl = $('profile-peer-bio');
     avatarEl.hidden = true;
     initialEl.hidden = false;
-    bioEl.hidden = true;
+    bioSec.hidden = true;
     try {
       const prof = await client.viewProfile(currentPeer);
-      // descriptions are surfaced only for ID-verified accounts (an
-      // unverified stranger gets no broadcast channel for their text)
-      if (prof.bio && peerIdentityVerified) { bioEl.textContent = prof.bio; bioEl.hidden = false; }
+      // descriptions surface only for ID-verified accounts (an unverified
+      // stranger gets no broadcast channel for their text)
+      if (prof.bio && peerIdentityVerified) { bioEl.textContent = prof.bio; bioSec.hidden = false; }
       rememberPeerAvatar(currentPeer, prof.avatar).catch(() => {});
       if (prof.avatar) {
         avatarEl.src = `data:${prof.avatarType || 'image/jpeg'};base64,${prof.avatar}`;
@@ -722,6 +723,7 @@ export function createChat({ client, onHomeRefresh }) {
       $('profile-account-state').hidden = true;
       $('profile-joined').hidden = true;
       $('profile-coco').hidden = true;
+      $('profile-bio-section').hidden = true;
       return;
     }
     [socialState, socialNote, youState, youNote].forEach((el) => { el.hidden = false; });
@@ -790,8 +792,9 @@ export function createChat({ client, onHomeRefresh }) {
       initial.hidden = false;
       initial.textContent = meUl.slice(0, 1);
     }
+    const bioSec = $('profile-bio-section');
     const bioEl = $('profile-peer-bio');
-    bioEl.hidden = !(prof?.bio && me?.verified);
+    bioSec.hidden = !(prof?.bio && me?.verified);
     if (prof?.bio && me?.verified) bioEl.textContent = prof.bio;
     $('profile-status-icon').replaceChildren(peerStateIcon(PS.TRUSTED));
     renderAccountStage(me?.createdAt ? new Date(me.createdAt).getTime() : null);

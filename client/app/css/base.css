@@ -701,3 +701,5 @@ body[data-view="blocked"] .page-footer { display: none; }
   box-shadow: var(--shadow); image-rendering: auto; cursor: zoom-out;
 }
 #profile-avatar-img, #profile-own-avatar, #me-avatar-img, .chat-avatar, .peer-list .avatar-img { cursor: zoom-in; }
+
+.bio-text { margin: 0; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
