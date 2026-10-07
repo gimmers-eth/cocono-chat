@@ -9,7 +9,7 @@
 // touches — unlike the earlier "focus class on a bubble" attempt, which the
 // click-triggered catchUp re-render wiped within the same gesture.
 
-import { $, setStatus, setChatOpen, fmtTime, confirmModal } from '../ui.js';
+import { $, setStatus, setChatOpen, fmtTime, confirmModal, toast } from '../ui.js';
 import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
 import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl } from './peername.js';
@@ -183,7 +183,7 @@ export function createChat({ client, onHomeRefresh }) {
     client.on('ack', async ({ localId, ok, error }) => {
       if (!localId) return;
       const rec = await updateMessage(`out:${localId}`, { state: ok ? 'sent' : 'failed' });
-      if (!ok) setStatus($('chat-status'), `Send rejected: ${error ?? 'unknown'}`, true);
+      if (!ok) toast(`Send rejected: ${error ?? 'unknown'}`, 'error');
       if (rec) {
         await render();
         onHomeRefresh?.();
@@ -199,7 +199,7 @@ export function createChat({ client, onHomeRefresh }) {
       }
     });
 
-    client.on('error', ({ error }) => setStatus($('chat-status'), error?.message ?? String(error), true));
+    client.on('error', ({ error }) => toast(error?.message ?? String(error), true));
   }
 
   // --- sending ---
@@ -209,7 +209,7 @@ export function createChat({ client, onHomeRefresh }) {
     const text = input.value.trim();
     if (!text || !currentPeer || peerGone) return;
     input.value = '';
-    setStatus($('chat-status'), '');
+    toast('');
     try {
       const { localId } = await client.sendMessage(currentPeer, text);
       await saveMessage({ id: `out:${localId}`, peer: currentPeer, dir: 'out', text, ts: Date.now(), state: 'sending' });
@@ -230,13 +230,9 @@ export function createChat({ client, onHomeRefresh }) {
         updateTrustUI().catch(() => {});
         onHomeRefresh?.();
       }
-      setStatus(
-        $('chat-status'),
-        navigator.onLine === false
-          ? 'Offline — messages cannot be sent yet. They stay unsent until you reconnect.'
-          : err.message ?? String(err),
-        true,
-      );
+      toast(navigator.onLine === false
+        ? 'Offline — messages cannot be sent yet. They stay unsent until you reconnect.'
+        : err.message ?? String(err), 'error');
     }
   }
 
@@ -460,18 +456,17 @@ export function createChat({ client, onHomeRefresh }) {
       const pin = await getPin(currentPeer);
       if (pin && entry?.p && entry.p !== pin.p) {
         await client.removeFriend(currentPeer).catch(() => {});
-        setStatus($('chat-status'),
-          `Couldn’t add ${currentPeer}: the key we remember on this device doesn’t match what the server says. Open the safety number and check it together before trusting this name.`, true);
+        toast(`Couldn’t add ${currentPeer}: the key we remember on this device doesn’t match what the server says. Open the safety number and check it together before trusting this name.`, 'error');
         await updateTrustUI();
         return;
       }
       await friendAdd(currentPeer, entry?.p ?? '');
       if (entry?.p) await recordPinSeen(currentPeer, entry.p);
-      setStatus($('chat-status'), `${currentPeer} added — now verify the safety number to be sure it’s really them.`);
+      toast(`${currentPeer} added — now verify the safety number to be sure it’s really them.`);
       await updateTrustUI();
       onHomeRefresh?.();
     } catch (err) {
-      setStatus($('chat-status'), err.message ?? String(err), true);
+      toast(err.message ?? String(err), 'error');
     }
   }
 
@@ -485,11 +480,11 @@ export function createChat({ client, onHomeRefresh }) {
     try {
       await client.removeFriend(currentPeer);
       await friendDel(currentPeer);
-      setStatus($('chat-status'), `${currentPeer} removed.`);
+      toast(`${currentPeer} removed.`);
       await updateTrustUI();
       onHomeRefresh?.();
     } catch (err) {
-      setStatus($('chat-status'), err.message ?? String(err), true);
+      toast(err.message ?? String(err), 'error');
     }
   }
 
@@ -508,11 +503,11 @@ export function createChat({ client, onHomeRefresh }) {
     try {
       await client.setFriendTrusted(currentPeer, true);
       await friendMarkFlags(currentPeer, { trust: true });
-      setStatus($('chat-status'), `${currentPeer} trusted.`);
+      toast(`${currentPeer} trusted.`);
       await updateTrustUI();
       onHomeRefresh?.();
     } catch (err) {
-      setStatus($('chat-status'), err.message ?? String(err), true);
+      toast(err.message ?? String(err), 'error');
     }
   }
 
@@ -698,12 +693,12 @@ export function createChat({ client, onHomeRefresh }) {
     try {
       await client.setFriendVerified(currentPeer, !ent.verified);
       await friendMarkFlags(currentPeer, { verified: !ent.verified, trust: false });
-      setStatus($('chat-status'), ent.verified ? 'Verification undone.' : 'Verified ✓ — now trust them if you know this person.');
+      toast(ent.verified ? 'Verification undone.' : 'Verified ✓ — now trust them if you know this person.');
       await showIdentityView();
       await updateTrustUI();
       onHomeRefresh?.();
     } catch (err) {
-      setStatus($('chat-status'), err.message ?? String(err), true);
+      toast(err.message ?? String(err), 'error');
     }
   }
 
@@ -767,7 +762,7 @@ export function createChat({ client, onHomeRefresh }) {
       const { localId } = await client.sendMessage(target, rec.text);
       await saveMessage({ id: `out:${localId}`, peer: target, dir: 'out', text: rec.text, ts: Date.now(), state: 'sending' });
       closeForward();
-      setStatus($('chat-status'), `Forwarded to ${target}`);
+      toast(`Forwarded to ${target}`);
       onHomeRefresh?.();
       if (currentPeer === target) await render();
     } catch (err) {
@@ -805,7 +800,7 @@ export function createChat({ client, onHomeRefresh }) {
       // deleted"), then device count or the offline note
       $('chat-sub').replaceChildren(...chatSubNodes(peer));
       setComposerEnabled(!peerGone);
-      setStatus($('chat-status'), '');
+      toast('');
       $('chat-empty').hidden = true;
       $('chat-view').hidden = false;
       setChatOpen(true);
@@ -833,8 +828,7 @@ export function createChat({ client, onHomeRefresh }) {
       if (peer && ent && (ent.changed || (peer.id && ent.pub && ent.pub !== peer.id))) {
         client.removeFriend(currentPeer).catch(() => {});
         await friendDel(currentPeer);
-        setStatus($('chat-status'),
-          `Trust removed — ${currentPeer}'s account identity changed (username re-registered). Re-add to re-bind.`);
+        toast(`Trust removed — ${currentPeer}'s account identity changed (username re-registered). Re-add to re-bind.`, 'error');
       }
       await updateTrustUI();
       // Read up to the newest DISPLAYED message (server-assigned ts): marking
@@ -950,7 +944,7 @@ export function createChat({ client, onHomeRefresh }) {
       const n = await clearMessages(currentPeer);
       await render();
       onHomeRefresh?.();
-      setStatus($('chat-status'), n ? `Cleared ${n} message${n === 1 ? '' : 's'} on this device` : '');
+      toast(n ? `Cleared ${n} message${n === 1 ? '' : 's'} on this device` : '');
     });
 
     // Forward dialog. NB: reference forwardCurrentMsg/sendForward at CALL

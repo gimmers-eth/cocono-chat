@@ -33,7 +33,13 @@
 
   --sidebar-w: 380px;
   --head-h: 54px;
+  /* bottom safe-area padding: only installed (standalone) apps sit under a
+     home indicator — in a browser the toolbar already provides the space */
+  --sa-b: 0px;
   font-size: 16px;
+}
+@media (display-mode: standalone) {
+  :root { --sa-b: env(safe-area-inset-bottom); }
 }
 
 * { box-sizing: border-box; margin: 0; }
@@ -373,7 +379,7 @@ img.logo { object-fit: cover; background: none; }
   background: var(--panel);
   border: 1px solid var(--border); border-top: 0;
   border-radius: 0 0 16px 16px; box-shadow: var(--shadow);
-  padding: .4rem 1.2rem calc(1rem + env(safe-area-inset-bottom));
+  padding: .4rem 1.2rem calc(1rem + var(--sa-b));
   padding-top: calc(.4rem + env(safe-area-inset-top));
   animation: sheet-down .22s cubic-bezier(.2, .8, .3, 1);
 }
@@ -479,11 +485,10 @@ img.logo { object-fit: cover; background: none; }
 
 .composer {
   flex: none; display: flex; gap: .6rem; align-items: center;
-  padding: .6rem 1rem calc(.6rem + env(safe-area-inset-bottom));
+  padding: .6rem 1rem calc(.6rem + var(--sa-b));
   background: var(--panel);
 }
 .composer input { flex: 1; }
-#chat-status { padding: 0 1rem; }
 
 /* ---------- mobile: one pane at a time ---------- */
 
@@ -507,7 +512,7 @@ img.logo { object-fit: cover; background: none; }
 .page-footer {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 30;
   display: none;
-  padding: .5rem 1rem calc(.5rem + env(safe-area-inset-bottom));
+  padding: .5rem 1rem calc(.5rem + var(--sa-b));
   background: var(--bg); border-top: 1px solid var(--border);
   font-size: .8rem; opacity: .9;
 }
@@ -568,7 +573,7 @@ body[data-view="blocked"] .page-footer { display: none; }
 
 /* Offline banner (app view) */
 .offline-banner {
-  position: fixed; left: 50%; bottom: calc(.75rem + env(safe-area-inset-bottom));
+  position: fixed; left: 50%; bottom: calc(.75rem + var(--sa-b));
   transform: translateX(-50%);
   z-index: 35; background: var(--panel); color: var(--text);
   border: 1px solid var(--accent); border-radius: 999px;
@@ -578,9 +583,24 @@ body[data-view="blocked"] .page-footer { display: none; }
 
 /* Sidebar footer: client build */
 .side-foot {
-  margin-top: auto; padding: .5rem .9rem calc(.5rem + env(safe-area-inset-bottom));
+  margin-top: auto; padding: .5rem .9rem calc(.5rem + var(--sa-b));
   border-top: 1px solid var(--border); opacity: .75; user-select: none;
 }
+
+/* Transient toast pill above the composer (errors / confirmations) */
+.toast {
+  position: fixed; left: 50%; bottom: calc(4.6rem + var(--sa-b));
+  transform: translateX(-50%); z-index: 60;
+  max-width: min(92vw, 520px);
+  background: var(--panel-raised); color: var(--text);
+  border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: 10px; padding: .55rem .9rem;
+  font-size: .85rem; line-height: 1.35; box-shadow: var(--shadow);
+  animation: toast-in .18s ease-out; text-align: center;
+}
+.toast.error { border-left-color: var(--danger); }
+.toast.ok { border-left-color: var(--success); }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 6px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
 /* In-app incoming-message banner (open app, other conversation) */
 .notif-banner {

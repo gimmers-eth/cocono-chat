@@ -25,6 +25,20 @@ export function setStatus(el, message, isError = false) {
   el.classList.toggle('error', Boolean(isError));
 }
 
+// Transient toast pill (errors & short confirmations) — floats above the
+// composer, auto-dismisses. Replaces the old always-present chat status
+// line, whose min-height was a permanent gap below the input.
+let toastTimer = null;
+export function toast(message, kind = '') {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = message ?? '';
+  el.className = `toast ${kind}`;
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  if (message) toastTimer = setTimeout(() => { el.hidden = true; }, 4500);
+}
+
 export function setBusy(busy) {
   for (const btn of document.querySelectorAll('button')) btn.disabled = busy;
 }

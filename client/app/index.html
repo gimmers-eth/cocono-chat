@@ -142,7 +142,6 @@
                  autocomplete="off" maxlength="4096" />
           <button id="btn-send" class="btn btn-accent round" title="Send" data-icon="send"></button>
         </footer>
-        <p id="chat-status" class="status" role="status"></p>
       </section>
     </main>
   </div>
@@ -365,6 +364,9 @@
 
   <!-- Page footer: diagnostics send (login screen only). -->
   <footer id="page-footer" class="page-footer"></footer>
+
+  <!-- transient toast (errors & short confirmations) -->
+  <p id="toast" class="toast" hidden role="status"></p>
 
   <script type="module" src="/js/main.js"></script>
 </body>
