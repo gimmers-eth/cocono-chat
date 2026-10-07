@@ -602,18 +602,35 @@ export function createChat({ client, onHomeRefresh }) {
     const pin = await getPin(currentPeer);
     const state = trustState(ent, pin);
     $('profile-status-icon').replaceChildren(peerStateIcon(state));
-    $('profile-joined').textContent = peerJoinedAt
-      ? `Joined ${new Date(peerJoinedAt).toLocaleDateString()}`
-      : '';
+    $('profile-joined').textContent = peerJoinedAt ? `Joined ${new Date(peerJoinedAt).toLocaleDateString()}` : '';
     $('profile-joined').hidden = !peerJoinedAt;
+
+    // reputation counts at the TOP of Safety (hidden for vanished profiles;
+    // counts of a dead account would only confuse)
+    const rep = $('profile-reputation');
+    rep.hidden = true;
 
     const idState = $('profile-id-state');
     const idNote = $('profile-id-note');
-    if (state === PS.GONE) {
+    const trustStateEl = $('profile-trust-state');
+    const trustNote = $('profile-trust-note');
+
+    // one single verdict for vanished peers — no repeated "deleted/not
+    // found" across the identity AND trust rows
+    if (peerGone || ent?.gone) {
       idState.textContent = peerHadHistory ? 'Account deleted' : 'User not found';
       idState.className = 'profile-id-state bad';
-      idNote.textContent = '';
-    } else if (peerIdentityKnown && peerIdentityVerified) {
+      idNote.textContent = peerHadHistory
+        ? 'This account no longer exists. Your saved messages stay readable, but nothing new can be sent.'
+        : 'No account with this name exists — nothing you send can be delivered.';
+      trustStateEl.hidden = true;
+      trustNote.hidden = true;
+      return;
+    }
+    trustStateEl.hidden = false;
+    trustNote.hidden = false;
+
+    if (peerIdentityKnown && peerIdentityVerified) {
       idState.textContent = 'Identity verified';
       idState.className = 'profile-id-state ok';
       idNote.textContent = 'This account handed an ID document to a human reviewer — the person behind it has been checked.';
@@ -627,28 +644,19 @@ export function createChat({ client, onHomeRefresh }) {
       idNote.textContent = 'Open this chat while online to check the account status.';
     }
 
-    const goneStage = peerHadHistory
-      ? ['bad', 'Account deleted', 'This account no longer exists. Your saved messages stay readable, but nothing new can be sent.']
-      : ['bad', 'User not found', 'No account with this name exists.'];
-    const [cls, title, desc] = state === PS.GONE
-      ? goneStage
-      : (TRUST_STAGES[state] ?? TRUST_STAGES[PS.STRANGER]);
-    const trustStateEl = $('profile-trust-state');
+    const [cls, title, desc] = TRUST_STAGES[state] ?? TRUST_STAGES[PS.STRANGER];
     trustStateEl.textContent = title;
     trustStateEl.className = `profile-id-state trust ${cls}`;
-    $('profile-trust-note').textContent = state === PS.GONE ? '' : desc;
+    trustNote.textContent = desc;
 
-    // reputation counts for this profile (never identities)
-    const rep = $('profile-reputation');
-    rep.hidden = true;
-    if (!(peerGone || state === PS.GONE)) {
-      let stats = null;
-      try { stats = await client.userStats(currentPeer); } catch { /* offline: leave hidden */ }
+    // reputation last fetch so a vanished verdict above can short-circuit it
+    try {
+      const stats = await client.userStats(currentPeer);
       if (stats) {
         rep.textContent = `Added by ${stats.addedBy} · Verified by ${stats.verifiedBy} · Trusted by ${stats.trustedBy}`;
         rep.hidden = false;
       }
-    }
+    } catch { /* offline: stay hidden */ }
   }
 
   async function openProfileView() {
