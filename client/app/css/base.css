@@ -141,7 +141,12 @@ img.logo { object-fit: cover; background: none; }
   height: var(--head-h); flex: none; display: flex; align-items: center;
   justify-content: space-between; padding: 0 1rem; gap: .6rem;
 }
-.me { display: flex; align-items: center; gap: .6rem; min-width: 0; }
+.me { display: flex; align-items: baseline; gap: .35rem; min-width: 0; }
+/* the avatar is the only centred element; text bits share a baseline just
+   like the sidebar rows (.convo-name i treatment) */
+.me .avatar { align-self: center; }
+.me .verify-badge { margin-left: 0; font-size: .72rem; vertical-align: .05em; }
+#me-verify-badge { display: inline; }
 .me-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side-actions { display: flex; align-items: center; gap: .3rem; }
 
@@ -280,7 +285,7 @@ img.logo { object-fit: cover; background: none; }
 .verify-badge { color: var(--danger) !important; font-size: .72em; margin-left: .4em; }
 .badge-slot { display: inline; }
 .badge-slot .verify-badge { margin-left: .35em; }
-.verify-link { font-size: .72rem; margin-left: .5rem; opacity: .9; color: var(--warning) !important; }
+.verify-link { font-size: .72rem; margin-left: 0; opacity: .9; color: var(--warning) !important; }
 /* chat-head sub-line flags (Unverified user / Account deleted) */
 #chat-sub .sub-flag { color: var(--danger); }
 
