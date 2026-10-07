@@ -96,7 +96,21 @@ export default async function adminOpsRoutes(app, { redis }) {
     const job = request.body?.job;
     if (!JOBS[job]) return fail(reply, 'bad_job', 'unknown job (hourly|daily|drill)', 400);
     if (await lockBusy()) return fail(reply, 'busy', 'another ops run is active', 409);
-    const child = spawn('bash', [path.join(OPS, JOBS[job][0]), ...JOBS[job][1]], {
+    const args = [...JOBS[job][1]];
+    // The drill tests a SPECIFIC archive when one is selected (validated to
+    // our hourly naming + existence); with none, backup-drill.sh takes the
+    // newest hourly by itself.
+    if (job === 'drill' && request.body?.archive) {
+      const name = String(request.body.archive);
+      if (!ARCHIVE_RE.test(name)) return fail(reply, 'bad_archive', 'not a valid hourly archive name', 400);
+      try {
+        await fs.stat(path.join(BACKUP_DIR, 'hourly', name));
+      } catch {
+        return fail(reply, 'unknown_archive', 'archive not found in ~/backups/hourly', 404);
+      }
+      args.push(path.join(BACKUP_DIR, 'hourly', name));
+    }
+    const child = spawn('bash', [path.join(OPS, JOBS[job][0]), ...args], {
       cwd: REPO, stdio: 'ignore', detached: true,
     });
     child.on('error', () => { /* surfaces as a missing status file next refresh */ });

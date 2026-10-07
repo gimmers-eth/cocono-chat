@@ -211,11 +211,16 @@ $('btn-purge-diags').addEventListener('click', () => {
 });
 
 // ---- Backup & Ops ----
-const opsRun = (job, label) => run(`${label} started`, () =>
-  api('/api/admin/ops/run', { method: 'POST', body: JSON.stringify({ job }) }));
+const opsRun = (job, label, extra = {}) => run(`${label} started`, () =>
+  api('/api/admin/ops/run', { method: 'POST', body: JSON.stringify({ job, ...extra }) }));
 $('btn-ops-hourly').addEventListener('click', () => opsRun('hourly', 'Hourly backup'));
 $('btn-ops-daily').addEventListener('click', () => opsRun('daily', 'Box bundle'));
-$('btn-ops-drill').addEventListener('click', () => opsRun('drill', 'Restore drill'));
+// The drill tests the archive selected in the dropdown (top = newest by
+// default); empty selection falls back to newest server-side via the script.
+$('btn-ops-drill').addEventListener('click', () => {
+  const archive = $('restore-archive').value || undefined;
+  opsRun('drill', archive ? `Restore drill on ${archive}` : 'Restore drill (newest)', { archive });
+});
 $('btn-ops-restore').addEventListener('click', () => {
   const archive = $('restore-archive').value;
   if (!archive) return setStatus('No hourly backup available', 'error');

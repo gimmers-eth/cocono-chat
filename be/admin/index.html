@@ -58,7 +58,7 @@
       <div class="row">
         <button id="btn-ops-hourly">Backup now</button>
         <button id="btn-ops-daily">Box bundle now</button>
-        <button id="btn-ops-drill">Test a backup (drill)</button>
+        <button id="btn-ops-drill">Test selected backup (drill)</button>
         <span id="ops-running" class="dim" hidden>⏳ ops run in progress…</span>
       </div>
       <table>
@@ -72,7 +72,7 @@
         <select id="restore-archive" size="1"></select>
         <input id="restore-confirm" type="text" placeholder="type RESTORE" size="12" autocomplete="off" />
         <button id="btn-ops-restore" class="danger tiny">Restore prod</button>
-        <span class="dim">overwrites live data with the chosen backup</span>
+        <span class="dim">selected hourly archive — used by the drill AND by restore</span>
       </div>
       <pre id="ops-log" class="log" hidden></pre>
     </div>
