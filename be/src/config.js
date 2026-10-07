@@ -22,7 +22,7 @@ const parseTrustProxy = (value) => {
 export const config = {
   // Display name of the app (sign-in screen, chat header, PWA, admin).
   // Overridable at runtime in the admin panel (settings collection).
-  appName: env.APP_NAME ?? 'co.co.no',
+  appName: env.APP_NAME ?? 'CoCoNo',
 
   port: numOf(env.PORT, 3000),
   // Default to all interfaces so LAN/mobile access works out of the box.

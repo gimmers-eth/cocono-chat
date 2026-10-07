@@ -144,7 +144,7 @@ function renderDiags(diags) {
 }
 
 function renderBranding(b) {
-  const name = b.appName ?? b.defaultName ?? 'co.co.no';
+  const name = b.appName ?? b.defaultName ?? 'CoCoNo';
   document.title = `${name} admin`;
   const title = $('admin-title');
   if (title) title.textContent = `${name} — internal admin`;

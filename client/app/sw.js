@@ -20,7 +20,7 @@
 //    manifest are never cached.
 
 const SHELL_CACHE = 'cocono-shell-v4';
-const FALLBACK_TITLE = 'co.co.no';
+const FALLBACK_TITLE = 'CoCoNo';
 const SETTLE_MS = 800;
 
 self.addEventListener('install', () => self.skipWaiting());
