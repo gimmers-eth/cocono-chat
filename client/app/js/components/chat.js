@@ -784,6 +784,7 @@ export function createChat({ client, onHomeRefresh }) {
     $('forward-preview').textContent = text;
     setStatus($('forward-status'), '');
     $('forward-username').value = '';
+    $('btn-forward-send').classList.remove('ready');
     $('forward-overlay').hidden = false;
     $('forward-modal').hidden = false;
     await forwardSuggestions.refresh(); // local users, filtered as you type
@@ -1086,7 +1087,20 @@ export function createChat({ client, onHomeRefresh }) {
     // Forward dialog. NB: reference forwardCurrentMsg/sendForward at CALL
     // time (not wire time) — a const binding defined further down the
     // closure would sit in the TDZ and throw during boot.
-    forwardSuggestions.wireInput($('forward-username'), (p) => sendForward(p));
+    // Fat-finger save: tapping a suggestion SELECTS (fills the field, the
+    // list filters to show the pick) — sending requires the explicit Send
+    // button / Enter, so there is a beat to check and cancel.
+    forwardSuggestions.wireInput($('forward-username'), (p) => {
+      const input = $('forward-username');
+      if (input.value.trim().toLowerCase() === p) {
+        input.value = ''; // tapping the already-selected name un-selects
+      } else {
+        input.value = p;
+      }
+      forwardSuggestions.paint();
+      $('btn-forward-send').classList.toggle('ready', !!input.value.trim());
+      input.focus?.();
+    });
     $('btn-forward-cancel').addEventListener('click', closeForward);
     $('forward-overlay').addEventListener('click', closeForward);
     $('btn-forward-send').addEventListener('click', () => sendForward());

@@ -133,11 +133,18 @@ export async function clearMessages(peer) {
   });
 }
 
-// Usernames known ON THIS DEVICE (peers we hold messages with). No server
+// Usernames known ON THIS DEVICE: peers we hold messages with, PLUS added
+// friends (a friend with zero messages is still a person you can reach —
+// drives the sidebar new-chat and forward suggestion lists). No server
 // contact — this is what the UI surfaces as "local users".
 export async function knownPeers() {
-  const all = await allMessages();
-  return [...new Set(all.map((m) => String(m.peer).toLowerCase()))].sort();
+  const [all, friends] = await Promise.all([allMessages(), loadFriends()]);
+  const set = new Set([
+    ...all.map((m) => String(m.peer).toLowerCase()),
+    ...friends.map((f) => String(f.peer).toLowerCase()),
+  ]);
+  set.delete('');
+  return [...set].sort();
 }
 
 export function allMessages() {

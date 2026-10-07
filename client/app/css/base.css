@@ -274,6 +274,9 @@ img.logo { object-fit: cover; background: none; }
 /* Off-screen selection helper for the clipboard fallback (never visible). */
 .copy-helper { position: fixed; top: -100vw; left: -100vw; opacity: 0; }
 
+/* forward flow: a target is selected, Send is armed */
+.btn.ready { box-shadow: 0 0 0 2px var(--accent), 0 0 14px rgba(0, 168, 132, 0.35); }
+
 /* Safety number panel: smaller text; the WHOLE box is the copy target with
    a tag bottom-right; .copied highlights until the next tap re-copies. */
 .identity-number {
