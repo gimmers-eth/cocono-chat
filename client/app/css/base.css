@@ -207,7 +207,10 @@ img.own-avatar { border-radius: 50%; }
 .convo-list .convo-name { font-weight: 600; }
 .convo-list .convo-name.gone { font-style: italic; }
 .convo-list .convo-name i { font-size: .72rem; margin-right: .5em; vertical-align: .05em; }
-.convo-list .convo-last {
+/* the chat-head sub-line ("N devices", flags) uses the exact message-preview
+   typography + overflow behaviour of the sidebar rows */
+.sub-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.convo-list .convo-last, #chat-sub {
   color: var(--muted); font-size: .85rem; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap;
 }
