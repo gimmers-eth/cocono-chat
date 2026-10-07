@@ -301,19 +301,21 @@ export function createChat({ client, onHomeRefresh }) {
       headStatus?.replaceChildren();
       return;
     }
-    // header identity mark mirrors the sidebar: green outlined user (friend)
-    // vs red person-with-an-x (stranger) — always recomputed, including for
-    // ghost chats (the friend mirror is still the local truth)
+    // header identity mark: deleted account -> user-slash (red, italic name);
+    // otherwise green outlined user (friend) vs red user-with-an-x (stranger)
     const friend = await isCurrentPeerFriend();
     headStatus.replaceChildren(
-      iconEl(friend ? 'friend' : 'notFriend', friend ? 'icon-friend' : 'icon-danger'),
+      peerGone
+        ? iconEl('userGone', 'icon-danger')
+        : iconEl(friend ? 'friend' : 'notFriend', friend ? 'icon-friend' : 'icon-danger'),
     );
+    $('chat-peer').parentElement.classList.toggle('gone', peerGone);
     if (peerGone) {
       // deleted account outranks the trust strip: this chat is history
       warn.classList.add('gone');
       warn.hidden = false;
       warn.replaceChildren(
-        iconEl('notFriend', 'icon-danger'),
+        iconEl('userGone', 'icon-danger'),
         document.createTextNode(` ${currentPeer} no longer exists — this account was deleted. `
           + 'Your stored messages remain readable, but sending is disabled.'),
       );

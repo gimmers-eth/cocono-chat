@@ -26,6 +26,7 @@ export const ICONS = {
 
   // friendship (one-way trust) — sidebar + menu identity marks
   userSolid: 'fa-user',              // you (solid)
+  userGone: 'fa-user-slash',         // deleted account (red, italic name)
   friend: 'fa-regular fa-user',      // trusted peer (outlined, green)
   notFriend: 'fa-user-xmark',        // stranger marker (red)
   friendAdd: 'fa-user-shield',      // action: add as friend

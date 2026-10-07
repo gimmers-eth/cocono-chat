@@ -208,6 +208,8 @@ img.logo { object-fit: cover; background: none; }
 }
 .chat-peer { display: grid; }
 .chat-peer-name { font-weight: 600; }
+/* ghost chat (deleted account): italic username */
+.chat-peer-name.gone { font-style: italic; }
 
 .messages {
   flex: 1; overflow-y: auto; padding: 1rem clamp(.6rem, 6vw, 4rem);
