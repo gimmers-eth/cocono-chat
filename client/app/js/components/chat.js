@@ -305,10 +305,10 @@ export function createChat({ client, onHomeRefresh }) {
   }
 
   function friendMenuLabel(isFriend, peer) {
+    // ONE icon per menu row: the action itself (shield = grant trust,
+    // minus = revoke). Stranger/friend state lives in the chat warning
+    // strip and the label text — no status column.
     const btn = $('btn-chat-friend');
-    const status = $('friend-status');
-    // status column: the red person-with-an-x (stranger) vs green check-user
-    status.replaceChildren(iconEl(isFriend ? 'friend' : 'notFriend', isFriend ? 'icon-friend' : 'icon-danger'));
     btn.replaceChildren(
       iconEl(isFriend ? 'friendRemove' : 'friendAdd'),
       document.createTextNode(isFriend ? ` Remove @${peer} as friend` : ` Add @${peer} as friend`),
@@ -349,12 +349,30 @@ export function createChat({ client, onHomeRefresh }) {
     friendMenuLabel(await isCurrentPeerFriend(), currentPeer);
     $('chatopts-overlay').hidden = false;
     $('chatopts-modal').hidden = false;
-    $('btn-chatopts-close').focus?.();
+    setMenuBtnOpen(true);
+    $('chatopts-modal').focus?.();
   }
 
   function closeChatOpts() {
     $('chatopts-overlay').hidden = true;
     $('chatopts-modal').hidden = true;
+    setMenuBtnOpen(false);
+  }
+
+  function toggleChatOpts() {
+    if ($('chatopts-modal').hidden) openChatOpts();
+    else closeChatOpts();
+  }
+
+  // Header button morphs ⋮ <-> ✕ as the side menu opens/closes (FA Free has
+  // no true morph; swap + keyframe spin-in reads as one). The open button
+  // lifts above the scrim so tapping it closes the menu.
+  function setMenuBtnOpen(open) {
+    const btn = $('btn-chat-menu');
+    const i = btn.querySelector('i');
+    btn.classList.toggle('menu-open', open);
+    if (i) i.className = `fa-solid ${open ? 'fa-xmark' : 'fa-ellipsis-vertical'}`;
+    btn.title = open ? 'Close chat options' : 'Chat options';
   }
 
   // --- forward dialog ---
@@ -495,9 +513,8 @@ export function createChat({ client, onHomeRefresh }) {
     $('btn-msg-fwd').addEventListener('click', forwardCurrentMsg);
     $('btn-msg-del').addEventListener('click', deleteCurrentMsg);
 
-    // Chat options modal.
-    $('btn-chat-menu').addEventListener('click', openChatOpts);
-    $('btn-chatopts-close').addEventListener('click', closeChatOpts);
+    // Chat options side menu.
+    $('btn-chat-menu').addEventListener('click', toggleChatOpts);
     $('chatopts-overlay').addEventListener('click', closeChatOpts);
     $('btn-chat-friend').addEventListener('click', () => {
       closeChatOpts();
