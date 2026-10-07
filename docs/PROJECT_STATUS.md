@@ -164,9 +164,13 @@ launch, P1 = strongly before/soon after, P2 = roadmap.
    collapses onto the CDN\'s single IP (the .env comment warns; now it bites). Decide
    direct-expose vs Cloudflare and set hops accordingly.
 4. **HSTS** missing on the HTTPS origin (one header line; also consider preload later).
-5. **Backups + secrets.** No backup job exists yet (ops trio); when it lands,
-   `.env`/DB bundles (JWT secret, VAPID, ADMIN_TOKEN) must be **encrypted at rest**
-   (age/gpg) before leaving the box, with a restore drill.
+5. **Backups + secrets.** Backup jobs are BUILT (`ops/backup.sh` + systemd
+   timers, age-encrypted end to end, rclone off-box) — **not yet armed**:
+   needs the user-supplied age recipient + rclone remote in
+   `~/.config/cocono-backup.conf`. Once configured, `.env`/DB bundles (JWT
+   secret, VAPID, ADMIN_TOKEN) leave the box encrypted at rest, and the
+   weekly drill (`ops/backup-drill.sh`) is the standing restore test.
+   P0 #5 counts as closed only after the FIRST successful drill.
 6. **Abuse tooling.** No contact **block/report** exists — a public messenger without
    one is a support fire. (FE-side block = hide + drop-queued? needs small protocol
    thought: unsolicited E2EE messages can\'t be server-filtered by content, but the

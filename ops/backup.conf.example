@@ -1,0 +1,19 @@
+# cocono-chat backup configuration — COPY this file to:
+#   ~/.config/cocono-backup.conf          (chmod 600)
+# The timers (cocono-backup{,-daily,-drill}.timer) run silently no-op until
+# AGE_RECIPIENT is set here.
+
+# Age RECIPIENT public key (age1... — the PUBLIC half; generating it:
+#   run `age-keygen` on your OWN machine, keep the identity file OFF this
+#   box, hand only the public recipient to this config).
+AGE_RECIPIENT=
+
+# rclone destination for the encrypted off-box copies, e.g.:
+#   RCLONE_DEST=b2:cocono-backups
+# (configure the remote once interactively: ~/.local/bin/rclone config)
+RCLONE_DEST=
+
+# Ports used by the weekly restore drill (throwaway instances; must be free).
+DRILL_MONGO_PORT=27019
+DRILL_REDIS_PORT=6380
+DRILL_APP_PORT=3100

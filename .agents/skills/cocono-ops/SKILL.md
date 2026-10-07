@@ -66,7 +66,25 @@ development restart it automatically**; static FE/SDK files (`client/app`,
 `systemctl --user restart cocono-be` is for stuck crash loops or config
 changes only — update.sh does the clean known-good bounce itself.
 
-## Gotchas
+## Backups (ops trio #2 — built, needs first-run setup)
+
+- Scripts: `ops/backup.sh hourly|daily` (mongodump + redis RDB / box bundle
+  of `.env` + acme.sh + units; **always age-encrypted**, staging only in
+  tmpfs, local mirror `~/backups`, rclone copy off-box, retention 24
+  hourly / 14 daily local + remote-pruned by age).
+- Timers: `cocono-backup.timer` (hourly), `cocono-backup-daily.timer`
+  (~02:30), `cocono-backup-drill.timer` (Sun ~04:15 — decrypts the newest
+  archive into throwaway mongo :27019 / redis :6380 and count-checks;
+  manual `ops/backup-drill.sh --full` also boots the real app on :3100).
+- Status/log: `~/backups/last-run.json`, `~/backups/backup.log`,
+  `journalctl --user -u cocono-backup[-daily|-drill]`.
+- Until `~/.config/cocono-backup.conf` has `AGE_RECIPIENT` set the timers
+  NO-OP politely. Drills additionally need the age identity on-box at
+  `~/.config/cocono-backup/identity.age` (chmod 600) — or stop the drill
+  timer.
+- Restore (panic button): `ops/restore.sh <archive> ` — typed 'RESTORE'
+  confirmation, overwrites prod data with the backup state.
+
 
 - Tests need local Redis (up as `cocono-redis`); the backend test suite boots
   its own in-process Mongo fallback, dev uses `MONGO_URL` from `be/.env`.
