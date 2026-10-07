@@ -212,7 +212,7 @@ export function createHome({ client, chat, onLogout }) {
     ctx.drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, size, size);
     let quality = 0.72;
     let dataUrl = canvas.toDataURL('image/jpeg', quality);
-    while (dataUrl.length * 0.75 > 64 * 1024 && quality > 0.4) {
+    while (dataUrl.length * 0.75 > 96 * 1024 && quality > 0.4) {
       quality -= 0.12;
       dataUrl = canvas.toDataURL('image/jpeg', quality);
     }

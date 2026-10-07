@@ -1241,25 +1241,31 @@ export function createChat({ client, onHomeRefresh }) {
     // view number); remove is its own row.
     $('btn-chat-menu').addEventListener('click', toggleChatOpts);
     // chat-head name opens the profile view directly
-    $('btn-peer-profile').addEventListener('click', openProfileView);
-    $('btn-chat-profile').addEventListener('click', openProfileView);
+    $('btn-peer-profile')?.addEventListener('click', openProfileView);
+    $('btn-chat-profile')?.addEventListener('click', openProfileView);
     $('chatopts-overlay').addEventListener('click', closeChatOpts);
-    $('btn-chat-friend').addEventListener('click', () => {
+    $('btn-chat-friend')?.addEventListener('click', () => {
       primaryAction(); // decides itself whether to stay open (panel) or close
     });
-    $('btn-chat-remove').addEventListener('click', () => {
+    $('btn-chat-remove')?.addEventListener('click', () => {
       closeChatOpts();
       removeUser();
     });
-    $('btn-identity-back').addEventListener('click', showChatOptsMenu);
-    $('identity-number').addEventListener('click', copySafetyNumber);
-    $('identity-number').addEventListener('keydown', (e) => {
+    $('btn-identity-back')?.addEventListener('click', showChatOptsMenu);
+    $('identity-number')?.addEventListener('click', copySafetyNumber);
+    $('identity-number')?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); copySafetyNumber(); }
     });
-    $('btn-identity-verify').addEventListener('click', toggleVerified);
-    $('profile-avatar-img').addEventListener('click', (e) => { if (!e.target.hidden) openLightbox(e.target.src); });
-    $('btn-profile-close').addEventListener('click', closeProfileView);
-    $('profile-overlay').addEventListener('click', closeProfileView);
+    $('btn-identity-verify')?.addEventListener('click', toggleVerified);
+    // delegated lightbox: ANY rendered avatar photo zooms, whenever it exists
+    document.addEventListener('click', (e) => {
+      const el = e.target;
+      if (el && el.tagName === 'IMG' && el.src && !el.hidden && el.closest('#profile-modal, #tabpanel-profile, #chat-head')) {
+        openLightbox(el.src);
+      }
+    });
+    $('btn-profile-close')?.addEventListener('click', closeProfileView);
+    $('profile-overlay')?.addEventListener('click', closeProfileView);
     window.addEventListener(FRIENDS_EVENT, () => { updateTrustUI(); });
     window.addEventListener(AVATARS_EVENT, () => { renderChatAvatar(); });
     $('btn-chat-clear').addEventListener('click', async () => {
