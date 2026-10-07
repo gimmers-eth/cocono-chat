@@ -324,10 +324,10 @@ img.logo { object-fit: cover; background: none; }
      shadow once that side is reached (classic scroll-shadow trick);
      rgb(from …) keeps the fade theme-correct. */
   background:
-    linear-gradient(to right, var(--panel) 35%, rgb(from var(--panel) r g b / 0)) left center / 32px 100% no-repeat local,
-    linear-gradient(to left,  var(--panel) 35%, rgb(from var(--panel) r g b / 0)) right center / 32px 100% no-repeat local,
-    radial-gradient(farthest-side at 0 50%, rgb(0 0 0 / .45), transparent) left center / 12px 100% no-repeat scroll,
-    radial-gradient(farthest-side at 100% 50%, rgb(0 0 0 / .45), transparent) right center / 12px 100% no-repeat scroll,
+    linear-gradient(to right, var(--panel) 35%, rgb(from var(--panel) r g b / 0)) left center / 56px 100% no-repeat local,
+    linear-gradient(to left,  var(--panel) 35%, rgb(from var(--panel) r g b / 0)) right center / 56px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, rgb(0 0 0 / .55), transparent 75%) left center / 26px 115% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, rgb(0 0 0 / .55), transparent 75%) right center / 26px 115% no-repeat scroll,
     var(--panel);
 }
 @supports not (color: rgb(from red r g b)) {
@@ -335,7 +335,7 @@ img.logo { object-fit: cover; background: none; }
      always-on edge hint so overflow is still discoverable */
   .drawer-tabs {
     background:
-      linear-gradient(to left, var(--panel) 35%, transparent) right center / 28px 100% no-repeat,
+      linear-gradient(to left, var(--panel) 35%, transparent) right center / 44px 100% no-repeat,
       var(--panel);
   }
 }
@@ -347,6 +347,14 @@ img.logo { object-fit: cover; background: none; }
 .drawer-tab i { margin-right: .4em; }
 .drawer-tab:hover { color: var(--text); background: var(--panel-raised); }
 .drawer-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+/* Verify tab: status chip beside the heading + roomy upload action */
+.idverify-head { display: flex; align-items: baseline; gap: .7rem; }
+.idverify-state { font-size: .72rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.idverify-state.ok { color: var(--success); }
+.idverify-state.bad { color: var(--danger); }
+.idverify-actions { margin: 1rem 0 1.1rem; }
+.idverify-actions .btn { padding-inline: 1.3rem; }
 
 /* Chat options: right-hand side menu over the translucent scrim. */
 .side-menu {

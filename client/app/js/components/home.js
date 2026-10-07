@@ -74,10 +74,20 @@ export function createHome({ client, chat, onLogout }) {
   // in user-facing copy.)
   async function renderIdentity() {
     const state = $('idverify-state');
+    const note = $('idverify-note');
     const btn = $('btn-id-doc');
     const link = $('btn-self-verify');
     let me = null;
     try { me = await client.identity(); } catch { /* offline/no session */ }
+    const show = (txt, cls, noteTxt) => {
+      if (!state) return;
+      state.textContent = txt;
+      state.className = `idverify-state ${cls}`;
+      if (note) {
+        note.hidden = !noteTxt;
+        note.textContent = noteTxt ?? '';
+      }
+    };
     if (!me) {
       // no facts fetched: hide all affordances, assume nothing
       link.hidden = true; btn.hidden = true; return;
@@ -87,16 +97,16 @@ export function createHome({ client, chat, onLogout }) {
     link.hidden = !!me.verified; // the top-left entry only while unverified
     if (me.verified) {
       btn.hidden = true;
-      if (state) state.textContent = 'Verified — the red notice no longer appears next to your name.';
-      return;
-    }
-    if (me.idDoc) {
-      btn.hidden = false; // re-upload allowed before review
-      if (state) state.textContent = `ID photo submitted ${new Date(me.idDoc.uploadedAt).toLocaleDateString()} — waiting for review.`;
+      show('Verified', 'ok', null);
       return;
     }
     btn.hidden = false;
-    if (state) state.textContent = 'Not verified. Upload a photo of your ID so a human can confirm this account is really you.';
+    if (me.idDoc) {
+      // re-upload allowed before review
+      show('Not Verified', 'bad', `ID photo submitted ${new Date(me.idDoc.uploadedAt).toLocaleDateString()} — waiting for review.`);
+      return;
+    }
+    show('Not Verified', 'bad', null);
   }
 
   // magic-byte sniffing matches the server (PNG signature; JPEG SOI+EOI):
