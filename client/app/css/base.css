@@ -314,30 +314,29 @@ img.logo { object-fit: cover; background: none; }
 .convo-last i { font-size: .72rem; margin: 0 .15em; color: var(--muted); }
 .chat-warn i { margin-right: .45em; }
 
-/* Settings drawer tabs (Devices / Verify / General / Diagnostics) */
+/* Settings drawer tabs (Devices / Verify / General / Diagnostics).
+   Overflow affordance lives on the WRAPPER (outside the scroller): edge
+   gradients that fade the cut-off tabs into the panel colour — clearly
+   visible on dark themes where shadows disappear. .fade-left/.fade-right
+   are toggled by JS and only appear while content is actually clipped
+   that way. */
+.drawer-tabs-wrap { position: relative; margin: .2rem 0 .6rem; }
+.drawer-tabs-wrap::before, .drawer-tabs-wrap::after {
+  content: ''; position: absolute; top: 0; bottom: 1px; width: 34px;
+  pointer-events: none; z-index: 1; opacity: 0; transition: opacity .15s ease;
+}
+.drawer-tabs-wrap::before { left: 0; background: linear-gradient(to right, var(--panel) 20%, rgb(from var(--panel) r g b / 0)); }
+.drawer-tabs-wrap::after  { right: 0; background: linear-gradient(to left,  var(--panel) 20%, rgb(from var(--panel) r g b / 0)); }
+.drawer-tabs-wrap.fade-left::before { opacity: 1; }
+.drawer-tabs-wrap.fade-right::after { opacity: 1; }
+@supports not (color: rgb(from red r g b)) {
+  .drawer-tabs-wrap::before { background: linear-gradient(to right, var(--panel) 40%, transparent); }
+  .drawer-tabs-wrap::after  { background: linear-gradient(to left,  var(--panel) 40%, transparent); }
+}
 .drawer-tabs {
   display: flex; gap: .2rem; border-bottom: 1px solid var(--border);
-  margin: .2rem 0 .6rem; overflow-x: auto; scrollbar-width: none;
-  /* Overflow affordance: an inner shadow appears at an edge ONLY while
-     content is scrolled off that way. Cover gradients use `local`
-     attachment so they ride the content and mask the `scroll`-pinned
-     shadow once that side is reached (classic scroll-shadow trick);
-     rgb(from …) keeps the fade theme-correct. */
-  background:
-    linear-gradient(to right, var(--panel) 35%, rgb(from var(--panel) r g b / 0)) left center / 56px 100% no-repeat local,
-    linear-gradient(to left,  var(--panel) 35%, rgb(from var(--panel) r g b / 0)) right center / 56px 100% no-repeat local,
-    radial-gradient(farthest-side at 0 50%, rgb(0 0 0 / .55), transparent 75%) left center / 26px 115% no-repeat scroll,
-    radial-gradient(farthest-side at 100% 50%, rgb(0 0 0 / .55), transparent 75%) right center / 26px 115% no-repeat scroll,
-    var(--panel);
-}
-@supports not (color: rgb(from red r g b)) {
-  /* engines without relative-color syntax: no fade-mask, keep a plain
-     always-on edge hint so overflow is still discoverable */
-  .drawer-tabs {
-    background:
-      linear-gradient(to left, var(--panel) 35%, transparent) right center / 44px 100% no-repeat,
-      var(--panel);
-  }
+  overflow-x: auto; scrollbar-width: none;
+  background: var(--panel);
 }
 .drawer-tab {
   background: none; border: 0; border-bottom: 2px solid transparent;

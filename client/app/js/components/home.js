@@ -37,6 +37,19 @@ export function createHome({ client, chat, onLogout }) {
     settingsTab = SETTINGS_TABS.includes(tab) ? tab : 'devices';
     try { localStorage.setItem('cocono.settings.tab', settingsTab); } catch { /* private mode */ }
     showSettingsTab();
+    updateTabFades();
+  }
+
+  // Tab-bar overflow fades: shown only while tabs are actually clipped on
+  // that side (re-measured on scroll / open / resize).
+  function updateTabFades() {
+    const tabs = document.querySelector('.drawer-tabs');
+    const wrap = $('drawer-tabs-wrap');
+    if (!tabs || !wrap) return;
+    const overflow = tabs.scrollWidth - tabs.clientWidth;
+    const sl = tabs.scrollLeft;
+    wrap.classList.toggle('fade-left', sl > 2);
+    wrap.classList.toggle('fade-right', sl < overflow - 2);
   }
 
   function openSettings(tab) {
@@ -51,6 +64,8 @@ export function createHome({ client, chat, onLogout }) {
       $('btn-settings-close').focus?.();
     }
     showSettingsTab();
+    // measure after layout settles (drawer was hidden until this frame)
+    requestAnimationFrame(updateTabFades);
   }
 
   function closeSettings() {
@@ -362,6 +377,8 @@ export function createHome({ client, chat, onLogout }) {
       const btn = e.target.closest('.drawer-tab');
       if (btn) selectSettingsTab(btn.dataset.tab);
     });
+    document.querySelector('.drawer-tabs')?.addEventListener('scroll', updateTabFades, { passive: true });
+    window.addEventListener('resize', updateTabFades);
     $('btn-self-verify').addEventListener('click', () => openSettings('verify'));
     $('btn-id-doc').addEventListener('click', () => $('id-doc-input').click());
     $('id-doc-input').addEventListener('change', (e) => {
