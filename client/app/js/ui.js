@@ -101,3 +101,20 @@ export function fmtTime(ts) {
   if (dayDiff > 0 && dayDiff < 7) return d.toLocaleDateString(undefined, { weekday: 'short' });
   return d.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
+
+// Lightbox: click any profile photo (own tab or peer's profile sheet) to
+// view it large over a dim scrim; click/Esc closes. data: URLs stay in-DOM
+// (top-level data: navigation is blocked by browsers, so no new tab here).
+export function openLightbox(src) {
+  const overlay = $('lightbox-overlay');
+  const img = $('lightbox-img');
+  if (!overlay || !img || !src) return;
+  img.src = src;
+  overlay.hidden = false;
+}
+export function closeLightbox() {
+  const overlay = $('lightbox-overlay');
+  const img = $('lightbox-img');
+  if (overlay) overlay.hidden = true;
+  if (img) img.removeAttribute('src');
+}

@@ -17,12 +17,12 @@
   --text: #e9edef;
   --muted: #8696a0;
 
-  --accent: #00a884;           /* brand green */
-  --accent-strong: #008069;
+  --accent: #7d6ce0;           /* light purple — brand primary */
+  --accent-strong: #4b3fa8;    /* dark purple — secondary */
   --on-accent: #ffffff;
 
-  --bubble-in: #202c33;
-  --bubble-out: #005c4b;
+  --bubble-in: #2b2545;   /* deep purple — receiving */
+  --bubble-out: #7d6ce0;   /* light purple — sending */
   --bubble-text: #e9edef;
 
   --danger: #ef6975;

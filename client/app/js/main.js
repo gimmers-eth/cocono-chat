@@ -3,7 +3,7 @@
 // served by the backend from client/src).
 
 import { CoconoClient, IdbStorage, CoconoApiError } from '/sdk/index.js';
-import { $, showView, setStatus } from './ui.js';
+import { $, showView, setStatus, closeLightbox } from './ui.js';
 import { initTheme } from './theme.js';
 import { startSingleTabGuard } from './components/blocked.js';
 import { createAuth } from './components/auth.js';
@@ -142,6 +142,10 @@ async function showAuth() {
 
 // Boot — wire every component exactly once, then route.
 startSingleTabGuard();
+// lightbox dismissal: click scrim or Escape
+$('lightbox-overlay')?.addEventListener('click', closeLightbox);
+$('lightbox-img')?.addEventListener('click', closeLightbox);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('lightbox-overlay')?.hidden) closeLightbox(); });
 applyIcons(); // data-icon placeholders -> Font Awesome (js/icons.js config)
 initKeyboardFit(); // pin the app shell to the visible viewport (soft keyboard)
 await initTheme(); // dark fallback already linked in index.html

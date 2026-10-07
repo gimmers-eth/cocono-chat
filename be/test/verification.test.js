@@ -32,6 +32,7 @@ async function getToken(app, client, u, d) {
 }
 
 // A tiny fake "photo" — the server validates type/size, never image-parses.
+const JPEG_BYTES_B64 = Buffer.concat([Buffer.from([0xff, 0xd8]), Buffer.from('y'.repeat(200)), Buffer.from([0xff, 0xd9])]).toString('base64');
 const PNG_BYTES = Buffer.concat([
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), randomBytes(200),
 ]);
@@ -50,6 +51,7 @@ function adminApp(ctx) {
       settings: ctx.mongo.db.collection('settings'),
       messages: ctx.mongo.db.collection('messages'),
       idDocs: ctx.mongo.db.collection('id_docs'),
+    profiles: ctx.mongo.db.collection('profiles'),
     });
     return admin;
   })();
@@ -182,6 +184,27 @@ async function trustAndVerifyTarget(app, target, token) {
   await app.inject({ method: 'PUT', url: `/api/me/friends/${target}/verify`, headers: h, payload: { verified: true } });
   return app.inject({ method: 'PUT', url: `/api/me/friends/${target}/trust`, headers: h, payload: { trust: true } });
 }
+
+test('admin un-verifying an account removes its profile photo', async () => {
+  const { app, mongo, teardown } = await setupApp({ ...LIMITS, profileEditAccountLimit: 100 });
+  const admin = await adminApp({ app, mongo });
+  try {
+    const c = makeClient();
+    const a = await signupUser(app, c, 'phoebe');
+    const h = { authorization: `Bearer ${await getToken(app, c, 'phoebe', a.d)}` };
+    await app.inject({ method: 'PUT', url: '/api/me/profile', headers: h, payload: { avatar: JPEG_BYTES_B64 } });
+    assert.ok((await app.inject({ method: 'GET', url: '/api/me/profile', headers: h })).json().avatar);
+
+    await admin.inject({ method: 'PUT', url: '/api/admin/users/phoebe/verified', payload: { verified: true } });
+    await admin.inject({ method: 'PUT', url: '/api/admin/users/phoebe/verified', payload: { verified: false } });
+
+    assert.equal((await app.inject({ method: 'GET', url: '/api/me/profile', headers: h })).json().avatar, null);
+    assert.equal((await admin.inject({ method: 'GET', url: '/api/admin/users/phoebe/avatar' })).statusCode, 404);
+  } finally {
+    await admin.close();
+    await teardown();
+  }
+});
 
 test('ID upload requires a VERIFIED user to trust you first (vouching gate)', async () => {
   const { app, mongo, teardown } = await setupApp(LIMITS);

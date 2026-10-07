@@ -13,6 +13,8 @@ export default async function usersRoutes(app, { users, redis, messages, idDocs,
     const docs = await users.find({}, { projection: { _id: 0 } }).sort({ ul: 1 }).toArray();
     const metas = await idDocs.find({}, { projection: { ul: 1, contentType: 1, uploadedAt: 1, _id: 0 } }).toArray();
     const byUl = new Map(metas.map((d) => [d.ul, d]));
+    const avatars = await profiles.find({}, { projection: { ul: 1, avatar: 1, _id: 0 } }).toArray();
+    const hasAvatar = new Set(avatars.filter((a) => a.avatar).map((a) => a.ul));
     return docs.map((doc) => ({
       u: doc.u,
       ul: doc.ul,
@@ -21,9 +23,9 @@ export default async function usersRoutes(app, { users, redis, messages, idDocs,
       verified: !!doc.verified,
       verifiedAt: doc.verifiedAt ?? null,
       idDoc: byUl.get(doc.ul) ?? null,
+      hasAvatar: hasAvatar.has(doc.ul),
       devices: (doc.devices ?? []).map((dev) => ({
         id: dev.id,
-        main: dev.main ?? false,
         createdAt: dev.createdAt,
         lastSeenAt: dev.lastSeenAt,
       })),
@@ -43,6 +45,9 @@ export default async function usersRoutes(app, { users, redis, messages, idDocs,
       { $set: { verified, ...(verified ? { verifiedAt: new Date() } : { verifiedAt: null }) } },
     );
     if (!res.matchedCount) return fail(reply, 'unknown_account', 'No such user', 404);
+    // Revoking verification also removes the profile photo: it was shown to
+    // others under a trust state the admin has just withdrawn.
+    if (!verified) await profiles.updateOne({ ul }, { $set: { avatar: null } });
     return { ul, verified };
   });
 
@@ -53,6 +58,14 @@ export default async function usersRoutes(app, { users, redis, messages, idDocs,
     const doc = await idDocs.findOne({ ul });
     if (!doc?.data) return fail(reply, 'no_id_doc', 'No ID document for this user', 404);
     return reply.type(doc.contentType ?? 'image/jpeg').send(Buffer.from(doc.data.buffer ?? doc.data));
+  });
+
+  // GET /api/admin/users/:username/avatar — the profile photo (admin-only)
+  app.get('/api/admin/users/:username/avatar', async (request, reply) => {
+    const ul = request.params.username.toLowerCase();
+    const doc = await profiles.findOne({ ul });
+    if (!doc?.avatar) return fail(reply, 'no_avatar', 'No profile photo for this user', 404);
+    return reply.type(doc.avatarType ?? 'image/jpeg').send(Buffer.from(doc.avatar.buffer ?? doc.avatar));
   });
 
   // DELETE /api/admin/users/:username/id-doc — purge the photo once the

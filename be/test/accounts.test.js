@@ -265,7 +265,7 @@ test('a removed device loses access immediately (H4)', async () => {
     // removal is legal, then pull the token's device).
     await mongo.db.collection('users').updateOne(
       { ul: u },
-      { $push: { devices: { id: 'dummy-device-0002', pub: 'x', aes: 'x', main: false } } },
+      { $push: { devices: { id: 'dummy-device-0002', pub: 'x', aes: 'x', } } },
     );
     await mongo.db.collection('users').updateOne({ ul: u }, { $pull: { devices: { id: d } } });
 

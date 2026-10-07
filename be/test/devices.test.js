@@ -98,7 +98,7 @@ test('device flow: enroll -> approve -> second device logs in', async () => {
     assert.equal(body.maxDevices, 3);
     const mainDev = body.devices.find((dev) => dev.id === dMain);
     const secondDev = body.devices.find((dev) => dev.id === dSecond);
-    assert.ok(mainDev.main && mainDev.current && !secondDev.main && !secondDev.current);
+    assert.ok(mainDev.current && !secondDev.current, 'only the viewer-marker remains — devices have no roles');
 
     const listSecond = await app.inject({
       method: 'GET',

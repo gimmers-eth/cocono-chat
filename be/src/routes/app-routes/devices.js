@@ -157,7 +157,7 @@ export default async function deviceRoutes(app, { users, redis, config, messages
         'devices.id': { $ne: d },
         $expr: { $lt: [{ $size: '$devices' }, '$maxDevices'] },
       },
-      { $push: { devices: { id: d, pub: p, x, aes: a, main: false, createdAt: now, lastSeenAt: now } } },
+      { $push: { devices: { id: d, pub: p, x, aes: a, createdAt: now, lastSeenAt: now } } },
     );
     if (!res.matchedCount) {
       const fresh = await users.findOne({ ul });
@@ -185,7 +185,6 @@ export default async function deviceRoutes(app, { users, redis, config, messages
       maxDevices: user.maxDevices,
       devices: user.devices.map((dev) => ({
         id: dev.id,
-        main: dev.main ?? false,
         current: dev.id === request.auth.d,
         createdAt: dev.createdAt,
         lastSeenAt: dev.lastSeenAt,

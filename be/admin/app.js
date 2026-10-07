@@ -57,6 +57,21 @@ function renderLimits(limits) {
     .join('');
 }
 
+async function fillAvatarThumbs(users) {
+  for (const u of users) {
+    if (!u.hasAvatar) continue;
+    const img = document.querySelector(`img[data-avatar-for="${CSS.escape(u.ul)}"]`);
+    if (!img) continue;
+    try {
+      const res = await fetch(`/api/admin/users/${encodeURIComponent(u.ul)}/avatar`, {
+        headers: { 'x-admin-token': tokenInput.value.trim() },
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      img.src = URL.createObjectURL(await res.blob());
+    } catch { /* offline/none: stays empty */ }
+  }
+}
+
 function renderUsers(users) {
   lastUsers = users;
   const body = $('users-body');
@@ -67,6 +82,9 @@ function renderUsers(users) {
         <td><strong>@${esc(u.u)}</strong><br /><span class="dim mono">${esc(u.ul)}</span></td>
         <td>${fmtDate(u.createdAt)}</td>
         <td><input type="checkbox" class="verify-toggle" data-verify="${esc(u.ul)}" ${u.verified ? 'checked' : ''} title="${u.verified && u.verifiedAt ? 'verified ' + esc(fmtDate(u.verifiedAt)) : 'not verified'}" /></td>
+        <td>${u.hasAvatar
+          ? `<img class="avatar-thumb" data-avatar-for="${esc(u.ul)}" alt="profile photo" title="Click to enlarge" />`
+          : '<span class="dim">no photo</span>'}</td>
         <td>${u.idDoc
           ? `<span class="dim">${esc(u.idDoc.contentType.replace('image/', ''))} · ${fmtDate(u.idDoc.uploadedAt)}</span><br />
              <button class="tiny" data-view-id="${esc(u.ul)}">view</button>
@@ -80,7 +98,6 @@ function renderUsers(users) {
           .map(
             (d) => `<div class="device">
               <span class="mono">${esc(d.id.slice(0, 8))}…</span>
-              ${d.main ? '<span class="badge main">main</span>' : '<span class="badge">extra</span>'}
               <span class="dim">seen ${fmtAgo(d.lastSeenAt)}</span>
               <button class="danger tiny" data-del-device="${esc(u.ul)}" data-device="${esc(d.id)}">remove</button>
             </div>`,
@@ -90,6 +107,7 @@ function renderUsers(users) {
       </tr>`,
     )
     .join('');
+  fillAvatarThumbs(users).catch(() => {});
 }
 
 let lastDiags = [];

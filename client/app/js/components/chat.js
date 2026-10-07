@@ -730,6 +730,71 @@ export function createChat({ client, onHomeRefresh }) {
     $('profile-modal').focus?.();
   }
 
+  // Self preview: same sheet, fed by our own public data — exactly what a
+  // mutually-added contact sees (App verdict, Social reputation, CoCo).
+  async function openSelfProfile() {
+    const meUl = String(client.username ?? '').toLowerCase();
+    if (!meUl) return;
+    let me = null, prof = null, stats = null;
+    try { me = await client.identity(); } catch { /* offline */ }
+    try { prof = await client.viewProfile(meUl); } catch { /* offline */ }
+    try { stats = await client.userStats(meUl); } catch { /* offline */ }
+    $('profile-name').textContent = meUl;
+    const avatarImg = $('profile-avatar-img');
+    const initial = $('profile-avatar');
+    if (prof?.avatar) {
+      avatarImg.src = `data:image/jpeg;base64,${prof.avatar}`;
+      avatarImg.hidden = false;
+      initial.hidden = true;
+    } else {
+      avatarImg.hidden = true;
+      initial.hidden = false;
+      initial.textContent = meUl.slice(0, 1);
+    }
+    const bioEl = $('profile-bio');
+    bioEl.hidden = !prof?.bio;
+    if (prof?.bio) bioEl.textContent = prof.bio;
+    $('profile-status-icon').replaceChildren(peerStateIcon(PS.TRUSTED));
+    $('profile-joined').hidden = !me?.createdAt;
+    if (me?.createdAt) $('profile-joined').textContent = `Joined ${new Date(me.createdAt).toLocaleDateString()}`;
+
+    const setRow = (s, n, cls, title, note) => {
+      s.textContent = title;
+      s.className = `profile-id-state ${cls}`;
+      n.textContent = note ?? '';
+    };
+    if (me?.verified) {
+      setRow($('profile-app-state'), $('profile-app-note'), 'ok', 'App: Verified',
+        'A human reviewer checked your ID — contacts see the green mark.');
+    } else {
+      setRow($('profile-app-state'), $('profile-app-note'), 'bad', 'App: Unverified',
+        me?.idDoc ? 'Your ID photo is submitted and waiting for review.'
+                  : 'Upload an ID photo in settings to earn the green mark (or be vouched for and verified directly).');
+    }
+    if (stats) {
+      setRow($('profile-social-state'), $('profile-social-note'),
+        stats.socialTrusted ? 'ok' : 'bad',
+        stats.socialTrusted ? 'Social: Trusted' : 'Social: Untrusted',
+        'Reputation grows when contacts verify and trust you.');
+      $('profile-reputation').textContent =
+        `Vouched by ${stats.addedBy} added · ${stats.verifiedBy} verified · ${stats.trustedBy} trusted`;
+      $('profile-reputation').hidden = false;
+      $('profile-coco').textContent = `CoCo: ${stats.coco} — Social Score`;
+      $('profile-coco').hidden = false;
+    } else {
+      setRow($('profile-social-state'), $('profile-social-note'), '', 'Social: unknown',
+        'Reputation needs a connection.');
+      $('profile-reputation').hidden = true;
+      $('profile-coco').hidden = true;
+    }
+    setRow($('profile-you-state'), $('profile-you-note'), 'trust ok', 'You: Trusted',
+      'This is your public profile — exactly what mutually-added contacts see.');
+
+    $('profile-overlay').hidden = false;
+    $('profile-modal').hidden = false;
+    $('profile-modal').focus?.();
+  }
+
   function closeProfileView() {
     $('profile-overlay').hidden = true;
     $('profile-modal').hidden = true;
@@ -1108,6 +1173,7 @@ export function createChat({ client, onHomeRefresh }) {
     // > conversation). Desktop "close" gesture otherwise.
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
+      if (!$('lightbox-overlay')?.hidden) { closeLightbox(); return; }
       if (forwardOpen()) { closeForward(); return; }
       if (!$('profile-modal')?.hidden) { closeProfileView(); return; }
       if (msgModalOpen()) { closeMsgModal(); return; }
@@ -1152,6 +1218,7 @@ export function createChat({ client, onHomeRefresh }) {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); copySafetyNumber(); }
     });
     $('btn-identity-verify').addEventListener('click', toggleVerified);
+    $('profile-avatar-img').addEventListener('click', (e) => { if (!e.target.hidden) openLightbox(e.target.src); });
     $('btn-profile-close').addEventListener('click', closeProfileView);
     $('profile-overlay').addEventListener('click', closeProfileView);
     window.addEventListener(FRIENDS_EVENT, () => { updateTrustUI(); });
@@ -1211,5 +1278,5 @@ export function createChat({ client, onHomeRefresh }) {
     $('chat-messages').addEventListener('click', catchUp);
   }
 
-  return { wire, connectEvents, openChat, render };
+  return { wire, connectEvents, openChat, render, openSelfProfile };
 }

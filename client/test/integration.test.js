@@ -32,8 +32,7 @@ test('sdk: register -> me -> devices -> logout -> login', async (t) => {
 
   const { devices, maxDevices } = await alice.devices();
   assert.equal(devices.length, 1);
-  assert.equal(devices[0].main, true);
-  assert.equal(devices[0].current, true);
+  assert.equal(devices[0].current, true); // devices have no roles — only the viewer marker
   assert.equal(maxDevices, 3);
 
   alice.logout();

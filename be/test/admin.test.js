@@ -26,7 +26,7 @@ async function setupAdmin() {
   await ctx.mongo.db.collection('users').insertOne({
     u: 'Alice',
     ul: 'alice',
-    devices: [{ id: 'device-one-123', pub: 'x', aes: 'x', main: true, createdAt: now, lastSeenAt: now }],
+    devices: [{ id: 'device-one-123', pub: 'x', aes: 'x', createdAt: now, lastSeenAt: now }],
     maxDevices: 3,
     createdAt: now,
   });

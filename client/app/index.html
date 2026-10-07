@@ -198,12 +198,12 @@
           <span id="profile-own-initial" class="avatar own-avatar" aria-hidden="true"></span>
           <span class="profile-idtext">
             <span class="profile-nameline"><span id="profile-own-name"></span></span>
-            <span class="muted small"><span id="profile-you-chip" class="you-chip">You: Trusted</span> · this is how contacts see you once you mutual-add</span>
           </span>
         </div>
         <input id="profile-avatar-input" type="file" accept="image/png,image/jpeg" hidden />
         <div class="row-actions profile-actions">
           <button id="btn-profile-avatar" class="btn btn-small">Change photo</button>
+          <button id="btn-profile-preview" class="btn btn-small" data-icon="profile" data-icon-class="">Preview my profile</button>
           <button id="btn-profile-avatar-clear" class="linkish danger" hidden>Remove photo</button>
           <span id="profile-save-state" class="save-chip" hidden></span>
         </div>
@@ -403,6 +403,10 @@
 
   <!-- Page footer: diagnostics send (login screen only). -->
   <footer id="page-footer" class="page-footer"></footer>
+
+  <!-- photo lightbox (shared) -->
+  <div id="lightbox-overlay" class="overlay lightbox-overlay" hidden></div>
+  <img id="lightbox-img" class="lightbox" alt="" hidden />
 
   <script type="module" src="/js/main.js"></script>
 </body>

@@ -2,7 +2,7 @@
 // list, new-chat launcher and the devices panel (list + approve pairing +
 // theme picker).
 
-import { $, setStatus, fmtTime, confirmModal } from '../ui.js';
+import { $, setStatus, fmtTime, confirmModal, openLightbox } from '../ui.js';
 import { humanError } from '../errors.js';
 import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
@@ -444,7 +444,7 @@ export function createHome({ client, chat, onLogout }) {
         id.textContent = dev.id.slice(0, 8) + '…';
         const tag = document.createElement('span');
         tag.className = 'dim';
-        tag.textContent = [dev.current && 'this device', dev.main && 'main', `${maxDevices} max`]
+        tag.textContent = [dev.current && 'this device', `${maxDevices} max`]
           .filter(Boolean)
           .join(' · ');
         li.append(id, tag);
@@ -556,6 +556,11 @@ export function createHome({ client, chat, onLogout }) {
     });
 
     $('btn-profile-avatar').addEventListener('click', () => $('profile-avatar-input').click());
+    $('profile-own-avatar').addEventListener('click', (e) => { if (!e.target.hidden) openLightbox(e.target.src); });
+    $('btn-profile-preview').addEventListener('click', () => {
+      closeSettings();
+      chat.openSelfProfile?.();
+    });
     // photo: resize + save immediately (it was an explicit action)
     $('profile-avatar-input').addEventListener('change', async (e) => {
       const file = e.target.files?.[0];

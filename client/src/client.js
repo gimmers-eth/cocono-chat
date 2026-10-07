@@ -165,7 +165,8 @@ export class CoconoClient extends Emitter {
   // ==================== public API ====================
 
   /**
-   * Register a new account (this device becomes the main one) and log in.
+   * Register a new account with this device as its first member and log in.
+   * (Devices have no roles — the first one is simply the first.)
    * @returns {Promise<{username: string, deviceId: string, token: string}>}
    */
   async register(username) {
