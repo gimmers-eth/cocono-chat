@@ -102,6 +102,15 @@ both stages. `verified`/`trust` live on the server entry so they propagate
 to every device of the account (sys messages + reconcile-on-entry); the
 local pin stays the device's own key-change alarm.
 
+> **Don't confuse the two verifications.** The ladder above is *peer*
+> verification — you confirming a cryptographic key out of band. Separately,
+> a grey `fa-certificate` badge marks *identity* verification: an admin has
+> checked that account's government ID photo (or exercised discretion).
+> The badge is orthogonal to the ladder, shown after the name everywhere,
+> and drives the cold-send gate: unverified accounts may only message people
+> who added them or wrote to them first (see PROJECT_STATUS, identity
+> verification).
+
 ### Legacy states
 
 | State | Sidebar | Header/menu icon | Strip |
