@@ -388,15 +388,22 @@ export function createChat({ client, onHomeRefresh }) {
     $('btn-chat-remove').closest('.menu-row').hidden = !(state === PS.UNVERIFIED || state === PS.VERIFIED || state === PS.TRUSTED);
   }
 
-  // Menu primary row dispatch: the next step of the ladder.
+  // Menu primary row dispatch: the next step of the ladder. VERIFY/VIEW
+  // swap the side menu IN PLACE (the panel lives inside it — closing first
+  // would hide what we just showed); ADD/TRUST end with a result (status
+  // line / confirm modal above the scrim) so those dismiss the menu.
   async function primaryAction() {
     if (!currentPeer) return;
     const ent = await friendEntryFor(currentPeer);
     const pin = await getPin(currentPeer);
     const state = trustState(ent, pin);
-    if (state === PS.STRANGER) return addUser();
-    if (state === PS.UNVERIFIED || state === PS.TRUSTED) return showIdentityView();
-    if (state === PS.VERIFIED) return confirmTrust();
+    if (state === PS.UNVERIFIED || state === PS.TRUSTED) {
+      await showIdentityView();
+      return;
+    }
+    closeChatOpts();
+    if (state === PS.STRANGER) await addUser();
+    else if (state === PS.VERIFIED) await confirmTrust();
   }
 
   async function addUser() {
@@ -764,16 +771,22 @@ export function createChat({ client, onHomeRefresh }) {
     $('btn-chat-menu').addEventListener('click', toggleChatOpts);
     $('chatopts-overlay').addEventListener('click', closeChatOpts);
     $('btn-chat-friend').addEventListener('click', () => {
-      closeChatOpts();
-      primaryAction();
+      primaryAction(); // decides itself whether to stay open (panel) or close
     });
     $('btn-chat-remove').addEventListener('click', () => {
       closeChatOpts();
       removeUser();
     });
-    $('btn-identity-back').addEventListener('click', () => {
+    $('btn-identity-back').addEventListener('click', async () => {
       $('chatopts-identity-view').hidden = true;
       $('chatopts-menu-view').hidden = false;
+      // the ladder may have advanced while the panel was open (verified
+      // just now) — re-render the menu row before showing it again
+      if (currentPeer) {
+        const ent = await friendEntryFor(currentPeer);
+        const pin = await getPin(currentPeer);
+        menuActionLabel(trustState(ent, pin), currentPeer);
+      }
     });
     $('btn-identity-copy').addEventListener('click', copySafetyNumber);
     $('btn-identity-verify').addEventListener('click', toggleVerified);
