@@ -140,7 +140,7 @@ export const config = {
   // the server enforces anyway). Avatars are delivered ONLY when viewer
   // and target have mutually added each other (or viewer === target).
   profileBioMaxLen: numOf(env.PROFILE_BIO_MAX_LEN, 250),
-  profileAvatarMaxBytes: numOf(env.PROFILE_AVATAR_MAX_BYTES, 96 * 1024),
+  profileAvatarMaxBytes: numOf(env.PROFILE_AVATAR_MAX_BYTES, 288 * 1024),
   profileEditAccountLimit: numOf(env.PROFILE_EDIT_ACCOUNT_LIMIT, 30),
   profileEditWindowSec: numOf(env.PROFILE_EDIT_WINDOW_SEC, 3600),
   idDocMaxBytes: numOf(env.ID_DOC_MAX_BYTES, 5 * 1024 * 1024),

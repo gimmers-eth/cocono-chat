@@ -418,7 +418,7 @@ img.own-avatar { border-radius: 50%; }
 
 /* Peer profile: TOP sheet (drawer-style) over the translucent scrim */
 .side-sheet {
-  position: fixed; top: 0; left: 50%; transform: translateX(-50%);
+  position: fixed; top: 0; left: 50%; transform: translateX(-50%); z-index: 50;
   z-index: 50; width: min(560px, 100%);
   max-height: min(86dvh, 640px); overflow-y: auto;
   background: var(--panel);

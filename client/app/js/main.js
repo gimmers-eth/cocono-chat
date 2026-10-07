@@ -3,7 +3,7 @@
 // served by the backend from client/src).
 
 import { CoconoClient, IdbStorage, CoconoApiError } from '/sdk/index.js';
-import { $, showView, setStatus, closeLightbox } from './ui.js';
+import { $, showView, setStatus, closeLightbox, openLightbox } from './ui.js';
 import { initTheme } from './theme.js';
 import { startSingleTabGuard } from './components/blocked.js';
 import { createAuth } from './components/auth.js';
@@ -142,6 +142,15 @@ async function showAuth() {
 
 // Boot — wire every component exactly once, then route.
 startSingleTabGuard();
+// photo zoom: capture-phase delegation at boot, so it works regardless of
+// what any component's wire() does or drops (profile sheet + settings tab)
+document.addEventListener('click', (e) => {
+  const el = e.target;
+  if (el && el.tagName === 'IMG' && el.src && !el.hidden
+    && el.closest('#profile-modal, #tabpanel-profile')) {
+    openLightbox(el.src);
+  }
+}, true);
 // lightbox dismissal: click scrim or Escape
 $('lightbox-overlay')?.addEventListener('click', closeLightbox);
 $('lightbox-img')?.addEventListener('click', closeLightbox);

@@ -208,15 +208,15 @@ export function createHome({ client, chat, onLogout }) {
     if (!file) return null;
     if (!['image/png', 'image/jpeg'].includes(file.type)) throw new Error('Pick a PNG or JPEG photo.');
     const bmp = await createImageBitmap(file);
-    const size = 128;
+    const size = 384; // ×3 budget: crisper avatars, still tiny after JPEG
     const canvas = document.createElement('canvas');
     canvas.width = size; canvas.height = size;
     const side = Math.min(bmp.width, bmp.height);
     const ctx = canvas.getContext('2d');
     ctx.drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, size, size);
-    let quality = 0.72;
+    let quality = 0.82;
     let dataUrl = canvas.toDataURL('image/jpeg', quality);
-    while (dataUrl.length * 0.75 > 96 * 1024 && quality > 0.4) {
+    while (dataUrl.length * 0.75 > 288 * 1024 && quality > 0.4) {
       quality -= 0.12;
       dataUrl = canvas.toDataURL('image/jpeg', quality);
     }
