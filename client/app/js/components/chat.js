@@ -46,6 +46,7 @@ const STATE_MARK = { sending: 'stateSending', sent: 'stateSent', delivered: 'sta
 const NOTICE_TEXT = {
   'trust-revoked': (peer) => `Heads up: trust in ${peer} was revoked — the account behind this username changed its identity key (possibly re-registered by someone else). Verify the safety number again before trusting new messages.`,
   'account-deleted': (peer) => `Heads up: the ${peer} account was deleted. This conversation is read-only now; your saved messages remain here.`,
+  'user-gone': (peer) => `Heads up: ${peer} doesn’t exist — no account with this name was found, so nothing was delivered.`,
 };
 
 // 'Read' means the user actually LOOKED at the conversation: the tab is
@@ -77,6 +78,10 @@ export function createChat({ client, onHomeRefresh }) {
   // transcript stays readable, but sending is disabled (no keys to encrypt
   // to — the account is gone forever).
   let peerGone = false;
+  // whether a transcript existed WHEN THE CHAT OPENED — decides whether a
+  // vanished peer is “account deleted” (we had history) or simply “user does
+  // not exist” (a cold name). Fresh failed sends must not fake history.
+  let peerHadHistory = false;
   // TOFU pin state for the open chat: 'new' | 'ok' | 'changed' (from
   // recordPinSeen) and the live identity key seen from peerKeys
   let pinState = 'ok';
@@ -99,7 +104,7 @@ export function createChat({ client, onHomeRefresh }) {
   function chatSubNodes(peer) {
     const parts = [];
     if (peerGone) {
-      parts.push(['Account deleted — history only', 'sub-flag']);
+      parts.push([peerHadHistory ? 'Account deleted — history only' : 'User does not exist', 'sub-flag']);
     } else {
       if (peerIdentityKnown && !peerIdentityVerified) parts.push(['Unverified user', 'sub-flag']);
       parts.push([peer
@@ -409,7 +414,9 @@ export function createChat({ client, onHomeRefresh }) {
     // plain-language strips, tiered: red (danger) / orange (warn).
     // No strip once TRUSTED (or when the chat is self/unknown state).
     const MSG = {
-      [PS.GONE]: ['danger', 'userGone', 'This account was deleted. Your saved messages stay readable, but you can’t send new ones.'],
+      [PS.GONE]: ['danger', 'userGone', peerHadHistory
+        ? 'This account was deleted. Your saved messages stay readable, but you can’t send new ones.'
+        : ` ${'@'}${currentPeer} doesn’t exist — no account with this name was found.`],
       [PS.STRANGER]: ['danger', 'notFriend', `You haven’t added ${currentPeer} yet. Messages are private, but anyone can sign up with a name — add them, then verify, to be sure it’s really them.`],
       [PS.UNVERIFIED]: ['warn', 'friend', `You’ve added ${currentPeer}, but haven’t verified them. Read the safety number aloud together (a call works) — when both screens match, nobody is in between. Open ⋮ and tap “Verify user”.`],
       [PS.VERIFIED]: ['warn', 'friendVerified', `You’ve verified ${currentPeer}’s key, but haven’t trusted them yet. Only trust accounts you actually know in person — open ⋮ and tap “Trust user” when you’re sure.`],
@@ -597,7 +604,7 @@ export function createChat({ client, onHomeRefresh }) {
     const idState = $('profile-id-state');
     const idNote = $('profile-id-note');
     if (state === PS.GONE) {
-      idState.textContent = 'Account deleted';
+      idState.textContent = peerHadHistory ? 'Account deleted' : 'User not found';
       idState.className = 'profile-id-state bad';
       idNote.textContent = '';
     } else if (peerIdentityKnown && peerIdentityVerified) {
@@ -614,7 +621,12 @@ export function createChat({ client, onHomeRefresh }) {
       idNote.textContent = 'Open this chat while online to check the account status.';
     }
 
-    const [cls, title, desc] = TRUST_STAGES[state] ?? TRUST_STAGES[PS.STRANGER];
+    const goneStage = peerHadHistory
+      ? ['bad', 'Account deleted', 'This account no longer exists. Your saved messages stay readable, but nothing new can be sent.']
+      : ['bad', 'User not found', 'No account with this name exists.'];
+    const [cls, title, desc] = state === PS.GONE
+      ? goneStage
+      : (TRUST_STAGES[state] ?? TRUST_STAGES[PS.STRANGER]);
     const trustStateEl = $('profile-trust-state');
     trustStateEl.textContent = title;
     trustStateEl.className = `profile-id-state trust ${cls}`;
@@ -853,8 +865,10 @@ export function createChat({ client, onHomeRefresh }) {
         setComposerEnabled(false);
         await updateTrustUI();
         onHomeRefresh?.();
-        await announceNotice(currentPeer, 'account-deleted');
-        toast(`${currentPeer}'s account was deleted — history is read-only now.`, 'error');
+        await announceNotice(currentPeer, peerHadHistory ? 'account-deleted' : 'user-gone');
+        toast(peerHadHistory
+          ? `${currentPeer}'s account was deleted — history is read-only now.`
+          : `${currentPeer} doesn’t exist — nothing was delivered.`, 'error');
       }
       // any other error (offline, transient): leave state untouched — the
       // send itself already surfaced it
@@ -887,6 +901,7 @@ export function createChat({ client, onHomeRefresh }) {
       $('chat-view').hidden = false;
       setChatOpen(true);
       const last = await render();
+      peerHadHistory = (await messagesWith(currentPeer)).length > 0;
       // Identity verification: compare the stored friend binding against the
       // LIVE account key from this very lookup. Mismatch (or server-flagged
       // 'changed') = the username was re-registered: drop trust on EVERY
