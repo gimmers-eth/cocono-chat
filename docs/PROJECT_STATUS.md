@@ -94,18 +94,23 @@ is the only FE (audits mentioning `fe/` are historical).
   empty queue (the page owns that copy; generic-on-empty would only
   downgrade the visible notification) — generic remains only for genuine
   failures (login/peek errors, budget timeout).
-- **Friends (one-way trust)**: users can mark accounts as trusted. Server is
-  the SOURCE OF TRUTH (`/api/me/friends` GET/PUT/DELETE, be/.../friends.js:
-  validation, self/unknown rejected, `FRIENDS_MAX` cap 500, rate-limited).
-  Devices mirror into per-account IndexedDB (`friends` store, DB v2) and
-  sync LIVE via E2EE system messages — the acting device broadcasts
-  `{"sys":"friend+/-","ul"}` to its OWN account over the normal relay path
-  (server can't read/forge it); app-level filter keeps sys payloads out of
-  the transcript. New/offline devices reconcile with `listFriends()` at app
-  entry (main.js). UI: non-friend chat shows a red `user-xmark` warning
-  strip + menu status; menu actions `user-shield` add / `user-minus` remove;
-  **friends persist in the sidebar with zero messages** (list merges
-  messages ∪ friends — clearing a chat never unfriends anyone).
+- **Friends (identity-anchored one-way trust)**: per-account trust list
+  bound to the target's ACCOUNT IDENTITY KEY (`users.identity.p` — founder
+  device key, frozen for the account's lifetime; backfilled by migration;
+  re-registered usernames get a new key). Server = source of truth
+  (`/api/me/friends`): add is SERVER-STAMPED (clients cannot claim keys);
+  reads resolve the live directory flagging `gone` / `changed` (stale
+  binding after re-registration) / `trusted`; re-add re-binds; cap +
+  validation + rate limits. Live device sync via E2EE sys messages
+  `{"sys":"friend+/-",ul,p}` broadcast by the acting device to its own
+  account (server cannot forge/read); new+offline devices reconcile with
+  `listFriends()` on app entry. Auto-untrust: chat open verifies
+  `peerKeys.id` against the binding — mismatch removes trust on EVERY
+  device (server DELETE + sys broadcast) and warns. Legacy/unbound entries
+  are NOT trusted (strict option B — ANSWERS.md §11). UI: green outlined
+  user = trusted, red user-xmark = stranger/unbound/stale, user-slash +
+  italic = deleted account; sidebar merges messages ∪ friends (clearing a
+  chat never unfriends); ghost chats are read-only with composer locked.
 - **Icons: Font Awesome 7 Free** — vendored (not CDN: CSP `default-src
   'self'` + offline shell). `client/app/vendor/fontawesome/{css,webfonts}`
   (+ LICENSE.txt). Single config `client/app/js/icons.js` (ICONS map +
