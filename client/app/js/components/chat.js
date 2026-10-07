@@ -183,7 +183,13 @@ export function createChat({ client, onHomeRefresh }) {
     client.on('ack', async ({ localId, ok, error }) => {
       if (!localId) return;
       const rec = await updateMessage(`out:${localId}`, { state: ok ? 'sent' : 'failed' });
-      if (!ok) toast(`Send rejected: ${error ?? 'unknown'}`, 'error');
+      if (!ok) {
+        toast(`Send rejected: ${error ?? 'unknown'}`, 'error');
+        // unknown_recipient on a chat that opened fine means our cached view
+        // is stale — almost always: their account was deleted while we sat
+        // here. Re-resolve and let the icons/ghost state catch up.
+        if (error === 'unknown_recipient') recheckPeerAfterSend();
+      }
       if (rec) {
         await render();
         onHomeRefresh?.();
@@ -773,6 +779,51 @@ export function createChat({ client, onHomeRefresh }) {
 
   // --- opening ---
 
+  // Peer facts from a keys lookup, applied wherever they surface (openChat
+  // and post-send re-checks): identity anchors, chat-head badge + sub line,
+  // and the verified-flag cache the sidebar renders from.
+  async function applyPeerFacts(peer) {
+    peerIdentity = peer?.id ?? null;
+    peerIdentityKnown = !!peer;
+    peerJoinedAt = peer?.joinedAt ?? null;
+    peerIdentityVerified = !!peer?.verified;
+    $('chat-sub').replaceChildren(...chatSubNodes(peer));
+    renderIdentityBadge($('chat-peer-badge'));
+    if (peer) await rememberPeerVerified(currentPeer, peerIdentityVerified);
+  }
+
+  // Re-resolve the peer after an unknown_recipient send rejection.
+  // Success = they exist (re-apply facts: a mid-chat admin verification or
+  // re-registration updates the icons immediately); 404 = flip the whole UI
+  // into the deleted-account state without waiting for a chat reopen.
+  let rechecking = false;
+  async function recheckPeerAfterSend() {
+    if (!currentPeer || rechecking || peerGone) return;
+    rechecking = true;
+    try {
+      const fresh = await client.peerKeys(currentPeer, { refresh: true });
+      await applyPeerFacts(fresh);
+      await markPeerGone(currentPeer, false);
+      await updateTrustUI();
+      onHomeRefresh?.();
+    } catch (err) {
+      if (err?.code === 'unknown_account' || err?.status === 404) {
+        peerGone = true;
+        await applyPeerFacts(null);
+        await markPeerGone(currentPeer, true);
+        await friendMarkFlags(currentPeer, { gone: true });
+        setComposerEnabled(false);
+        await updateTrustUI();
+        onHomeRefresh?.();
+        toast(`${currentPeer}'s account was deleted — history is read-only now.`, 'error');
+      }
+      // any other error (offline, transient): leave state untouched — the
+      // send itself already surfaced it
+    } finally {
+      rechecking = false;
+    }
+  }
+
   async function openChat(username) {
     const status = $('home-status');
     try {
@@ -791,13 +842,7 @@ export function createChat({ client, onHomeRefresh }) {
       }
       currentPeer = (peer?.u ?? username).toLowerCase();
       $('chat-peer').textContent = `${currentPeer}`;
-      peerIdentity = peer?.id ?? null;
-      peerIdentityKnown = !!peer;
-      peerJoinedAt = peer?.joinedAt ?? null;
-      peerIdentityVerified = !!peer?.verified;
-      // chat-head sub line: red flags first ("Unverified user" / "Account
-      // deleted"), then device count or the offline note
-      $('chat-sub').replaceChildren(...chatSubNodes(peer));
+      await applyPeerFacts(peer);
       setComposerEnabled(!peerGone);
       $('chat-empty').hidden = true;
       $('chat-view').hidden = false;
@@ -808,8 +853,6 @@ export function createChat({ client, onHomeRefresh }) {
       // 'changed') = the username was re-registered: drop trust on EVERY
       // device of ours — server delete + our own sys broadcast converge the
       // mirrors; the warning strip then shows the stranger state.
-      renderIdentityBadge($('chat-peer-badge'));
-      if (peer) await rememberPeerVerified(currentPeer, peerIdentityVerified);
       // Persist "this account is gone / is back" for the sidebar: it only
       // learns from the local mirror, and the server purges dead names from
       // friends lists. Skipped in pure-offline mode (no facts learned).
