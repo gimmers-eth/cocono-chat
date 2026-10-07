@@ -334,7 +334,7 @@ paths:
         - bearerAuth: []
       responses:
         '200':
-          description: Exclusive vouch-stage buckets: addedBy / verifiedBy / trustedBy.
+          description: Exclusive vouch-stage buckets (addedBy / verifiedBy / trustedBy) plus the CoCo score (verifiedBy + 3×trustedBy, see docs/COCO_SCORE.md).
         '404': { description: 'No such user.' }
 
   /api/me/verify-id:

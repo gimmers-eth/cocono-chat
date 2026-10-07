@@ -7,7 +7,7 @@ section links here.
 
 **Docs layout (since 2026-10-06):** every document lives in `docs/`
 (`DESIGN/QUESTIONS/ANSWERS/PROJECT_STATUS/CLIENT_SDK/MESSAGES/SIGNUP/
-BE_TECH/THEMES/GO_LIVE_PROCESS/FRIENDS`, audits in `docs/audits/`). Only
+BE_TECH/THEMES/GO_LIVE_PROCESS/FRIENDS/COCO_SCORE`, audits in `docs/audits/`). Only
 `README.md` files stay beside code (root + `be/`, `client/`) and
 they point into `docs/`. The legacy `fe/` PWA and its
 `FE_LEGACY_TECH.md` doc were **deleted 2026-10-06** — `client/app`

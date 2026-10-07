@@ -8,6 +8,8 @@ import { fail, limited, requireAuth } from '../shared.js';
 //   addedBy     added, but the safety number was never confirmed
 //   verifiedBy  safety number verified, but not trusted yet
 //   trustedBy   taken to the trust (vouch) stage
+// The CoCo score (see docs/COCO_SCORE.md) is computed HERE so every client
+// shows one number: verified vouches are worth 1, trusted vouches 3.
 // Requires a JWT (same posture as the keys lookup) and is rate limited.
 export default async function userStatsRoutes(app, { users, redis, config }) {
   app.get('/api/users/:username/stats', async (request, reply) => {
@@ -27,6 +29,12 @@ export default async function userStatsRoutes(app, { users, redis, config }) {
       users.countDocuments({ friends: { $elemMatch: { u: ul, v: true, t: { $ne: true } } } }),
       users.countDocuments({ friends: { $elemMatch: { u: ul, t: true } } }),
     ]);
-    return { u: ul, addedBy, verifiedBy, trustedBy };
+    return {
+      u: ul,
+      addedBy,
+      verifiedBy,
+      trustedBy,
+      coco: verifiedBy * 1 + trustedBy * 3, // v1 weights; see docs/COCO_SCORE.md
+    };
   });
 }

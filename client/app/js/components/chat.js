@@ -586,12 +586,16 @@ export function createChat({ client, onHomeRefresh }) {
   // ---- profile: TOP sheet (separate from the chat menu), opened by the
   // chat-head name or the menu row. Colour-coded identity + trust stage. ----
 
-  const TRUST_STAGES = {
-    [PS.STRANGER]: ['bad', 'Not added', 'Anyone can register a name. Add this account from the chat menu to bind its identity key, then verify and trust it.'],
-    [PS.UNVERIFIED]: ['warn', 'Added', 'Now verify the safety number (chat menu → “Verify user”): reading the same number together proves nobody is in between.'],
-    [PS.VERIFIED]: ['warn', 'Safety number verified', 'The key is confirmed — but you have not TRUSTED this account yet. Trust is the human decision for someone you actually know.'],
-    [PS.TRUSTED]: ['ok', 'Trusted', 'You verified the safety number and confirmed this is someone you know.'],
-    [PS.GONE]: ['bad', 'Account deleted', 'This account no longer exists. Your saved messages stay readable, but nothing new can be sent.'],
+
+
+  // Profile "Safety" section: three labelled verdicts — App (platform ID
+  // verification), Social (how the network vouches: counts + CoCo score,
+  // see docs/COCO_SCORE.md) and You (where THIS user stands on the ladder).
+  const YOU_STAGES = {
+    [PS.STRANGER]: ['bad', 'You: Not added', 'You haven’t added this account. Anyone can register a name — add them, then compare safety numbers.'],
+    [PS.UNVERIFIED]: ['warn', 'You: Added', 'Added, but the safety number isn’t confirmed. Read it together (chat menu → “Verify user”) to rule out an interceptor.'],
+    [PS.VERIFIED]: ['warn', 'You: Verified', 'You confirmed the safety number, but haven’t trusted them yet. Trusting vouches for them on the platform.'],
+    [PS.TRUSTED]: ['ok', 'You: Trusted', 'You verified the number and trust this account — that trust counts as a public vouch in their reputation.'],
   };
 
   async function renderProfileView() {
@@ -605,58 +609,67 @@ export function createChat({ client, onHomeRefresh }) {
     $('profile-joined').textContent = peerJoinedAt ? `Joined ${new Date(peerJoinedAt).toLocaleDateString()}` : '';
     $('profile-joined').hidden = !peerJoinedAt;
 
-    // reputation counts at the TOP of Safety (hidden for vanished profiles;
-    // counts of a dead account would only confuse)
+    const appState = $('profile-app-state');
+    const appNote = $('profile-app-note');
+    const socialState = $('profile-social-state');
+    const socialNote = $('profile-social-note');
+    const youState = $('profile-you-state');
+    const youNote = $('profile-you-note');
     const rep = $('profile-reputation');
+    const coco = $('profile-coco');
     rep.hidden = true;
+    coco.hidden = true;
 
-    const idState = $('profile-id-state');
-    const idNote = $('profile-id-note');
-    const trustStateEl = $('profile-trust-state');
-    const trustNote = $('profile-trust-note');
+    const setRow = (stateEl, noteEl, cls, title, note) => {
+      stateEl.textContent = title;
+      stateEl.className = `profile-id-state ${cls}`;
+      noteEl.textContent = note ?? '';
+    };
 
-    // one single verdict for vanished peers — no repeated "deleted/not
-    // found" across the identity AND trust rows
+    // vanished peers: ONE verdict, nothing else
     if (peerGone || ent?.gone) {
-      idState.textContent = peerHadHistory ? 'Account deleted' : 'User not found';
-      idState.className = 'profile-id-state bad';
-      idNote.textContent = peerHadHistory
-        ? 'This account no longer exists. Your saved messages stay readable, but nothing new can be sent.'
-        : 'No account with this name exists — nothing you send can be delivered.';
-      trustStateEl.hidden = true;
-      trustNote.hidden = true;
+      setRow(appState, appNote, 'bad',
+        peerHadHistory ? 'Account deleted' : 'User not found',
+        peerHadHistory
+          ? 'This account no longer exists. Your saved messages stay readable, but nothing new can be sent.'
+          : 'No account with this name exists — nothing you send can be delivered.');
+      [socialState, socialNote, youState, youNote].forEach((el) => { el.hidden = true; });
       return;
     }
-    trustStateEl.hidden = false;
-    trustNote.hidden = false;
+    [socialState, socialNote, youState, youNote].forEach((el) => { el.hidden = false; });
 
+    // App
     if (peerIdentityKnown && peerIdentityVerified) {
-      idState.textContent = 'Identity verified';
-      idState.className = 'profile-id-state ok';
-      idNote.textContent = 'This account handed an ID document to a human reviewer — the person behind it has been checked.';
+      setRow(appState, appNote, 'ok', 'App: Verified',
+        'This account handed an ID document to a human reviewer — the person behind it has been checked.');
     } else if (peerIdentityKnown) {
-      idState.textContent = 'Not verified';
-      idState.className = 'profile-id-state bad';
-      idNote.textContent = 'Scammers typically use unverified accounts — they are cheap to set up and throw away. Do not trust this account with money, codes, personal details, or anything you would not send a stranger.';
+      setRow(appState, appNote, 'bad', 'App: Unverified',
+        'No ID has been checked for this account. Scammers typically use unverified accounts — they are cheap to set up and throw away.');
     } else {
-      idState.textContent = 'Identity status unknown';
-      idState.className = 'profile-id-state';
-      idNote.textContent = 'Open this chat while online to check the account status.';
+      setRow(appState, appNote, '', 'App: Unknown', 'Open this chat while online to check the account status.');
     }
 
-    const [cls, title, desc] = TRUST_STAGES[state] ?? TRUST_STAGES[PS.STRANGER];
-    trustStateEl.textContent = title;
-    trustStateEl.className = `profile-id-state trust ${cls}`;
-    trustNote.textContent = desc;
+    // Social + counts + CoCo (fetched once; hidden when offline)
+    let stats = null;
+    try { stats = await client.userStats(currentPeer); } catch { /* offline */ }
+    if (stats) {
+      const trusted = stats.trustedBy > 0;
+      setRow(socialState, socialNote, trusted ? 'ok' : 'bad',
+        trusted ? 'Social: Trusted' : 'Social: Untrusted',
+        trusted
+          ? 'Other people vouch for this account. Every vouch is a risk for the voucher — scammer contacts get their trustors reported and removed.'
+          : 'Nobody vouches for this account yet. Be extra careful: trust must be earned here, not assumed.');
+      rep.textContent = `Vouched by ${stats.addedBy} added · ${stats.verifiedBy} verified · ${stats.trustedBy} trusted`;
+      rep.hidden = false;
+      coco.textContent = `CoCo ${stats.coco} — from verified (×1) and trusted (×3) vouches; more signals later`;
+      coco.hidden = false;
+    } else {
+      setRow(socialState, socialNote, '', 'Social: Unknown', 'Reputation counts need a connection.');
+    }
 
-    // reputation last fetch so a vanished verdict above can short-circuit it
-    try {
-      const stats = await client.userStats(currentPeer);
-      if (stats) {
-        rep.textContent = `Added by ${stats.addedBy} · Verified by ${stats.verifiedBy} · Trusted by ${stats.trustedBy}`;
-        rep.hidden = false;
-      }
-    } catch { /* offline: stay hidden */ }
+    // You (the local ladder)
+    const [cls, title, desc] = YOU_STAGES[state] ?? YOU_STAGES[PS.STRANGER];
+    setRow(youState, youNote, `trust ${cls}`, title, desc);
   }
 
   async function openProfileView() {
