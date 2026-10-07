@@ -82,6 +82,30 @@ export function createChat({ client, onHomeRefresh }) {
     badgeEl.replaceChildren(...(peerIdentityKnown && !peerIdentityVerified ? [unverifiedBadgeEl()] : []));
   }
 
+  // Nodes for the chat-head sub line: red "Unverified user"/"Account
+  // deleted" flag first, device/offline info after — built from elements
+  // (no innerHTML, no null-string coercion).
+  function chatSubNodes(peer) {
+    const parts = [];
+    if (peerGone) {
+      parts.push(['Account deleted — history only', 'sub-flag']);
+    } else {
+      if (peerIdentityKnown && !peerIdentityVerified) parts.push(['Unverified user', 'sub-flag']);
+      parts.push([peer
+        ? `${peer.devices.length} device${peer.devices.length === 1 ? '' : 's'}`
+        : 'Offline — stored messages only', '']);
+    }
+    const nodes = [];
+    parts.forEach(([txt, cls], i) => {
+      if (i) nodes.push(document.createTextNode(' · '));
+      const s = document.createElement('span');
+      if (cls) s.className = cls;
+      s.textContent = txt;
+      nodes.push(s);
+    });
+    return nodes;
+  }
+
   // --- SDK event wiring (once) ---
 
   function connectEvents() {
@@ -696,11 +720,12 @@ export function createChat({ client, onHomeRefresh }) {
       }
       currentPeer = (peer?.u ?? username).toLowerCase();
       $('chat-peer').textContent = `${currentPeer}`;
-      $('chat-sub').textContent = peerGone
-        ? 'Account deleted — history only'
-        : peer
-          ? `${peer.devices.length} device${peer.devices.length === 1 ? '' : 's'}`
-          : 'Offline — stored messages only';
+      peerIdentity = peer?.id ?? null;
+      peerIdentityKnown = !!peer;
+      peerIdentityVerified = !!peer?.verified;
+      // chat-head sub line: red flags first ("Unverified user" / "Account
+      // deleted"), then device count or the offline note
+      $('chat-sub').replaceChildren(...chatSubNodes(peer));
       setComposerEnabled(!peerGone);
       setStatus($('chat-status'), '');
       $('chat-empty').hidden = true;
@@ -712,9 +737,6 @@ export function createChat({ client, onHomeRefresh }) {
       // 'changed') = the username was re-registered: drop trust on EVERY
       // device of ours — server delete + our own sys broadcast converge the
       // mirrors; the warning strip then shows the stranger state.
-      peerIdentity = peer?.id ?? null;
-      peerIdentityKnown = !!peer;
-      peerIdentityVerified = !!peer?.verified;
       renderIdentityBadge($('chat-peer-badge'));
       if (peer) await rememberPeerVerified(currentPeer, peerIdentityVerified);
       // Persist "this account is gone / is back" for the sidebar: it only

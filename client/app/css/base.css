@@ -281,6 +281,8 @@ img.logo { object-fit: cover; background: none; }
 .badge-slot { display: inline; }
 .badge-slot .verify-badge { margin-left: .35em; }
 .verify-link { font-size: .72rem; margin-left: .5rem; opacity: .9; color: var(--warning) !important; }
+/* chat-head sub-line flags (Unverified user / Account deleted) */
+#chat-sub .sub-flag { color: var(--danger); }
 
 /* Trust warning strip (unverified chat): stays under the header, above the
    transcript. Amber = caution, not danger — encryption still holds. */
