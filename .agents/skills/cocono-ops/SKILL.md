@@ -66,24 +66,26 @@ development restart it automatically**; static FE/SDK files (`client/app`,
 `systemctl --user restart cocono-be` is for stuck crash loops or config
 changes only — update.sh does the clean known-good bounce itself.
 
-## Backups (ops trio #2 — built, needs first-run setup)
+## Backups (ops trio #2 — LIVE, local-only)
 
 - Scripts: `ops/backup.sh hourly|daily` (mongodump + redis RDB / box bundle
   of `.env` + acme.sh + units; **always age-encrypted**, staging only in
-  tmpfs, local mirror `~/backups`, rclone copy off-box, retention 24
-  hourly / 14 daily local + remote-pruned by age).
-- Timers: `cocono-backup.timer` (hourly), `cocono-backup-daily.timer`
-  (~02:30), `cocono-backup-drill.timer` (Sun ~04:15 — decrypts the newest
-  archive into throwaway mongo :27019 / redis :6380 and count-checks;
-  manual `ops/backup-drill.sh --full` also boots the real app on :3100).
+  tmpfs, local mirror `~/backups`, rclone copy off-box IF `RCLONE_DEST` is
+  set, retention 24 hourly / 14 daily).
+- Timers (enabled): `cocono-backup.timer` (hourly),
+  `cocono-backup-daily.timer` (~02:30), `cocono-backup-drill.timer`
+  (Sun ~04:15 automatic drill; manual deeper proof:
+  `ops/backup-drill.sh --full` boots the real app on :3100 from the
+  backup). Check: `systemctl --user list-timers 'cocono-*'`.
+- Posture (dev box decision 2026-10-07): backups stay **on-box**,
+  `~/backups/{hourly,daily}`; age identity is on-box
+  (`~/.config/cocono-backup/identity.age`, needed for unattended drills) —
+  encryption guards the files, not a full-box compromise. Before public
+  launch: set `RCLONE_DEST` + move the identity off-box.
 - Status/log: `~/backups/last-run.json`, `~/backups/backup.log`,
-  `journalctl --user -u cocono-backup[-daily|-drill]`.
-- Until `~/.config/cocono-backup.conf` has `AGE_RECIPIENT` set the timers
-  NO-OP politely. Drills additionally need the age identity on-box at
-  `~/.config/cocono-backup/identity.age` (chmod 600) — or stop the drill
-  timer.
-- Restore (panic button): `ops/restore.sh <archive> ` — typed 'RESTORE'
-  confirmation, overwrites prod data with the backup state.
+  `journalctl --user -u cocono-backup -a`.
+- Restore (panic button): `ops/restore.sh <archive>` — typed 'RESTORE'
+  confirmation; overwrites prod data with the backup state.
 
 
 - Tests need local Redis (up as `cocono-redis`); the backend test suite boots

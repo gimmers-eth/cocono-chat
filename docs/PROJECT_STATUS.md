@@ -164,13 +164,13 @@ launch, P1 = strongly before/soon after, P2 = roadmap.
    collapses onto the CDN\'s single IP (the .env comment warns; now it bites). Decide
    direct-expose vs Cloudflare and set hops accordingly.
 4. **HSTS** missing on the HTTPS origin (one header line; also consider preload later).
-5. **Backups + secrets.** Backup jobs are BUILT (`ops/backup.sh` + systemd
-   timers, age-encrypted end to end, rclone off-box) — **not yet armed**:
-   needs the user-supplied age recipient + rclone remote in
-   `~/.config/cocono-backup.conf`. Once configured, `.env`/DB bundles (JWT
-   secret, VAPID, ADMIN_TOKEN) leave the box encrypted at rest, and the
-   weekly drill (`ops/backup-drill.sh`) is the standing restore test.
-   P0 #5 counts as closed only after the FIRST successful drill.
+5. **Backups + secrets.** Backup jobs are LIVE: age-encrypted hourly data +
+   daily box bundles, weekly automatic restore drill (first full drill
+   PASSED incl. real app boot from restored data). Current posture:
+   **on-box only** (`RCLONE_DEST` unset; age identity on the box for
+   unattended drills). Accepted for the dev box — **public launch requires
+   off-box encrypted copies**: set `RCLONE_DEST`, move the identity off-box
+   (recipient-only config remains).
 6. **Abuse tooling.** No contact **block/report** exists — a public messenger without
    one is a support fire. (FE-side block = hide + drop-queued? needs small protocol
    thought: unsolicited E2EE messages can\'t be server-filtered by content, but the
@@ -255,13 +255,23 @@ replay dedup · envelope HMAC/sender-mismatch/unknown-recipient · auth flow hap
 
 ## Next up (agreed order)
 
-1. **Ops trio — 1 of 3 DONE**:
+1. **Ops trio — 2 of 3 DONE**:
    ✅ `update.sh` (pull → install → test-gate with auto-rollback → restart
    → verify served sha; `--dry-run` supported).
-   ⬜ backup cron (hourly `mongodump`, daily repo bundle — **encrypted at
-   rest** per P0 #5, with a restore drill), ⬜ GitHub Actions CI (Node 22 +
-   redis, both suites). No build step exists (client is unbundled ES
-   modules; there is no `dist/`).
+   ✅ **backup trio (LIVE, local-only)**: `ops/backup.sh hourly|daily`
+   (mongodump + redis RDB / box bundle of `.env`+acme.sh+units → age
+   encrypted, tmpfs staging only, mirror `~/backups/{hourly,daily}`,
+   retention 24/14), `ops/backup-drill.sh` (weekly automatic: decrypt →
+   throwaway mongo :27019 + redis :6380 → count checks; `--full` also boots
+   the real app on :3100 from the backup — first run PASSED incl. full leg),
+   `ops/restore.sh` (typed-confirmation prod restore). Dev-box decision
+   2026-10-07: **backups stay on-box** (age identity lives here so drills
+   are unattended; encryption guards files, NOT a full-box compromise).
+   rclone off-box sync is implemented — set `RCLONE_DEST` in
+   `~/.config/cocono-backup.conf` when a second box/B2 exists (required
+   before public launch).
+   ⬜ GitHub Actions CI (Node 22 + redis, both suites). No build step exists
+   (client is unbundled ES modules; there is no `dist/`).
 2. **Public-launch P0 list** (see Security posture): registration gate, queue
    caps, TRUST_PROXY/CDN decision, HSTS, encrypted backups, block/report.
 3. M4 files/media (DESIGN.md sketch exists).
