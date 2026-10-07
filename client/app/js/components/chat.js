@@ -12,12 +12,13 @@
 import { $, setStatus, setChatOpen, fmtTime, confirmModal } from '../ui.js';
 import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
+import { PS, resolvePeerState, peerStateIcon } from './peername.js';
 import { safetyNumber } from '../identity.js';
 import {
   saveMessage, updateMessage, messagesWith, markRead, allMessages,
   getMessage, deleteMessage, clearMessages,
-  loadFriends, friendAdd, friendDel, FRIENDS_EVENT,
-  getPin, recordPinSeen, setPinVerified,
+  loadFriends, friendAdd, friendDel, friendMarkFlags, FRIENDS_EVENT,
+  getPin, recordPinSeen,
 } from '../store.js';
 
 // In-app banner (visible-but-other-chat) + OS notification (app hidden or
@@ -95,11 +96,14 @@ export function createChat({ client, onHomeRefresh }) {
       // sender's transport key), so the payload is trusted once decrypted —
       // but still parsed defensively.
       const selfUl = String(client.username ?? '').toLowerCase();
-      if (m.peer.toLowerCase() === selfUl && /^\{"sys":"friend[-+]"/.test(m.text)) {
+      if (m.peer.toLowerCase() === selfUl && /^\{"sys":"friend[-+]/.test(m.text)) {
         try {
           const p = JSON.parse(m.text);
           if (p.sys === 'friend+') await friendAdd(p.ul, p.p || '');
           else if (p.sys === 'friend-') await friendDel(p.ul);
+          else if (p.sys === 'friend-v') await friendMarkFlags(p.ul, { verified: !!p.v });
+          else if (p.sys === 'friend-t') await friendMarkFlags(p.ul, { trust: !!p.t });
+          else throw new Error('unknown sys');
           await updateTrustUI();
           onHomeRefresh?.();
         } catch { /* unparsable system payload: ignore */ }
@@ -300,9 +304,19 @@ export function createChat({ client, onHomeRefresh }) {
     return (await loadFriends()).find((f) => f.peer === peer);
   }
 
-  // "is friend" = actually trusted: bound key matches the live account
-  async function isCurrentPeerFriend() {
-    return !!(await friendEntryFor(currentPeer))?.trusted;
+  // "is friend" helper retired — trustState()/friendEntryFor() drive all
+  // menu and strip decisions now.
+
+  // One place that turns (mirror entry, local pin, chat state) into the
+  // shared peername trust state — red / orange / green ladder.
+  function trustState(ent, pin) {
+    return resolvePeerState({
+      gone: peerGone || !!ent?.gone,
+      bound: !!ent?.trusted && pinState !== 'changed',
+      verified: !!ent?.verified,
+      trusted: !!ent?.trust,
+      conflict: !!pin && !!ent?.pub && pin.p !== ent.pub,
+    });
   }
 
   async function updateTrustUI() {
@@ -315,95 +329,95 @@ export function createChat({ client, onHomeRefresh }) {
     }
     const ent = await friendEntryFor(currentPeer);
     const pin = await getPin(currentPeer);
-    const gone = peerGone || !!ent?.gone;
-    // pin conflict: the key WE first-saw/pinned differs from the server's
-    // binding — a fact no server opinion can explain away
-    const conflict = !!pin && !!ent?.pub && pin.p !== ent.pub;
-    const trusted = !!ent?.trusted && !conflict && pinState !== 'changed';
-    const verified = trusted && !!pin?.verified;
-    // header identity mark: slash+italic (deleted), green shield (verified),
-    // green user (trusted), red x (stranger/unbound/conflict)
-    headStatus.replaceChildren(
-      iconEl(gone ? 'userGone' : verified ? 'friendVerified' : trusted ? 'friend' : 'notFriend',
-        gone || !trusted ? 'icon-danger' : 'icon-friend'),
-    );
+    const state = trustState(ent, pin);
+    const gone = state === PS.GONE;
+
+    headStatus.replaceChildren(peerStateIcon(state));
     $('chat-peer').parentElement.classList.toggle('gone', gone);
-    if (gone) {
-      // deleted account outranks the trust strip: this chat is history
-      warn.classList.add('gone');
-      warn.hidden = false;
-      warn.replaceChildren(
-        iconEl('userGone', 'icon-danger'),
-        document.createTextNode(` ${currentPeer} no longer exists — this account was deleted. `
-          + 'Your stored messages remain readable, but sending is disabled.'),
-      );
-      return;
+
+    // plain-language strips, tiered: red (danger) / orange (warn).
+    // No strip once TRUSTED (or when the chat is self/unknown state).
+    const MSG = {
+      [PS.GONE]: ['danger', 'userGone', 'This account was deleted. Your saved messages stay readable, but you can’t send new ones.'],
+      [PS.STRANGER]: ['danger', 'notFriend', `You haven’t added ${currentPeer} yet. Messages are private, but anyone can sign up with a name — add them, then verify, to be sure it’s really them.`],
+      [PS.UNVERIFIED]: ['warn', 'friend', `You’ve added ${currentPeer}, but haven’t verified them. Read the safety number aloud together (a call works) — when both screens match, nobody is in between. Open ⋮ and tap “Verify user”.`],
+      [PS.VERIFIED]: ['warn', 'friendVerified', `You’ve verified ${currentPeer}’s key, but haven’t trusted them yet. Only trust accounts you actually know in person — open ⋮ and tap “Trust user” when you’re sure.`],
+    };
+    let tier;
+    let text;
+    if (conflictAlert(ent, pin)) {
+      tier = 'danger';
+      text = `Heads up: the key this device remembers for ${currentPeer} doesn’t match the server’s. Until you’ve checked the number together, treat this chat with suspicion.`;
+    } else if (pinState === 'changed' && !gone) {
+      tier = 'danger';
+      text = `Heads up: ${currentPeer}’s identity key changed on this device. If they reinstalled or re-created their account that can be normal — but verify them again before trusting new messages.`;
+    } else {
+      [tier, , text] = MSG[state] ?? [];
     }
-    warn.classList.remove('gone');
-    warn.hidden = trusted;
-    if (!trusted) {
-      let why;
-      if (conflict) {
-        why = `SECURITY ALERT: the key pinned on this device differs from the server's trust binding for ${currentPeer}. The server may be lying, or the account changed hands — verify the safety number out of band before trusting ANY message from it`;
-      } else if (pinState === 'changed') {
-        why = `SECURITY ALERT: ${currentPeer}'s identity key changed since this device first saw it. Trust was revoked automatically — compare the new safety number out of band, then re-add as a friend`;
-      } else if (ent?.changed) {
-        why = `${currentPeer}'s account was re-created (identity key changed) — the old trust binding is stale`;
-      } else if (ent) {
-        why = `${currentPeer} is on your friends list but not identity-bound yet`;
-      } else {
-        why = `${currentPeer} is not on your friends list`;
-      }
+    warn.classList.toggle('danger', tier === 'danger');
+    warn.classList.toggle('warn', tier === 'warn');
+    warn.hidden = !text;
+    if (text) {
       warn.replaceChildren(
-        iconEl('notFriend', 'icon-danger'),
-        document.createTextNode(` ${why}. Messages remain end-to-end encrypted, `
-          + (conflict || pinState === 'changed'
-            ? 'but treat this identity as unverified.'
-            : 'but this account is not trusted — add it as a friend to bind its identity key.')),
+        iconEl(MSG[state]?.[1] ?? 'notFriend', tier === 'danger' ? 'icon-danger' : 'icon-warn'),
+        document.createTextNode(` ${text}`),
       );
     }
   }
 
-  function friendMenuLabel(isFriend, peer) {
-    // ONE icon per menu row: the action itself (shield = grant trust,
-    // minus = revoke). Stranger/friend state lives in the chat warning
-    // strip and the label text — no status column.
+  // local-pin disagreement with the server binding (the loud case)
+  function conflictAlert(ent, pin) {
+    return !!pin && !!ent?.pub && pin.p !== ent.pub && pinState !== 'changed';
+  }
+
+  // Menu primary row is the NEXT STEP of the ladder: Add user → Verify
+  // user → Trust user → (trusted) Safety number. Remove is its own row.
+  function menuActionLabel(state, peer) {
     const btn = $('btn-chat-friend');
-    btn.replaceChildren(
-      iconEl(isFriend ? 'friendRemove' : 'friendAdd'),
-      document.createTextNode(isFriend ? ` Remove ${peer} as friend` : ` Add ${peer} as friend`),
-    );
-    btn.classList.toggle('danger', isFriend);
+    const LABELS = {
+      [PS.STRANGER]: ['userAdd', '', `Add ${peer}`],
+      [PS.UNVERIFIED]: ['friendVerify', 'icon-warn', 'Verify user'],
+      [PS.VERIFIED]: ['trust', 'icon-trust', 'Trust user'],
+      [PS.TRUSTED]: ['identity', 'icon-trust', 'Safety number'],
+      [PS.GONE]: ['userGone', 'icon-danger', 'This user is gone'],
+      [PS.SELF]: ['userSolid', '', 'This is you'],
+    };
+    const [icon, cls, label] = LABELS[state] ?? LABELS[PS.STRANGER];
+    btn.replaceChildren(iconEl(icon, cls), document.createTextNode(` ${label}`));
+    btn.disabled = state === PS.GONE || state === PS.SELF;
+    $('btn-chat-remove').closest('.menu-row').hidden = !(state === PS.UNVERIFIED || state === PS.VERIFIED || state === PS.TRUSTED);
   }
 
-  async function toggleFriend() {
+  // Menu primary row dispatch: the next step of the ladder.
+  async function primaryAction() {
     if (!currentPeer) return;
-    const wasFriend = await isCurrentPeerFriend();
+    const ent = await friendEntryFor(currentPeer);
+    const pin = await getPin(currentPeer);
+    const state = trustState(ent, pin);
+    if (state === PS.STRANGER) return addUser();
+    if (state === PS.UNVERIFIED || state === PS.TRUSTED) return showIdentityView();
+    if (state === PS.VERIFIED) return confirmTrust();
+  }
+
+  async function addUser() {
     try {
-      if (wasFriend) {
-        await client.removeFriend(currentPeer);
-        await friendDel(currentPeer);
-      } else {
-        const entries = await client.addFriend(currentPeer);
-        const entry = entries.find((f) => f.u === currentPeer);
-        // The server-stamped binding MUST match the key WE pinned from our
-        // own lookups. A disagreement is a fact no server opinion can
-        // explain away: refuse the bind and warn (possible hostile or
-        // inconsistent server, or an unconfirmed key change).
-        const pin = await getPin(currentPeer);
-        if (pin && entry?.p && entry.p !== pin.p) {
-          await client.removeFriend(currentPeer).catch(() => {});
-          setStatus($('chat-status'),
-            `Cannot friend ${currentPeer}: the server's key disagrees with the key pinned on this device. Verify the safety number out of band before trusting this identity.`, true);
-          await updateTrustUI();
-          return;
-        }
-        await friendAdd(currentPeer, entry?.p ?? '');
-        if (entry?.p) await recordPinSeen(currentPeer, entry.p);
+      const entries = await client.addFriend(currentPeer);
+      const entry = entries.find((f) => f.u === currentPeer);
+      // The server-stamped binding MUST match the key WE pinned from our
+      // own lookups. A disagreement is a fact no server opinion can
+      // explain away: refuse the bind and warn (possible hostile or
+      // inconsistent server, or an unconfirmed key change).
+      const pin = await getPin(currentPeer);
+      if (pin && entry?.p && entry.p !== pin.p) {
+        await client.removeFriend(currentPeer).catch(() => {});
+        setStatus($('chat-status'),
+          `Couldn’t add ${currentPeer}: the key we remember on this device doesn’t match what the server says. Open the safety number and check it together before trusting this name.`, true);
+        await updateTrustUI();
+        return;
       }
-      setStatus($('chat-status'), wasFriend
-        ? `${currentPeer} removed from friends`
-        : `${currentPeer} added as friend`);
+      await friendAdd(currentPeer, entry?.p ?? '');
+      if (entry?.p) await recordPinSeen(currentPeer, entry.p);
+      setStatus($('chat-status'), `${currentPeer} added — now verify the safety number to be sure it’s really them.`);
       await updateTrustUI();
       onHomeRefresh?.();
     } catch (err) {
@@ -411,11 +425,54 @@ export function createChat({ client, onHomeRefresh }) {
     }
   }
 
-  // --- chat options modal (header ⋮): friend toggle + clear chat today;
-  //     report/block land here later. Modal (not dropdown) on purpose: an
-  //     early in-bubble actions design was killed by the click-triggered
-  //     catchUp re-render wiping the focus state mid-gesture — overlay DOM
-  //     survives render(). ---
+  async function removeUser() {
+    const ok = await confirmModal({
+      title: 'Remove user?',
+      body: `You’ll stop trusting ${currentPeer}. Chat history stays on this device.`,
+      okLabel: 'Remove', danger: true,
+    });
+    if (!ok) return;
+    try {
+      await client.removeFriend(currentPeer);
+      await friendDel(currentPeer);
+      setStatus($('chat-status'), `${currentPeer} removed.`);
+      await updateTrustUI();
+      onHomeRefresh?.();
+    } catch (err) {
+      setStatus($('chat-status'), err.message ?? String(err), true);
+    }
+  }
+
+  // Third stage behind a deliberate warning (the server also requires the
+  // verify stage — a key never confirmed can’t be "trusted").
+  async function confirmTrust() {
+    const ok = await confirmModal({
+      title: `Trust ${currentPeer}?`,
+      body: 'Only trust people you actually know. Trusting means you’ll treat this '
+        + 'account as the real person behind the name. If you haven’t compared the '
+        + 'safety number together yet, do that first — verifying the key is what '
+        + 'protects you; trusting is the human decision on top of it.',
+      okLabel: 'I know and trust them', danger: false,
+    });
+    if (!ok) return;
+    try {
+      await client.setFriendTrusted(currentPeer, true);
+      await friendMarkFlags(currentPeer, { trust: true });
+      setStatus($('chat-status'), `${currentPeer} trusted.`);
+      await updateTrustUI();
+      onHomeRefresh?.();
+    } catch (err) {
+      setStatus($('chat-status'), err.message ?? String(err), true);
+    }
+  }
+
+  // "bound" for menu purposes = the key binding itself is valid
+
+  // --- chat options side menu (header ⋮): the next-step action + remove +
+  //     clear; report/block land here later. Modal (not dropdown) on
+  //     purpose: an early in-bubble actions design was killed by the
+  //     click-triggered catchUp re-render wiping the focus state mid-gesture
+  //     — overlay DOM survives render(). ---
 
   async function openChatOpts() {
     if (!currentPeer) return;
@@ -423,22 +480,11 @@ export function createChat({ client, onHomeRefresh }) {
     $('chatopts-menu-view').hidden = false;
     $('chatopts-identity-view').hidden = true;
     $('chatopts-title').textContent = currentPeer;
-    // status icon beside the name: slash (gone) > shield (verified) > green
-    // user (trusted) > red x (stranger / unbound / stale binding)
     const ent = await friendEntryFor(currentPeer);
     const pin = await getPin(currentPeer);
-    const gone = peerGone || !!ent?.gone;
-    const conflict = !!pin && !!ent?.pub && pin.p !== ent.pub;
-    const trusted = !!ent?.trusted && !gone && !conflict && pinState !== 'changed';
-    const verified = trusted && !!pin?.verified;
-    friendMenuLabel(trusted, currentPeer);
-    // ghost chat (deleted account): friending is meaningless — the server
-    // rejects unknown users; hide the row, keep Clear + Safety number
-    $('btn-chat-friend').closest('.menu-row').hidden = gone;
-    $('chatopts-peer-status').replaceChildren(
-      iconEl(gone ? 'userGone' : verified ? 'friendVerified' : trusted ? 'friend' : 'notFriend',
-        trusted ? 'icon-friend' : 'icon-danger'),
-    );
+    const state = trustState(ent, pin);
+    menuActionLabel(state, currentPeer);
+    $('chatopts-peer-status').replaceChildren(peerStateIcon(state));
     $('chatopts-overlay').hidden = false;
     $('chatopts-modal').hidden = false;
     setMenuBtnOpen(true);
@@ -472,26 +518,25 @@ export function createChat({ client, onHomeRefresh }) {
       return;
     }
     numEl.textContent = await safetyNumber(myKey, peerKey);
-    const verified = !!pin?.verified && pin.p === peerKey;
-    statusIcon.replaceChildren(
-      iconEl(verified ? 'friendVerified' : 'friend', verified ? 'icon-friend' : 'icon-danger'),
-    );
+    const ent = await friendEntryFor(currentPeer);
+    const verified = !!ent?.verified;
+    statusIcon.replaceChildren(peerStateIcon(trustState(ent, pin)));
     $('identity-since').textContent = pin
-      ? `Pinned on this device since ${new Date(pin.firstSeenAt).toLocaleString()}`
-        + (pin.changedAt ? ` — key CHANGED ${new Date(pin.changedAt).toLocaleString()}, verification reset` : '')
-      : 'Not pinned on this device yet (seen from the server only).';
+      ? `Key remembered on this device since ${new Date(pin.firstSeenAt).toLocaleString()}`
+        + (pin.changedAt ? ` — it changed ${new Date(pin.changedAt).toLocaleString()}, verification was reset` : '')
+      : 'This device has not seen the key directly yet.';
     const vb = $('btn-identity-verify');
-    vb.disabled = !pin; // verification is only meaningful against a local pin
+    vb.disabled = !ent?.trusted; // verification needs a live binding
     vb.replaceChildren(
-      iconEl(verified ? 'friendRemove' : 'friendVerified'),
-      document.createTextNode(verified ? ' Mark unverified' : ' Mark verified'),
+      iconEl(verified ? 'friendRemove' : 'friendVerify'),
+      document.createTextNode(verified ? ' Undo verification' : ' We compared — mark verified'),
     );
     vb.classList.toggle('danger', verified);
   }
 
   async function copySafetyNumber() {
     const text = $('identity-number').textContent ?? '';
-    if (!text || text.startsWith('No identity')) return;
+    if (!text || text.startsWith('Safety number not available')) return;
     try {
       await navigator.clipboard.writeText(text);
       setStatus($('identity-since'), 'Safety number copied ✓');
@@ -502,12 +547,18 @@ export function createChat({ client, onHomeRefresh }) {
 
   async function toggleVerified() {
     if (!currentPeer) return;
-    const pin = await getPin(currentPeer);
-    if (!pin) return;
-    await setPinVerified(currentPeer, !pin.verified);
-    await showIdentityView();
-    await updateTrustUI();
-    onHomeRefresh?.(); // sidebar shield too
+    const ent = await friendEntryFor(currentPeer);
+    if (!ent?.trusted) return;
+    try {
+      await client.setFriendVerified(currentPeer, !ent.verified);
+      await friendMarkFlags(currentPeer, { verified: !ent.verified, trust: false });
+      setStatus($('chat-status'), ent.verified ? 'Verification undone.' : 'Verified ✓ — now trust them if you know this person.');
+      await showIdentityView();
+      await updateTrustUI();
+      onHomeRefresh?.();
+    } catch (err) {
+      setStatus($('chat-status'), err.message ?? String(err), true);
+    }
   }
 
   function closeChatOpts() {
@@ -708,14 +759,18 @@ export function createChat({ client, onHomeRefresh }) {
     $('btn-msg-fwd').addEventListener('click', forwardCurrentMsg);
     $('btn-msg-del').addEventListener('click', deleteCurrentMsg);
 
-    // Chat options side menu.
+    // Chat options side menu: primary = next ladder step (add/verify/trust/
+    // view number); remove is its own row.
     $('btn-chat-menu').addEventListener('click', toggleChatOpts);
     $('chatopts-overlay').addEventListener('click', closeChatOpts);
     $('btn-chat-friend').addEventListener('click', () => {
       closeChatOpts();
-      toggleFriend();
+      primaryAction();
     });
-    $('btn-chat-identity').addEventListener('click', showIdentityView);
+    $('btn-chat-remove').addEventListener('click', () => {
+      closeChatOpts();
+      removeUser();
+    });
     $('btn-identity-back').addEventListener('click', () => {
       $('chatopts-identity-view').hidden = true;
       $('chatopts-menu-view').hidden = false;

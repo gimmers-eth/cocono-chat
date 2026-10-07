@@ -80,7 +80,29 @@ chat open, `changed` revokes friendship via the same auto-untrust path and
 shows a red SECURITY ALERT strip. A pin that disagrees with the server
 binding (`conflict`) is the loudest state: the server may be lying.
 
-## UI state matrix
+## The trust ladder (UI state matrix)
+
+Three explicit stages, one shared component (`client/app/js/components/peername.js`)
+so EVERY surface (sidebar, chat header, chat-options title) shows the same
+mark. Plain-language strips guide the user to the next step — red and
+orange warnings in the chat, no strip once trusted:
+
+| Stage | Icon | Colour | Menu primary action | Strip |
+|---|---|---|---|---|
+| stranger (not added) | user-with-x | RED | “Add user” | red: anyone can register a name — add + verify |
+| added, unverified | outlined user | ORANGE | “Verify user” (safety number panel) | orange: read the number together |
+| verified, not trusted | shield user | GREEN | “Trust user” (warning modal) | orange: verified, but not trusted yet |
+| trusted | check user | BLUE | “Safety number” (view again) | none |
+| account deleted | user-slash + italic name | RED | — (rows hidden) | red: history only |
+
+Server enforcement mirrors the ladder: `verify` requires the add (404
+`not_friends`), `trust` requires `verify` (409 `stage_required`),
+un-verifying revokes trust, and RE-BIND (re-add after a key change) resets
+both stages. `verified`/`trust` live on the server entry so they propagate
+to every device of the account (sys messages + reconcile-on-entry); the
+local pin stays the device's own key-change alarm.
+
+### Legacy states
 
 | State | Sidebar | Header/menu icon | Strip |
 |---|---|---|---|

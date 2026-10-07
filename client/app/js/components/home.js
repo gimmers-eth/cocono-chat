@@ -6,6 +6,7 @@ import { $, setStatus, fmtTime, confirmModal } from '../ui.js';
 import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
 import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData } from '../store.js';
+import { PS, resolvePeerState, peerStateIcon } from './peername.js';
 import { refreshSettingsUI } from '../install.js';
 import { loadRegistry, applyTheme, savedTheme, wireThemeSelect } from '../theme.js';
 
@@ -78,21 +79,19 @@ export function createHome({ client, chat, onLogout }) {
       const selfUl = String(client.username ?? '').toLowerCase();
       const ent = friends.find((f) => f.peer === peer);
       const pin = pins.find((p) => p.peer === peer);
-      const gone = !!ent?.gone;
-      const conflict = !!pin && !!ent?.pub && pin.p !== ent.pub;
-      const trusted = !!ent?.trusted && !gone && !conflict;
-      const mark = peer === selfUl
-        ? iconEl('userSolid')
-        : gone
-          ? iconEl('userGone', 'icon-danger')
-          : trusted && pin?.verified
-            ? iconEl('friendVerified', 'icon-friend')
-            : trusted
-              ? iconEl('friend', 'icon-friend')
-              : iconEl('notFriend', 'icon-danger');
-      name.replaceChildren(mark);
+      // one shared ladder: red (not added/conflict) → orange (added, not
+      // verified) → green (verified) → blue (trusted); slash+italic = gone
+      const state = resolvePeerState({
+        isSelf: peer === selfUl,
+        gone: !!ent?.gone,
+        bound: !!ent?.trusted,
+        verified: !!ent?.verified,
+        trusted: !!ent?.trust,
+        conflict: !!pin && !!ent?.pub && pin.p !== ent.pub,
+      });
+      name.replaceChildren(peerStateIcon(state));
       name.append(peer);
-      if (name.classList) name.classList.toggle('gone', gone);
+      name.classList.toggle('gone', state === PS.GONE);
       const preview = document.createElement('span');
       preview.className = 'convo-last';
       preview.textContent = '';

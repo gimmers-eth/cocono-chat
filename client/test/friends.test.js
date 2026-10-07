@@ -118,3 +118,45 @@ test('friends: addFriend to unknown user rejects; self rejects', async (t) => {
   await assert.rejects(() => dev.addFriend('nosuchuser'), /unknown_account|No such user/);
   await assert.rejects(() => dev.addFriend(alice), /self_friend|yourself/);
 });
+
+test('friends: verify + trust stages propagate to every device (sys + list)', async (t) => {
+  const srv = await startServer();
+  const alice = randUser('alice');
+  const bobby = randUser('bobby');
+  const dev1 = srv.client({ storage: new MemoryStorage() });
+  const dev2 = srv.client({ storage: new MemoryStorage() });
+  const bClient = srv.client({ storage: new MemoryStorage() });
+  t.after(async () => {
+    for (const c of [dev1, dev2, bClient]) c.disconnect?.();
+    await srv.deleteUser(alice);
+    await srv.deleteUser(bobby);
+    await srv.stop();
+  });
+
+  await bClient.register(bobby);
+  await dev1.register(alice);
+  const { code } = await dev2.beginPairing(alice);
+  await dev1.approvePairing(code);
+  await dev2.completePairing({ pollIntervalMs: 100 });
+  await dev1.connect(); await waitOpen(dev1);
+  await dev2.connect(); await waitOpen(dev2);
+
+  await dev1.addFriend(bobby);
+
+  const vSys = waitFor(dev2, 'message', (m) => m.text?.startsWith('{"sys":"friend-v'), 8000);
+  const entries = await dev1.setFriendVerified(bobby, true);
+  assert.equal(entries[0].verified, true);
+  assert.equal(JSON.parse((await vSys).text).v, true);
+
+  const tSys = waitFor(dev2, 'message', (m) => m.text?.startsWith('{"sys":"friend-t'), 8000);
+  const trusted = await dev1.setFriendTrusted(bobby, true);
+  assert.equal(trusted[0].trust, true);
+  assert.equal(JSON.parse((await tSys).text).t, true);
+
+  // a third client (fresh reconcile) sees both stages from the server
+  const dev3 = srv.client({ storage: dev1.storage });
+  await dev3.login();
+  const list = await dev3.listFriends();
+  assert.equal(list[0].verified, true);
+  assert.equal(list[0].trust, true);
+});

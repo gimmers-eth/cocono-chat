@@ -55,6 +55,18 @@ export class Api {
     return this.#request(`/api/me/friends/${encodeURIComponent(ul)}`, { method: 'DELETE', token });
   }
 
+  verifyFriend(token, ul, verified) {
+    return this.#request(`/api/me/friends/${encodeURIComponent(ul)}/verify`, {
+      method: 'PUT', body: { verified }, token,
+    });
+  }
+
+  trustFriend(token, ul, trust) {
+    return this.#request(`/api/me/friends/${encodeURIComponent(ul)}/trust`, {
+      method: 'PUT', body: { trust }, token,
+    });
+  }
+
   appInfo() {
     return this.#request('/api/app-info');
   }

@@ -229,3 +229,51 @@ test('deleted username can be RE-REGISTERED and re-bound (fresh identity)', asyn
     await teardown();
   }
 });
+
+test('friends: verify + trust stages gate each other; rebind resets both', async () => {
+  const { app, teardown } = await setupApp(LIMITS);
+  try {
+    const alice = makeClient();
+    const bobby = makeClient();
+    const a = await signupUser(app, alice, 'alice');
+    await signupUser(app, bobby, 'bobby');
+    const tokenA = await getToken(app, alice, 'alice', a.d);
+    const authA = { authorization: `Bearer ${tokenA}` };
+
+    // stages need the add first
+    assert.equal((await app.inject({ method: 'PUT', url: '/api/me/friends/bobby/verify',
+      headers: authA, payload: { verified: true } })).statusCode, 404);
+
+    await app.inject({ method: 'PUT', url: '/api/me/friends/bobby', headers: authA });
+
+    // trust requires verify (stage ladder is enforced server-side too)
+    const earlyTrust = await app.inject({ method: 'PUT', url: '/api/me/friends/bobby/trust',
+      headers: authA, payload: { trust: true } });
+    assert.equal(earlyTrust.statusCode, 409);
+    assert.equal(earlyTrust.json().error, 'stage_required');
+
+    const v = await app.inject({ method: 'PUT', url: '/api/me/friends/bobby/verify',
+      headers: authA, payload: { verified: true } });
+    assert.equal(v.json().friends[0].verified, true);
+    assert.equal(v.json().friends[0].trust, false);
+
+    const t = await app.inject({ method: 'PUT', url: '/api/me/friends/bobby/trust',
+      headers: authA, payload: { trust: true } });
+    assert.equal(t.json().friends[0].trust, true);
+
+    // un-verifying revokes trust automatically
+    const un = await app.inject({ method: 'PUT', url: '/api/me/friends/bobby/verify',
+      headers: authA, payload: { verified: false } });
+    assert.equal(un.json().friends[0].verified, false);
+    assert.equal(un.json().friends[0].trust, false);
+
+    // re-trust, then RE-BIND (re-add) resets both stages
+    await app.inject({ method: 'PUT', url: '/api/me/friends/bobby/verify', headers: authA, payload: { verified: true } });
+    await app.inject({ method: 'PUT', url: '/api/me/friends/bobby/trust', headers: authA, payload: { trust: true } });
+    const rebind = await app.inject({ method: 'PUT', url: '/api/me/friends/bobby', headers: authA });
+    assert.equal(rebind.json().friends[0].verified, false, 'rebind resets verification');
+    assert.equal(rebind.json().friends[0].trust, false, 'rebind resets trust');
+  } finally {
+    await teardown();
+  }
+});

@@ -134,10 +134,15 @@ is the only FE (audits mentioning `fe/` are historical).
   PAIR-DERIVED (`client/app/js/identity.js`: SHA-256 over the
   canonically-ordered key pair → 8 hex groups — BOTH users see the same
   number; symmetry + format unit-tested against an independent spec
-  implementation) are viewable/copyable in the chat side menu with a
-  **Mark verified**
-  flow (compare out of band first — the panel says so). Verified peers show
-  a green shield in sidebar/header/menu. `toggleFriend` REFUSES to bind when
+  implementation) are viewable/copyable in the chat side menu; the
+  **verify** and **trust** stages live on the SERVER per friend
+  (`{u,p,v,t}` — verify requires the add, trust requires verify, rebind
+  resets both) and propagate to all devices via friend-v / friend-t sys
+  messages + reconcile-on-entry. Verified peers show a green shield,
+  trusted a blue check; the menu's primary row is always the NEXT step
+  (“Add user” → “Verify user” → “Trust user” → “Safety number”), enforced
+  server-side and mirrored by the shared `peername.js` ladder component.
+  `toggleFriend` REFUSES to bind when
   the server-stamped key contradicts the local pin. Full model + honest
   threat limits in **docs/FRIENDS.md**. (Signed append-only friend-event log
   — tamper-evident history — remains deliberately deferred to P2; groups

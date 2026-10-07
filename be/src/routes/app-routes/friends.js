@@ -43,7 +43,9 @@ export default async function friendsRoutes(app, { users, redis, config }) {
   }
 
   const normalize = (list) => (list ?? []).map((f) => (
-    typeof f === 'string' ? { u: f, p: null } : { u: String(f.u ?? '').toLowerCase(), p: f.p ?? null }
+    typeof f === 'string'
+      ? { u: f, p: null, v: false, t: false }
+      : { u: String(f.u ?? '').toLowerCase(), p: f.p ?? null, v: f.v === true, t: f.t === true }
   )).filter((f) => f.u);
 
   // entries + live-directory annotations (one $in query for all targets)
@@ -61,12 +63,19 @@ export default async function friendsRoutes(app, { users, redis, config }) {
     }
     return entries.map((e) => {
       const idp = live.get(e.u) ?? null;
+      const trusted = idp !== null && e.p !== null && e.p === idp;
       return {
         u: e.u,
         p: e.p,
         gone: idp === null,
         changed: idp !== null && e.p !== null && e.p !== idp,
-        trusted: idp !== null && e.p !== null && e.p === idp,
+        trusted,
+        // verification AND the trust stage live HERE (server) so they
+        // propagate to every device of this account (sys messages for live
+        // ones, reconcile-on-entry for the rest). Both only count while the
+        // binding itself is valid; re-binding (new key) resets them.
+        verified: trusted && e.v === true,
+        trust: trusted && e.v === true && e.t === true,
       };
     });
   }
@@ -90,21 +99,52 @@ export default async function friendsRoutes(app, { users, redis, config }) {
     const idp = targetDoc.identity?.p ?? targetDoc.devices?.[0]?.pub ?? null;
 
     // read-modify-write (single-account scale; unique-ul index protects the
-    // doc, and the operation is idempotent: re-add = re-bind)
+    // doc, and the operation is idempotent: re-add = RE-BIND, and a new key
+    // is never "verified" until the numbers are compared again)
     const user = await users.findOne({ ul }, { projection: { friends: 1 } });
     const list = normalize(user?.friends);
     const existing = list.find((f) => f.u === target);
     if (existing) {
-      existing.p = idp; // explicit re-add re-binds (e.g. after 'changed')
+      existing.p = idp;
+      existing.v = false; // a new key is never pre-verified or pre-trusted
+      existing.t = false;
     } else {
       if (list.length >= config.friendsMax) {
         return fail(reply, 'friends_full', `Friends list is full (max ${config.friendsMax})`, 409);
       }
-      list.push({ u: target, p: idp });
+      list.push({ u: target, p: idp, v: false, t: false });
     }
     await users.updateOne({ ul }, { $set: { friends: list.sort((a, b) => a.u.localeCompare(b.u)) } });
     return { friends: await enriched(ul) };
   });
+
+  // shared flag setter for the two post-add stages (verify / trust)
+  async function setFlag(request, reply, field, bodyKey, requires) {
+    const denied = await guard(request, reply, config.friendsChangeIpLimit);
+    if (denied) return denied;
+    const target = targetOf(request);
+    if (!target) return fail(reply, 'bad_username', 'Invalid username', 400);
+    const on = request.body?.[bodyKey] === true;
+    const ul = request.auth.sub;
+    const user = await users.findOne({ ul }, { projection: { friends: 1 } });
+    const list = normalize(user?.friends);
+    const existing = list.find((f) => f.u === target);
+    if (!existing) return fail(reply, 'not_friends', 'Add this user first', 404);
+    if (on && requires && !existing[requires]) {
+      return fail(reply, 'stage_required', 'Verify the safety number before trusting', 409);
+    }
+    existing[field] = on;
+    if (!on && field === 'v') existing.t = false; // un-verifying revokes trust too
+    await users.updateOne({ ul }, { $set: { friends: list } });
+    return { friends: await enriched(ul) };
+  }
+
+  // PUT /api/me/friends/:ul/verify — "we compared the safety numbers".
+  app.put('/api/me/friends/:ul/verify', (request, reply) => setFlag(request, reply, 'v', 'verified', null));
+
+  // PUT /api/me/friends/:ul/trust — third stage: "I know this person".
+  // Requires the verify stage (a key you never confirmed cannot be trusted).
+  app.put('/api/me/friends/:ul/trust', (request, reply) => setFlag(request, reply, 't', 'trust', 'v'));
 
   app.delete('/api/me/friends/:ul', async (request, reply) => {
     const denied = await guard(request, reply, config.friendsChangeIpLimit);

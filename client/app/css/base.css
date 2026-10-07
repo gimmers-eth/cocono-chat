@@ -23,6 +23,7 @@
   --danger: #ef6975;
   --success: #00a884;
   --warning: #ffa355;
+  --info: #58a6ff;          /* the "trusted" (third stage) blue */
   --dot-off: #556068;
   --dot-on: #00a884;
   --dot-busy: #ffa355;
@@ -267,8 +268,8 @@ img.logo { object-fit: cover; background: none; }
   background: rgba(255, 163, 85, 0.12); color: var(--warning);
   border-bottom: 1px solid var(--border);
 }
-/* deleted-account variant: stronger, danger-toned — this is final */
-.chat-warn.gone { background: rgba(239, 105, 117, 0.12); color: var(--danger); }
+/* trust ladder tiers for the strip: base = amber (warn), .danger = red */
+.chat-warn.danger { background: rgba(239, 105, 117, 0.12); color: var(--danger); }
 
 /* Font Awesome icons: every glyph comes from js/icons.js (vendored FA Free,
    /vendor/fontawesome). Sizing + tint helpers only — no per-view magic. */
@@ -276,7 +277,14 @@ img.logo { object-fit: cover; background: none; }
 #btn-send i { font-size: 1rem; }
 .linkish i { margin-right: .45em; }
 .icon-danger { color: var(--danger) !important; }
+.icon-warn { color: var(--warning) !important; }
 .icon-friend { color: var(--success) !important; }
+.icon-trust { color: var(--info) !important; }
+
+/* Shared username tag (components/peername.js): icon + name, one layout. */
+.peer-tag { display: inline-flex; align-items: center; gap: .45em; min-width: 0; }
+.peer-tag i { flex: none; }
+.peer-tag.gone > span:last-child { font-style: italic; }
 .msg .meta i { font-size: .68rem; margin-left: .3em; color: var(--muted); }
 .msg.out .meta i { color: #a7d9cd; }
 .msg.out .meta i.icon-danger, .msg .meta i.icon-danger { color: var(--danger); }

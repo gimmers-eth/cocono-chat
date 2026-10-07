@@ -172,8 +172,17 @@ export function loadFriends() {
 export async function friendAdd(peer, pub = '') {
   await withStore('readwrite', (s) => s.put({
     peer: String(peer).toLowerCase(), pub,
-    gone: false, changed: false, trusted: !!pub,
+    gone: false, changed: false, trusted: !!pub, verified: false, trust: false,
   }), FRIENDS);
+  notifyFriends();
+}
+
+/** Live-update the mirror from a friend-v / friend-t sys message. */
+export async function friendMarkFlags(peer, patch) {
+  const ul = String(peer).toLowerCase();
+  const cur = (await withStore('readonly', (s) => s.get(ul), FRIENDS))
+    ?? { peer: ul, pub: '', gone: false, changed: false, trusted: false };
+  await withStore('readwrite', (s) => s.put({ ...cur, ...patch }), FRIENDS);
   notifyFriends();
 }
 
@@ -198,6 +207,8 @@ export async function setFriends(entries) {
         gone: !!rec.gone,
         changed: !!rec.changed,
         trusted: !!rec.trusted,
+        verified: !!rec.verified, // server-account-level: propagates to all devices
+        trust: !!rec.trust,       // third stage: "I know this person"
       });
     }
     tx.oncomplete = resolve;
@@ -255,16 +266,6 @@ export async function recordPinSeen(peer, p) {
     await withStore('readwrite', (s) => s.put({ ...cur, lastSeenAt: now }), PINS);
   }
   return 'ok';
-}
-
-export async function setPinVerified(peer, verified) {
-  const ul = String(peer).toLowerCase();
-  const cur = await getPin(ul);
-  if (!cur) return null;
-  const next = { ...cur, verified, verifiedAt: verified ? Date.now() : null };
-  await withStore('readwrite', (s) => s.put(next), PINS);
-  notifyFriends();
-  return next;
 }
 
 /**

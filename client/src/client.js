@@ -388,6 +388,39 @@ export class CoconoClient extends Emitter {
     return res.friends ?? [];
   }
 
+  /**
+   * Record "we compared the safety numbers" for a bound user. Stored on
+   * the SERVER (account-level) so it propagates to every device: live ones
+   * via the friend-v sys message, offline/new ones via listFriends().
+   * @returns {Promise<Array>} authoritative entries
+   */
+  async setFriendVerified(username, verified) {
+    const ul = String(username).toLowerCase();
+    const res = await this.api.verifyFriend(this.#requireToken(), ul, verified === true);
+    const entries = res.friends ?? [];
+    this.#broadcastFlag('friend-v', ul, { v: verified === true });
+    return entries;
+  }
+
+  /**
+   * Third stage: "I know and trust this person" (UI gates it behind a
+   * warning modal; server additionally requires the verify stage). Also
+   * account-level: propagates to every device via friend-t / reconcile.
+   */
+  async setFriendTrusted(username, trust) {
+    const ul = String(username).toLowerCase();
+    const res = await this.api.trustFriend(this.#requireToken(), ul, trust === true);
+    const entries = res.friends ?? [];
+    this.#broadcastFlag('friend-t', ul, { t: trust === true });
+    return entries;
+  }
+
+  #broadcastFlag(sys, ul, extra) {
+    if (!this.#identity || !this.#transport || this.#transport.state !== 'open') return;
+    this.sendMessage(this.#identity.username, JSON.stringify({ sys, ul, ...extra }))
+      .catch((err) => this.logger.debug(`${sys} broadcast skipped: ${err?.message ?? err}`));
+  }
+
   // Friend events ride the NORMAL E2EE send path to self: an envelope our
   // other devices decrypt with their existing conversation keys. The app
   // recognises the {"sys":"friend+|friend-"} payload and keeps it out of

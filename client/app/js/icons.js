@@ -27,11 +27,14 @@ export const ICONS = {
   // friendship (one-way trust) — sidebar + menu identity marks
   userSolid: 'fa-user',              // you (solid)
   userGone: 'fa-user-slash',         // deleted account (red, italic name)
-  friend: 'fa-regular fa-user',      // trusted peer (outlined, green)
-  friendVerified: 'fa-user-shield',  // trust explicitly verified (green)
+  friend: 'fa-regular fa-user',      // added, not verified (orange)
+  friendVerified: 'fa-user-shield',  // safety number confirmed (green)
+  trust: 'fa-user-check',           // explicitly trusted (blue)
   notFriend: 'fa-user-xmark',        // stranger marker (red)
+  userAdd: 'fa-user-plus',          // action: add user
+  friendVerify: 'fa-user-shield',   // action: verify (safety number)
   friendAdd: 'fa-user-shield',      // action: add as friend
-  friendRemove: 'fa-user-minus',    // action: remove friend (red)
+  friendRemove: 'fa-user-minus',    // action: remove (red)
   identity: 'fa-fingerprint',       // safety-number panel
 
   // message status marks
