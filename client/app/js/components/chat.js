@@ -377,8 +377,8 @@ export function createChat({ client, onHomeRefresh }) {
     const LABELS = {
       [PS.STRANGER]: ['userAdd', '', `Add ${peer}`],
       [PS.UNVERIFIED]: ['friendVerify', 'icon-warn', 'Verify user'],
-      [PS.VERIFIED]: ['trust', 'icon-trust', 'Trust user'],
-      [PS.TRUSTED]: ['identity', 'icon-trust', 'Safety number'],
+      [PS.VERIFIED]: ['friendVerified', 'icon-friend', 'Trust user'],
+      [PS.TRUSTED]: ['identity', 'icon-friend', 'Safety number'],
       [PS.GONE]: ['userGone', 'icon-danger', 'This user is gone'],
       [PS.SELF]: ['userSolid', '', 'This is you'],
     };

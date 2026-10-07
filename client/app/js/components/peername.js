@@ -4,11 +4,11 @@
 // ladder consistent:
 //
 //   self        solid user          (neutral)
-//   stranger    user-xmark          RED    — not added / conflict
-//   unverified  outlined user       ORANGE — added, numbers not compared
-//   verified    shield user         GREEN  — safety number confirmed
-//   trusted     check user          BLUE   — explicitly trusted (known person)
-//   gone        user-slash + italic RED    — account deleted (outranks all)
+//   stranger    user-xmark          RED      — not added / conflict
+//   added       outlined user       ORANGE   — added, not verified
+//   verified    shield user         ORANGE   — safety number confirmed
+//   trusted     shield user         GREEN    — "I know this person" (max)
+//   gone        user-slash + italic RED      — account deleted (outranks all)
 //
 // A local pin CONFLICT (server binding disagrees with our pinned key) maps
 // to stranger for display; the chat strip carries the detailed alert.
@@ -48,8 +48,8 @@ const MARKS = {
   [PS.GONE]: ['userGone', 'icon-danger'],
   [PS.STRANGER]: ['notFriend', 'icon-danger'],
   [PS.UNVERIFIED]: ['friend', 'icon-warn'],
-  [PS.VERIFIED]: ['friendVerified', 'icon-friend'],
-  [PS.TRUSTED]: ['trust', 'icon-trust'],
+  [PS.VERIFIED]: ['friendVerified', 'icon-warn'],
+  [PS.TRUSTED]: ['friendVerified', 'icon-friend'],
 };
 
 /** <i> element carrying the state icon. */

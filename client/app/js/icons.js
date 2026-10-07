@@ -28,8 +28,8 @@ export const ICONS = {
   userSolid: 'fa-user',              // you (solid)
   userGone: 'fa-user-slash',         // deleted account (red, italic name)
   friend: 'fa-regular fa-user',      // added, not verified (orange)
-  friendVerified: 'fa-user-shield',  // safety number confirmed (green)
-  trust: 'fa-user-check',           // explicitly trusted (blue)
+  friendVerified: 'fa-user-shield',  // shield — ORANGE when only verified,
+  trust: 'fa-user-shield',           // GREEN once trusted (top of the ladder)
   notFriend: 'fa-user-xmark',        // stranger marker (red)
   userAdd: 'fa-user-plus',          // action: add user
   friendVerify: 'fa-user-shield',   // action: verify (safety number)

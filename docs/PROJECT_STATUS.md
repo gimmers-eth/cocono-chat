@@ -139,7 +139,7 @@ is the only FE (audits mentioning `fe/` are historical).
   (`{u,p,v,t}` — verify requires the add, trust requires verify, rebind
   resets both) and propagate to all devices via friend-v / friend-t sys
   messages + reconcile-on-entry. Verified peers show a green shield,
-  trusted a blue check; the menu's primary row is always the NEXT step
+  trusted the same shield in GREEN (ladder: red x → orange user → orange shield → green shield); the menu's primary row is always the NEXT step
   (“Add user” → “Verify user” → “Trust user” → “Safety number”), enforced
   server-side and mirrored by the shared `peername.js` ladder component.
   `toggleFriend` REFUSES to bind when

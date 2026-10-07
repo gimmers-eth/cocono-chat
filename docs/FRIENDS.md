@@ -91,8 +91,8 @@ orange warnings in the chat, no strip once trusted:
 |---|---|---|---|---|
 | stranger (not added) | user-with-x | RED | “Add user” | red: anyone can register a name — add + verify |
 | added, unverified | outlined user | ORANGE | “Verify user” (safety number panel) | orange: read the number together |
-| verified, not trusted | shield user | GREEN | “Trust user” (warning modal) | orange: verified, but not trusted yet |
-| trusted | check user | BLUE | “Safety number” (view again) | none |
+| verified, not trusted | shield user | ORANGE | “Trust user” (warning modal, green shield) | orange: verified, but not trusted yet |
+| trusted | shield user | GREEN | “Safety number” (view again) | none |
 | account deleted | user-slash + italic name | RED | — (rows hidden) | red: history only |
 
 Server enforcement mirrors the ladder: `verify` requires the add (404
