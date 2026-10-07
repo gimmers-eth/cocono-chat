@@ -365,6 +365,38 @@ img.logo { object-fit: cover; background: none; }
 .idverify-actions { margin: 1rem 0 1.1rem; }
 .idverify-actions .btn { padding-inline: 1.3rem; }
 
+/* Peer profile: TOP sheet (drawer-style) over the translucent scrim */
+.side-sheet {
+  position: fixed; top: 0; left: 50%; transform: translateX(-50%);
+  z-index: 50; width: min(560px, 100%);
+  max-height: min(86dvh, 640px); overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border); border-top: 0;
+  border-radius: 0 0 16px 16px; box-shadow: var(--shadow);
+  padding: .4rem 1.2rem calc(1rem + env(safe-area-inset-bottom));
+  padding-top: calc(.4rem + env(safe-area-inset-top));
+  animation: sheet-down .22s cubic-bezier(.2, .8, .3, 1);
+}
+@keyframes sheet-down {
+  from { transform: translate(-50%, -100%); }
+  to   { transform: translate(-50%, 0); }
+}
+.sheet-body { padding-top: .4rem; }
+.profile-id { display: flex; align-items: center; gap: .9rem; margin: .4rem 0 1rem; }
+.profile-idtext { display: flex; flex-direction: column; min-width: 0; }
+.profile-nameline { display: flex; align-items: baseline; gap: .45rem; min-width: 0; }
+#profile-name { font-weight: 700; font-size: 1.15rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.avatar.profile-avatar, .profile-id .avatar { width: 56px; height: 56px; font-size: 1.6rem; }
+.profile-section { border-top: 1px solid var(--divider); padding-top: .7rem; margin-top: .4rem; }
+.profile-section h3 { font-size: .85rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 .5rem; }
+.profile-id-state { margin: .1rem 0 0; font-weight: 700; font-size: .9rem; }
+.profile-id-state.ok { color: var(--success); }
+.profile-id-state.bad { color: var(--danger); }
+.profile-id-state.warn { color: var(--warning); }
+#profile-id-note { margin: 0 0 .7rem; line-height: 1.45; }
+.profile-id-state.trust { margin-top: .2rem; }
+#profile-trust-note { margin: 0; line-height: 1.45; }
+
 /* Chat-head peer button: opens the profile view */
 .peer-btn {
   display: grid; background: none; border: 0; padding: 0; margin: 0;

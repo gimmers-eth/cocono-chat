@@ -74,6 +74,7 @@ export function createChat({ client, onHomeRefresh }) {
   // admin-checked real-person flag of the open peer; KNOWN only when a
   // key lookup actually succeeded (offline/ghost chats show no badge)
   let peerIdentityVerified = false;
+  let peerJoinedAt = null; // "joined" date from the live key lookup
   let peerIdentityKnown = false;
 
   // red circle for unverified peers, clean for verified — never pass null
@@ -523,7 +524,7 @@ export function createChat({ client, onHomeRefresh }) {
   //     click-triggered catchUp re-render wiping the focus state mid-gesture
   //     — overlay DOM survives render(). ---
 
-  async function openChatOpts(view = 'menu') {
+  async function openChatOpts() {
     if (!currentPeer) return;
     $('chatopts-title').textContent = currentPeer;
     renderIdentityBadge($('chatopts-badge'));
@@ -532,10 +533,8 @@ export function createChat({ client, onHomeRefresh }) {
     const state = trustState(ent, pin);
     menuActionLabel(state, currentPeer);
     $('chatopts-peer-status').replaceChildren(peerStateIcon(state));
-    // view routing within the one side menu: menu / profile / safety number
-    $('chatopts-menu-view').hidden = view !== 'menu';
-    $('chatopts-profile-view').hidden = view !== 'profile';
-    if (view === 'profile') await renderProfileView();
+    $('chatopts-menu-view').hidden = false;
+    $('chatopts-identity-view').hidden = true;
     $('chatopts-overlay').hidden = false;
     $('chatopts-modal').hidden = false;
     setMenuBtnOpen(true);
@@ -544,22 +543,36 @@ export function createChat({ client, onHomeRefresh }) {
 
   // --- safety-number view (inside the chat-options side menu) ---
 
-  // ---- profile view (opened from the chat-head name or the menu) ----
+  // ---- profile: TOP sheet (separate from the chat menu), opened by the
+  // chat-head name or the menu row. Colour-coded identity + trust stage. ----
+
+  const TRUST_STAGES = {
+    [PS.STRANGER]: ['bad', 'Not added', 'Anyone can register a name. Add this account from the chat menu to bind its identity key, then verify and trust it.'],
+    [PS.UNVERIFIED]: ['warn', 'Added', 'Now verify the safety number (chat menu → “Verify user”): reading the same number together proves nobody is in between.'],
+    [PS.VERIFIED]: ['warn', 'Safety number verified', 'The key is confirmed — but you have not TRUSTED this account yet. Trust is the human decision for someone you actually know.'],
+    [PS.TRUSTED]: ['ok', 'Trusted', 'You verified the safety number and confirmed this is someone you know.'],
+    [PS.GONE]: ['bad', 'Account deleted', 'This account no longer exists. Your saved messages stay readable, but nothing new can be sent.'],
+  };
 
   async function renderProfileView() {
     if (!currentPeer) return;
     $('profile-name').textContent = currentPeer;
+    $('profile-avatar').textContent = currentPeer.slice(0, 1);
     const ent = await friendEntryFor(currentPeer);
     const pin = await getPin(currentPeer);
     const state = trustState(ent, pin);
     $('profile-status-icon').replaceChildren(peerStateIcon(state));
+    $('profile-joined').textContent = peerJoinedAt
+      ? `Joined ${new Date(peerJoinedAt).toLocaleDateString()}`
+      : '';
+    $('profile-joined').hidden = !peerJoinedAt;
 
     const idState = $('profile-id-state');
     const idNote = $('profile-id-note');
-    if (peerGone || ent?.gone) {
+    if (state === PS.GONE) {
       idState.textContent = 'Account deleted';
       idState.className = 'profile-id-state bad';
-      idNote.textContent = 'This account no longer exists. Your saved messages stay readable.';
+      idNote.textContent = '';
     } else if (peerIdentityKnown && peerIdentityVerified) {
       idState.textContent = 'Identity verified';
       idState.className = 'profile-id-state ok';
@@ -574,34 +587,37 @@ export function createChat({ client, onHomeRefresh }) {
       idNote.textContent = 'Open this chat while online to check the account status.';
     }
 
-    const trustBits = [];
-    if (state === PS.TRUSTED) trustBits.push('You trust this account');
-    else if (state === PS.VERIFIED) trustBits.push('Safety number verified — not trusted yet');
-    else if (state === PS.UNVERIFIED) trustBits.push('Added — safety number not verified yet');
-    else if (state === PS.STRANGER) trustBits.push('Not on your friends list');
-    $('profile-trust').textContent = trustBits.join(' · ');
+    const [cls, title, desc] = TRUST_STAGES[state] ?? TRUST_STAGES[PS.STRANGER];
+    const trustStateEl = $('profile-trust-state');
+    trustStateEl.textContent = title;
+    trustStateEl.className = `profile-id-state trust ${cls}`;
+    $('profile-trust-note').textContent = state === PS.GONE ? '' : desc;
+  }
 
-    $('btn-profile-safety').closest('.menu-row').hidden = !ent?.trusted;
+  async function openProfileView() {
+    if (!currentPeer) return;
+    closeChatOpts(); // the sheet replaces the menu, never stacks on it
+    await renderProfileView();
+    $('profile-overlay').hidden = false;
+    $('profile-modal').hidden = false;
+    $('profile-modal').focus?.();
+  }
+
+  function closeProfileView() {
+    $('profile-overlay').hidden = true;
+    $('profile-modal').hidden = true;
   }
 
   // Shared "back to menu": re-render the ladder row (it may have advanced
   // while another view was open) and return to the menu panel.
   async function showChatOptsMenu() {
     $('chatopts-identity-view').hidden = true;
-    $('chatopts-profile-view').hidden = true;
     $('chatopts-menu-view').hidden = false;
     if (currentPeer) {
       const ent = await friendEntryFor(currentPeer);
       const pin = await getPin(currentPeer);
       menuActionLabel(trustState(ent, pin), currentPeer);
     }
-  }
-
-  async function showProfileView() {
-    $('chatopts-menu-view').hidden = true;
-    $('chatopts-identity-view').hidden = true;
-    $('chatopts-profile-view').hidden = false;
-    await renderProfileView();
   }
 
   async function showIdentityView() {
@@ -783,6 +799,7 @@ export function createChat({ client, onHomeRefresh }) {
       $('chat-peer').textContent = `${currentPeer}`;
       peerIdentity = peer?.id ?? null;
       peerIdentityKnown = !!peer;
+      peerJoinedAt = peer?.joinedAt ?? null;
       peerIdentityVerified = !!peer?.verified;
       // chat-head sub line: red flags first ("Unverified user" / "Account
       // deleted"), then device count or the offline note
@@ -860,6 +877,7 @@ export function createChat({ client, onHomeRefresh }) {
 
     const closeChatPane = () => {
       currentPeer = null;
+      closeProfileView();
       setChatOpen(false);
       $('chat-view').hidden = true;
       $('chat-empty').hidden = false;
@@ -874,6 +892,7 @@ export function createChat({ client, onHomeRefresh }) {
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
       if (forwardOpen()) { closeForward(); return; }
+      if (!$('profile-modal')?.hidden) { closeProfileView(); return; }
       if (msgModalOpen()) { closeMsgModal(); return; }
       if (!$('chatopts-modal').hidden) { closeChatOpts(); return; }
       if (document.body.classList.contains('chat-open')) closeChatPane();
@@ -900,10 +919,8 @@ export function createChat({ client, onHomeRefresh }) {
     // view number); remove is its own row.
     $('btn-chat-menu').addEventListener('click', toggleChatOpts);
     // chat-head name opens the profile view directly
-    $('btn-peer-profile').addEventListener('click', () => {
-      if (currentPeer) openChatOpts('profile');
-    });
-    $('btn-chat-profile').addEventListener('click', showProfileView);
+    $('btn-peer-profile').addEventListener('click', openProfileView);
+    $('btn-chat-profile').addEventListener('click', openProfileView);
     $('chatopts-overlay').addEventListener('click', closeChatOpts);
     $('btn-chat-friend').addEventListener('click', () => {
       primaryAction(); // decides itself whether to stay open (panel) or close
@@ -918,8 +935,8 @@ export function createChat({ client, onHomeRefresh }) {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); copySafetyNumber(); }
     });
     $('btn-identity-verify').addEventListener('click', toggleVerified);
-    $('btn-profile-back').addEventListener('click', showChatOptsMenu);
-    $('btn-profile-safety').addEventListener('click', showIdentityView);
+    $('btn-profile-close').addEventListener('click', closeProfileView);
+    $('profile-overlay').addEventListener('click', closeProfileView);
     window.addEventListener(FRIENDS_EVENT, () => { updateTrustUI(); });
     $('btn-chat-clear').addEventListener('click', async () => {
       closeChatOpts();

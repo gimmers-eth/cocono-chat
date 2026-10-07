@@ -165,8 +165,8 @@
     <div class="drawer-body">
       <div class="drawer-tabs-wrap" id="drawer-tabs-wrap">
         <div class="drawer-tabs" role="tablist" aria-label="Settings sections">
-          <button class="drawer-tab" data-tab="devices" role="tab" data-icon="tabDevices">Devices</button>
           <button class="drawer-tab" data-tab="verify" role="tab" data-icon="tabVerify">Verify</button>
+          <button class="drawer-tab" data-tab="devices" role="tab" data-icon="tabDevices">Devices</button>
           <button class="drawer-tab" data-tab="general" role="tab" data-icon="tabGeneral">General</button>
           <button class="drawer-tab" data-tab="diagnostics" role="tab" data-icon="tabDiagnostics">Diagnostics</button>
         </div>
@@ -280,20 +280,6 @@
         <!-- report / block land here later as further rows -->
       </ul>
     </div>
-    <div id="chatopts-profile-view" hidden>
-      <h2 class="side-menu-title"><span id="profile-status-icon" class="peer-status"></span><span id="profile-name"></span></h2>
-      <p id="profile-id-state" class="profile-id-state"></p>
-      <p id="profile-id-note" class="muted small"></p>
-      <p id="profile-trust" class="muted small"></p>
-      <ul class="menu-list">
-        <li class="menu-row">
-          <button id="btn-profile-safety" class="menu-action" data-icon="identity">Safety number</button>
-        </li>
-        <li class="menu-row">
-          <button id="btn-profile-back" class="menu-action" data-icon="back">Back</button>
-        </li>
-      </ul>
-    </div>
     <div id="chatopts-identity-view" hidden>
       <h2 class="side-menu-title"><span class="peer-status" id="identity-status-icon"></span><span id="identity-peer"></span></h2>
       <p class="muted small">You and your contact must see the SAME number — it is derived from both accounts' identity keys. Compare it over any other channel; a match proves no one is intercepting this conversation.</p>
@@ -312,6 +298,33 @@
           <button id="btn-identity-back" class="menu-action" data-icon="back">Back</button>
         </li>
       </ul>
+    </div>
+  </aside>
+
+  <!-- Peer profile: top sheet, opened from the chat-head name or the chat
+       menu. Explains identity status + trust stage in colour. -->
+  <div id="profile-overlay" class="overlay" hidden></div>
+  <aside id="profile-modal" class="side-sheet" role="dialog" aria-modal="true" aria-labelledby="profile-name" tabindex="-1" hidden>
+    <header class="drawer-head">
+      <h2>Profile</h2>
+      <button id="btn-profile-close" class="icon-btn" title="Close" data-icon="close"></button>
+    </header>
+    <div class="sheet-body">
+      <div class="profile-id">
+        <span id="profile-avatar" class="avatar" aria-hidden="true"></span>
+        <span class="profile-idtext">
+          <span class="profile-nameline"><span id="profile-status-icon" class="peer-status"></span><span id="profile-name"></span></span>
+          <span id="profile-joined" class="muted small"></span>
+        </span>
+      </div>
+
+      <section class="profile-section">
+        <h3>Safety</h3>
+        <p id="profile-id-state" class="profile-id-state"></p>
+        <p id="profile-id-note" class="muted small"></p>
+        <p id="profile-trust-state" class="profile-id-state trust"></p>
+        <p id="profile-trust-note" class="muted small"></p>
+      </section>
     </div>
   </aside>
 

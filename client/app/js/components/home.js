@@ -16,10 +16,13 @@ export function createHome({ client, chat, onLogout }) {
   let settingsOpen = false;
 
   // ---- settings drawer tabs ----
-  const SETTINGS_TABS = ['devices', 'verify', 'general', 'diagnostics'];
+  const SETTINGS_TABS = ['verify', 'devices', 'general', 'diagnostics'];
   let settingsTab = 'devices';
   try { settingsTab = localStorage.getItem('cocono.settings.tab') || 'devices'; } catch { /* private mode */ }
   if (!SETTINGS_TABS.includes(settingsTab)) settingsTab = 'devices';
+  // our own identity-verification state (null = unknown/offline); while
+  // false, opening settings ALWAYS lands on the Verify tab
+  let myVerified = null;
 
   function showSettingsTab() {
     for (const t of SETTINGS_TABS) {
@@ -53,7 +56,10 @@ export function createHome({ client, chat, onLogout }) {
   }
 
   function openSettings(tab) {
-    if (settingsOpen && tab) selectSettingsTab(tab); // deep-link while open
+    // explicit tab wins; otherwise unverified users are ALWAYS taken to
+    // Verify — the whole point of the nag affordances
+    const want = tab || (myVerified === false ? 'verify' : null);
+    if (settingsOpen && want) selectSettingsTab(want);
     if (!settingsOpen) {
       settingsOpen = true;
       $('drawer-overlay').hidden = false;
@@ -62,6 +68,7 @@ export function createHome({ client, chat, onLogout }) {
       refreshSettingsUI();
       wireThemePicker();
       $('btn-settings-close').focus?.();
+      if (want) selectSettingsTab(want); else showSettingsTab();
     }
     showSettingsTab();
     // measure after layout settles (drawer was hidden until this frame)
@@ -94,6 +101,7 @@ export function createHome({ client, chat, onLogout }) {
     const link = $('btn-self-verify');
     let me = null;
     try { me = await client.identity(); } catch { /* offline/no session */ }
+    myVerified = me ? !!me.verified : null;
     const show = (txt, cls, noteTxt) => {
       if (!state) return;
       state.textContent = txt;

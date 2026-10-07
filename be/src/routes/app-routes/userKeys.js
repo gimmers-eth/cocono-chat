@@ -25,6 +25,8 @@ export default async function userKeysRoutes(app, { users, redis, config }) {
 
     return {
       u: user.u,
+      // when the account joined (public metadata, shown in profile views)
+      joinedAt: user.createdAt,
       // public account facts like this are directory-visible metadata (JWT
       // gate already required); drives the grey certificate badge in clients
       verified: !!user.verified,
