@@ -45,6 +45,10 @@
 * { box-sizing: border-box; margin: 0; }
 
 html, body { height: 100%; }
+/* Mobile: no double-tap zoom anywhere (tap targets are app chrome, not a
+   document). Panning stays alive — .drawer-tabs swipe and the message list
+   scroll depend on it; pinch is off via viewport meta + gesturestart guard. */
+body { touch-action: manipulation; }
 
 body {
   font-family: "Segoe UI", system-ui, -apple-system, Roboto, Ubuntu, sans-serif;
@@ -407,6 +411,17 @@ img.own-avatar { border-radius: 50%; }
 .drawer-tab i { margin-right: .4em; }
 .drawer-tab:hover { color: var(--text); background: var(--panel-raised); }
 .drawer-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+/* Desktop: the tab bar is drag-scrollable (home.js pointer handlers); a
+   grab cursor sells it. Touch keeps native swipe and gets no cursor. */
+@media (pointer: fine) {
+  .drawer-tabs { cursor: grab; user-select: none; }
+  .drawer-tabs.dragging { cursor: grabbing; }
+}
+
+/* Devices tab: the account's device budget belongs to the section, not to
+   each row — it sits right-aligned in the 'Devices' header. */
+.devices-head { display: flex; justify-content: space-between; align-items: baseline; gap: .6rem; }
+.devices-head #device-max { font-weight: 400; }
 
 /* Verify tab: status chip beside the heading + roomy upload action */
 .idverify-head { display: flex; align-items: baseline; gap: .7rem; }

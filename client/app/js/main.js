@@ -21,6 +21,37 @@ import { putAppTitle, takePendingChat } from './swkv.js';
 const logging =
   new URL(location.href).searchParams.has('debug') || localStorage.getItem('cocono.debug') === '1';
 
+// Mobile zoom is OFF (viewport meta above). iOS Safari has ignored
+// user-scalable/no since iOS 10, so the only reliable kill switch for pinch
+// zoom is cancelling Safari's gesture events. Desktop browsers are
+// unaffected (gesturestart is an iOS-only API); browser page zoom stays.
+for (const t of ['gesturestart', 'gesturechange', 'gestureend']) {
+  document.addEventListener(t, (e) => e.preventDefault());
+}
+
+// ---- my-chat deep link: /?chat=<username> (share button) ----
+// A logged-out opener must NOT lose the link: capture it at boot into
+// localStorage, strip the URL, and let enterApp consume it — which happens
+// right after login/signup, so the conversation with the RIGHT user opens.
+const SHARED_CHAT_KEY = 'cocono.shared.chat';
+function captureSharedChat() {
+  const url = new URL(location.href);
+  const peer = String(url.searchParams.get('chat') ?? '').trim().toLowerCase();
+  if (!peer) return;
+  try { localStorage.setItem(SHARED_CHAT_KEY, peer); } catch { /* private mode */ }
+  url.searchParams.delete('chat');
+  history.replaceState(null, '', url);
+}
+function takeSharedChat() {
+  let peer = null;
+  try {
+    peer = localStorage.getItem(SHARED_CHAT_KEY);
+    if (peer) localStorage.removeItem(SHARED_CHAT_KEY);
+  } catch { /* private mode */ }
+  return peer;
+}
+captureSharedChat();
+
 export const client = new CoconoClient({
   baseUrl: '', // same origin; the SDK derives ws(s):// from it
   storage: new IdbStorage(),
@@ -106,6 +137,12 @@ async function enterApp({ gesture = false, offline = false } = {}) {
   takePendingChat().then((peer) => {
     if (peer) chat.openChat(peer).catch(() => {});
   }).catch(() => {});
+
+  // Shared chat link (?chat=<username>): consumed here so it survives the
+  // auth screen — whoever lands logged in or signs up mid-session gets
+  // exactly that conversation opened once there is an account to open it as.
+  const sharedChat = takeSharedChat();
+  if (sharedChat) chat.openChat(sharedChat).catch(() => {});
 
   // OS notifications: from a gesture (login/signup button) this may prompt
   // for permission; on silent boot-resume it only re-registers a

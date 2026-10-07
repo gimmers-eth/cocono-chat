@@ -139,6 +139,17 @@ export async function clearMessages(peer) {
   });
 }
 
+// Wipe the ENTIRE local transcript (settings → Clear all messages). Same
+// contract as clearMessages: device-local only — other devices, the peer's
+// copies and the friends list are untouched. Returns the deleted count.
+export function clearAllMessages() {
+  return withStore('readwrite', (s) => {
+    const count = s.count();
+    s.clear();
+    return count;
+  });
+}
+
 // Usernames known ON THIS DEVICE: peers we hold messages with, PLUS added
 // friends (a friend with zero messages is still a person you can reach —
 // drives the sidebar new-chat and forward suggestion lists). No server

@@ -2,9 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+  <!-- zoom (pinch + double-tap) is disabled on mobile: the app chrome is not
+       a document to zoom, and double-tap zoom fought the tap targets. iOS
+       ignores user-scalable, so main.js also blocks gesturestart. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
   <meta name="theme-color" content="#111b21" />
-  <title>co.co.no</title>
+  <title>CoCoNo</title>
   <link rel="manifest" href="/manifest.webmanifest" />
   <!-- base.css: structure + default tokens. The theme stylesheet (loaded by
        js/theme.js) overrides the CSS custom properties per theme. -->
@@ -20,7 +23,7 @@
     <div class="auth-card">
       <div class="auth-brand">
         <img class="logo" src="/icons/icon-512.png" alt="" aria-hidden="true" />
-        <h1 data-app-name>co.co.no</h1>
+        <h1 data-app-name>CoCoNo</h1>
         <p class="muted">Passwordless · End-to-end encrypted</p>
       </div>
 
@@ -28,7 +31,7 @@
            on it (native prompt, or the iOS recipe needed for push). -->
       <div id="install-hint" class="install-hint" hidden>
         <div class="ih-text">
-          <strong>Install <span data-app-name>co.co.no</span></strong>
+          <strong>Install <span data-app-name>CoCoNo</span></strong>
           <span class="install-native"> for one-tap access and OS notifications for new messages.</span>
           <span class="install-ios"> — tap <em>Share → Add to Home Screen</em> to enable OS notifications (iPhone requires the installed app).</span>
           <span class="install-soft"> for one-tap access and OS notifications — choose “Install” in your browser menu.</span>
@@ -97,6 +100,7 @@
         </div>
         <div class="side-actions">
           <span id="ws-dot" class="dot dot-off" title="connection"></span>
+          <button id="btn-share-chat" class="icon-btn" title="Share a link to chat with me" data-icon="share"></button>
           <button id="btn-devices" class="icon-btn" title="Devices" data-icon="settings"></button>
           <button id="btn-logout" class="icon-btn" title="Log out" data-icon="logout"></button>
         </div>
@@ -121,7 +125,7 @@
       <div id="chat-empty" class="chat-empty">
         <div class="empty-inner">
           <img class="logo big" src="/icons/icon-512.png" alt="" aria-hidden="true" />
-          <h2 data-app-name>co.co.no</h2>
+          <h2 data-app-name>CoCoNo</h2>
           <p class="muted">Pick a conversation or start a new one.<br />
              Messages are encrypted device-to-device.</p>
         </div>
@@ -160,7 +164,7 @@
   <div id="view-blocked" class="view auth-view" hidden>
     <div class="auth-card">
       <h1>Already open</h1>
-      <p class="muted"><span data-app-name>co.co.no</span> runs in one tab per device. Close this tab or the other one.</p>
+      <p class="muted"><span data-app-name>CoCoNo</span> runs in one tab per device. Close this tab or the other one.</p>
     </div>
   </div>
 
@@ -183,7 +187,7 @@
       </div>
 
       <div id="tabpanel-devices">
-        <h3>Devices</h3>
+        <h3 class="devices-head">Devices<span id="device-max" class="dim small"></span></h3>
         <ul id="device-list" class="device-list"></ul>
         <h3>Approve a new device</h3>
         <div class="approve-code">
@@ -248,6 +252,11 @@
           <span>Push notifications on this device</span>
         </label>
         <p id="notify-hint" class="muted small"></p>
+        <h3>Messages</h3>
+        <div class="row-actions">
+          <button id="btn-clear-all-msgs" class="btn btn-small btn-danger">Clear all messages</button>
+        </div>
+        <p class="muted small">Removes every conversation from THIS device only — your other devices and your contacts keep their copies. Cannot be undone.</p>
       </div>
 
       <div id="tabpanel-diagnostics" hidden>

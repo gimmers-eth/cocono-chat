@@ -18,6 +18,7 @@ export const ICONS = {
   send: 'fa-paper-plane',
   menu: 'fa-ellipsis-vertical',
   chat: 'fa-comment',
+  share: 'fa-share-nodes',
 
   // message actions
   copy: 'fa-copy',

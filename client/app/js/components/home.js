@@ -6,7 +6,7 @@ import { $, setStatus, fmtTime, confirmModal, openLightbox } from '../ui.js';
 import { humanError } from '../errors.js';
 import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
-import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, loadPeerVerifications, loadPeerAvatars, rememberPeerAvatar, AVATARS_EVENT } from '../store.js';
+import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, clearAllMessages, loadPeerVerifications, loadPeerAvatars, rememberPeerAvatar, AVATARS_EVENT } from '../store.js';
 import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl } from './peername.js';
 import { refreshSettingsUI } from '../install.js';
 import { loadRegistry, applyTheme, savedTheme, wireThemeSelect } from '../theme.js';
@@ -441,6 +441,10 @@ export function createHome({ client, chat, onLogout }) {
     const status = $('drawer-status');
     try {
       const { devices, maxDevices } = await client.devices();
+      // The budget is per-ACCOUNT: it rides on the section header, not on
+      // every device row (it was 'N max' × devices before — noise).
+      const maxEl = $('device-max');
+      if (maxEl) maxEl.textContent = `${maxDevices} max`;
       const frag = document.createDocumentFragment();
       for (const dev of devices) {
         const li = document.createElement('li');
@@ -448,9 +452,7 @@ export function createHome({ client, chat, onLogout }) {
         id.textContent = dev.id.slice(0, 8) + '…';
         const tag = document.createElement('span');
         tag.className = 'dim';
-        tag.textContent = [dev.current && 'this device', `${maxDevices} max`]
-          .filter(Boolean)
-          .join(' · ');
+        tag.textContent = dev.current ? 'this device' : '';
         li.append(id, tag);
         if (!dev.current) {
           // Self-removal lives on the login screen ("remove account from this
@@ -546,6 +548,44 @@ export function createHome({ client, chat, onLogout }) {
       if (btn) selectSettingsTab(btn.dataset.tab);
     });
     document.querySelector('.drawer-tabs')?.addEventListener('scroll', updateTabFades, { passive: true });
+    // Desktop drag-scroll for the tab bar: touch already gets native swipe
+    // from overflow-x, but a mouse user needs click-and-drag. A drag must
+    // not end as a tab switch, so the trailing click gets eaten once.
+    {
+      const tabsEl = document.querySelector('.drawer-tabs');
+      if (tabsEl) {
+        let drag = null;
+        let suppressTabClick = false;
+        tabsEl.addEventListener('pointerdown', (e) => {
+          if (e.pointerType !== 'mouse') return; // touch: native swipe rules
+          drag = { x: e.clientX, left: tabsEl.scrollLeft, moved: false };
+        });
+        tabsEl.addEventListener('pointermove', (e) => {
+          if (!drag) return;
+          const dx = e.clientX - drag.x;
+          if (!drag.moved && Math.abs(dx) > 5) {
+            drag.moved = true;
+            tabsEl.classList.add('dragging');
+            tabsEl.setPointerCapture?.(e.pointerId);
+          }
+          if (drag.moved) tabsEl.scrollLeft = drag.left - dx;
+        });
+        const endDrag = () => {
+          if (drag?.moved) suppressTabClick = true;
+          drag = null;
+          tabsEl.classList.remove('dragging');
+        };
+        tabsEl.addEventListener('pointerup', endDrag);
+        tabsEl.addEventListener('pointercancel', endDrag);
+        tabsEl.addEventListener('pointerleave', endDrag);
+        tabsEl.addEventListener('click', (e) => {
+          if (!suppressTabClick) return;
+          suppressTabClick = false;
+          e.stopPropagation();
+          e.preventDefault();
+        }, true);
+      }
+    }
     window.addEventListener('resize', updateTabFades);
     window.addEventListener(AVATARS_EVENT, () => {
       paintOwnHeadAvatar();
@@ -603,6 +643,60 @@ export function createHome({ client, chat, onLogout }) {
       // login) + identity pins + verified flags (see store.clearLocalTrustData)
       clearLocalTrustData().catch(() => {});
       onLogout();
+    });
+
+    // Share MY chat link: OS share sheet (Web Share API) with a
+    // /?chat=<my-username> deep link — the recipient opens a conversation
+    // with ME, whoever is viewing. The receiving side parks the link until
+    // an account exists (main.js captureSharedChat/takeSharedChat), so a
+    // logged-out opener lands in exactly that chat right after signup.
+    $('btn-share-chat')?.addEventListener('click', async () => {
+      const status = $('home-status');
+      const me = String(client.username ?? '').toLowerCase();
+      if (!me) return setStatus(status, 'No active session — there is nothing to share yet.', true);
+      const url = `${location.origin}/?chat=${encodeURIComponent(me)}`;
+      const name = document.querySelector('[data-app-name]')?.textContent || 'CoCoNo';
+      const copyFallback = () => {
+        navigator.clipboard?.writeText(url).then(
+          () => setStatus(status, 'Your chat link was copied to clipboard.'),
+          () => setStatus(status, url),
+        );
+      };
+      if (navigator.share) {
+        try {
+          await navigator.share({
+            title: `Message me on ${name}`,
+            text: `Chat with me (@${me}) on ${name}:`,
+            url,
+          });
+        } catch (err) {
+          if (err?.name !== 'AbortError') copyFallback(); // cancelled = silence
+        }
+      } else copyFallback(); // desktop Chrome/Firefox without Web Share
+    });
+
+    // Settings → General: wipe the ENTIRE local transcript (per-device,
+    // same contract as clearing a single chat — friends stay friends).
+    $('btn-clear-all-msgs')?.addEventListener('click', async () => {
+      const ok = await confirmModal({
+        title: 'Are you sure?',
+        body: 'Clear ALL messages on this device?',
+        warning: 'Every conversation disappears from THIS device only — your other devices and your contacts keep their copies. This cannot be undone.',
+        okLabel: 'Clear all messages',
+        danger: true,
+      });
+      if (!ok) return;
+      try {
+        const n = await clearAllMessages();
+        await chat.render(); // open conversation (if any) repaints empty
+        await renderConversationList(); // message-less friends survive
+        setStatus(
+          $('drawer-status'),
+          n ? `Cleared ${n} message${n === 1 ? '' : 's'} from this device.` : 'Nothing to clear.',
+        );
+      } catch (err) {
+        setStatus($('drawer-status'), humanError(err), true);
+      }
     });
 
     // Settings drawer: opens from the top over a click-to-dismiss scrim.

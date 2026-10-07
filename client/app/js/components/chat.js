@@ -86,7 +86,7 @@ function notifyOS(peer, text) {
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   const snippet = (text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
   navigator.serviceWorker?.getRegistration?.()?.then((reg) => {
-    reg?.showNotification?.(document.title || 'co.co.no', {
+    reg?.showNotification?.(document.title || 'CoCoNo', {
       body: `${peer}: ${snippet || '(message)'}`,
       tag: 'cocono-activity',
       data: { type: 'msg', peer },
@@ -1214,6 +1214,29 @@ export function createChat({ client, onHomeRefresh }) {
       onHomeRefresh?.();
     };
     $('btn-chat-back').addEventListener('click', closeChatPane);
+    // Swipe closes the conversation (mobile): a deliberate horizontal drag
+    // either way (>72px, clearly more horizontal than vertical) acts as the
+    // back button. Passive listeners — we never fight the vertical scroll.
+    {
+      const view = $('chat-view');
+      let sw = null;
+      view.addEventListener('touchstart', (e) => {
+        if (e.touches.length !== 1 || !currentPeer) return;
+        sw = { x: e.touches[0].clientX, y: e.touches[0].clientY, fired: false };
+      }, { passive: true });
+      view.addEventListener('touchmove', (e) => {
+        if (!sw || sw.fired || e.touches.length !== 1) return;
+        const dx = e.touches[0].clientX - sw.x;
+        const dy = e.touches[0].clientY - sw.y;
+        if (Math.abs(dx) > 72 && Math.abs(dx) > Math.abs(dy) * 1.6) sw.fired = true;
+      }, { passive: true });
+      view.addEventListener('touchend', () => {
+        const fired = sw?.fired;
+        sw = null;
+        if (fired) closeChatPane();
+      }, { passive: true });
+      view.addEventListener('touchcancel', () => { sw = null; }, { passive: true });
+    }
     // Escape: dismiss the top-most layer first (forward > message > options
     // > conversation). Desktop "close" gesture otherwise.
     document.addEventListener('keydown', (e) => {
@@ -1227,8 +1250,11 @@ export function createChat({ client, onHomeRefresh }) {
     });
 
     // Tap/click a bubble -> message modal (delegated: bubbles re-render
-    // atomically, so the listener lives on the list itself).
+    // atomically, so the listener lives on the list itself). Guard against
+    // the synthetic click a swipe-close leaves behind: once the pane is
+    // hidden, taps must not pop the modal over the empty sidebar.
     $('chat-messages').addEventListener('click', (e) => {
+      if ($('chat-view').hidden) return;
       const li = e.target.closest('li.msg');
       if (!li) return;
       getMessage(li.dataset.id).then((rec) => {
