@@ -141,6 +141,10 @@ admin device cascade):**
   silently point at whoever re-registers the name later. The `gone`/
   `changed` flags remain as defense-in-depth (purge failure, restore from
   an old backup), but the normal lifecycle is: account dies → lists clean.
+  Because the purge leaves no server-side trace, the sidebar's deleted-state
+  (slash + italic) comes from a LOCAL gone marker: set where the fact is
+  actually learned (chat open 404, send rejection) and cleared when the
+  account demonstrably exists again.
 
 **Device-local (logout via the power button):**
 - The friends mirror is wiped (it is a cache — refetched at next entry).

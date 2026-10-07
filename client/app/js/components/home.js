@@ -79,11 +79,13 @@ export function createHome({ client, chat, onLogout }) {
       const selfUl = String(client.username ?? '').toLowerCase();
       const ent = friends.find((f) => f.peer === peer);
       const pin = pins.find((p) => p.peer === peer);
-      // one shared ladder: red (not added/conflict) → orange (added, not
-      // verified) → green (verified) → blue (trusted); slash+italic = gone
+      // one shared ladder: red (not added/conflict) → orange (added) →
+      // orange shield (verified) → green shield (trusted); deleted =
+      // slash+italic from the LOCAL gone marker (the server purges dead
+      // names from friends lists, so no mirror flag survives a deletion)
       const state = resolvePeerState({
         isSelf: peer === selfUl,
-        gone: !!ent?.gone,
+        gone: !!ent?.gone || !!pin?.gone,
         bound: !!ent?.trusted,
         verified: !!ent?.verified,
         trusted: !!ent?.trust,

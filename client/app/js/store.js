@@ -248,7 +248,10 @@ export async function recordPinSeen(peer, p) {
   const ul = String(peer).toLowerCase();
   const cur = await getPin(ul);
   const now = Date.now();
-  if (!cur) {
+  if (!cur || !cur.p) {
+    // 'new' also covers a record that only exists as a gone-marker (p:''):
+    // the account name was re-registered, this device has not seen "the
+    // old key" — first contact with the new identity, not a change.
     await withStore('readwrite', (s) => s.put(
       { peer: ul, p, firstSeenAt: now, lastSeenAt: now, verified: false },
     ), PINS);
@@ -263,9 +266,28 @@ export async function recordPinSeen(peer, p) {
     return 'changed';
   }
   if (now - (cur.lastSeenAt ?? 0) > 60_000) { // avoid write churn
-    await withStore('readwrite', (s) => s.put({ ...cur, lastSeenAt: now }), PINS);
+    await withStore('readwrite', (s) => s.put({ ...cur, lastSeenAt: now, gone: false }), PINS);
   }
   return 'ok';
+}
+
+/**
+ * Remember the deleted-account fact LOCALLY. The server purges dead
+ * usernames from friends lists, so no server flag survives to tell the
+ * sidebar — we mark it where we actually learn it (chat open 404, send
+ * rejection) and clear it when the account demonstrably exists again.
+ * Lives on the pins record (same per-device store as the key alarm).
+ */
+export async function markPeerGone(peer, gone) {
+  const ul = String(peer).toLowerCase();
+  const cur = await getPin(ul);
+  if (cur) {
+    if (!!cur.gone === !!gone) return;
+    await withStore('readwrite', (s) => s.put({ ...cur, gone: !!gone }), PINS);
+  } else if (gone) {
+    await withStore('readwrite', (s) => s.put({ peer: ul, p: '', gone: true }), PINS);
+  }
+  notifyFriends();
 }
 
 /**

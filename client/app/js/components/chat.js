@@ -18,7 +18,7 @@ import {
   saveMessage, updateMessage, messagesWith, markRead, allMessages,
   getMessage, deleteMessage, clearMessages,
   loadFriends, friendAdd, friendDel, friendMarkFlags, FRIENDS_EVENT,
-  getPin, recordPinSeen,
+  getPin, recordPinSeen, markPeerGone,
 } from '../store.js';
 
 // In-app banner (visible-but-other-chat) + OS notification (app hidden or
@@ -187,6 +187,14 @@ export function createChat({ client, onHomeRefresh }) {
       // braces for the send button, which must not steal it; see wire()).
       input.focus({ preventScroll: true });
     } catch (err) {
+      // Peer account died between opening the chat and sending: learn the
+      // gone fact right here so the sidebar + strip flip to deleted-state.
+      if (err?.code === 'unknown_account' || err?.status === 404) {
+        peerGone = true;
+        markPeerGone(currentPeer, true).catch(() => {});
+        updateTrustUI().catch(() => {});
+        onHomeRefresh?.();
+      }
       setStatus(
         $('chat-status'),
         navigator.onLine === false
@@ -694,6 +702,11 @@ export function createChat({ client, onHomeRefresh }) {
       // device of ours — server delete + our own sys broadcast converge the
       // mirrors; the warning strip then shows the stranger state.
       peerIdentity = peer?.id ?? null;
+      // Persist "this account is gone / is back" for the sidebar: it only
+      // learns from the local mirror, and the server purges dead names from
+      // friends lists. Skipped in pure-offline mode (no facts learned).
+      if (peerGone) await markPeerGone(currentPeer, true);
+      else if (peer) await markPeerGone(currentPeer, false);
       pinState = peerIdentity ? await recordPinSeen(currentPeer, peerIdentity) : 'ok';
       if (pinState === 'changed') {
         // OUR pin — not the server's opinion — says the key moved. Same
