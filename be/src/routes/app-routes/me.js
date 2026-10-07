@@ -3,6 +3,19 @@ import { rateLimit } from '../../lib/rateLimit.js';
 import { b64uDecode } from '../../lib/b64u.js';
 
 const ID_DOC_TYPES = new Set(['image/png', 'image/jpeg']);
+const ID_DOC_MIN_BYTES = 128; // reject trivially-empty "photos"
+
+// Magic-byte sniffing: the contentType a client DECLARES is untrusted —
+// validate the actual bytes and store what we detected.
+//   PNG : 89 50 4E 47 0D 0A 1A 0A
+//   JPEG: FF D8 … FF D9 (SOI + EOI markers)
+function sniffImage(buf) {
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47
+    && buf[4] === 0x0d && buf[5] === 0x0a && buf[6] === 0x1a && buf[7] === 0x0a) return 'image/png';
+  if (buf.length >= 4 && buf[0] === 0xff && buf[1] === 0xd8
+    && buf[buf.length - 2] === 0xff && buf[buf.length - 1] === 0xd9) return 'image/jpeg';
+  return null;
+}
 
 // GET /api/me — who am I + identity-verification state. POST /api/me/verify-id
 // — upload the ID-document photo the admin reviews (image only, size-capped,
@@ -47,15 +60,22 @@ export default async function meRoutes(app, { users, redis, config, idDocs }) {
     }
     const buf = typeof data === 'string' ? b64uDecode(data) : null;
     if (!buf || !buf.length) return fail(reply, 'bad_payload', 'data must be base64url bytes', 400);
+    if (buf.length < ID_DOC_MIN_BYTES) {
+      return fail(reply, 'too_small', 'ID photo looks empty — use a proper camera photo', 400);
+    }
     if (buf.length > config.idDocMaxBytes) {
       return fail(reply, 'too_large', `ID photo exceeds ${Math.floor(config.idDocMaxBytes / (1024 * 1024))} MB`, 413);
     }
+    const sniffed = sniffImage(buf);
+    if (!sniffed) return fail(reply, 'not_an_image', 'File is not a real PNG/JPEG image', 400);
 
     await idDocs.updateOne(
       { ul },
-      { $set: { ul, contentType, data: buf, uploadedAt: new Date() } },
+      // store the SNIFFED type, not the client's claim — the admin viewer
+      // and the app's metadata can both trust it
+      { $set: { ul, contentType: sniffed, data: buf, uploadedAt: new Date() } },
       { upsert: true },
     );
-    return { uploaded: true, bytes: buf.length, contentType };
+    return { uploaded: true, bytes: buf.length, contentType: sniffed };
   });
 }

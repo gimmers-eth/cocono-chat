@@ -32,7 +32,12 @@ async function getToken(app, client, u, d) {
 }
 
 // A tiny fake "photo" — the server validates type/size, never image-parses.
-const PNG_BYTES = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), randomBytes(48)]);
+const PNG_BYTES = Buffer.concat([
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), randomBytes(200),
+]);
+const JPEG_BYTES = Buffer.concat([
+  Buffer.from([0xff, 0xd8]), randomBytes(200), Buffer.from([0xff, 0xd9]),
+]);
 
 function adminApp(ctx) {
   return (async () => {
@@ -51,7 +56,7 @@ function adminApp(ctx) {
 }
 
 test('identity: upload ID photo, state surfaces in /api/me, guards hold', async () => {
-  const { app, mongo, teardown } = await setupApp({ idDocMaxBytes: 128 });
+  const { app, mongo, teardown } = await setupApp({ idDocMaxBytes: 320, idDocAccountLimit: 50, idDocIpLimit: 50 });
   try {
     const c = makeClient();
     const a = await signupUser(app, c, 'iduser');
@@ -72,6 +77,21 @@ test('identity: upload ID photo, state surfaces in /api/me, guards hold', async 
     assert.equal(me1.json().idDoc.contentType, 'image/png');
     assert.ok(me1.json().idDoc.uploadedAt);
 
+    // not-a-real-image rejected despite claiming png
+    const fake = await app.inject({
+      method: 'POST', url: '/api/me/verify-id', headers: auth,
+      payload: { contentType: 'image/png', data: b64uEncode(randomBytes(200)) },
+    });
+    assert.equal(fake.statusCode, 400);
+    assert.equal(fake.json().error, 'not_an_image');
+
+    // client's CLAIM is normalized to the sniffed truth: jpeg bytes
+    const mislabeled = await app.inject({
+      method: 'POST', url: '/api/me/verify-id', headers: auth,
+      payload: { contentType: 'image/png', data: b64uEncode(JPEG_BYTES) },
+    });
+    assert.equal(mislabeled.json().contentType, 'image/jpeg');
+
     // content type + size guards
     const badType = await app.inject({
       method: 'POST', url: '/api/me/verify-id', headers: auth,
@@ -80,7 +100,7 @@ test('identity: upload ID photo, state surfaces in /api/me, guards hold', async 
     assert.equal(badType.statusCode, 400);
     const tooBig = await app.inject({
       method: 'POST', url: '/api/me/verify-id', headers: auth,
-      payload: { contentType: 'image/png', data: b64uEncode(randomBytes(129)) },
+      payload: { contentType: 'image/png', data: b64uEncode(Buffer.concat([PNG_BYTES.subarray(0, 8), randomBytes(320)])) },
     });
     assert.equal(tooBig.statusCode, 413);
 
@@ -106,7 +126,7 @@ test('admin: list flags, verify toggle, view + delete ID photo', async () => {
     const auth = { authorization: `Bearer ${await getToken(ctx.app, c, 'admuser', a.d)}` };
     await ctx.app.inject({
       method: 'POST', url: '/api/me/verify-id', headers: auth,
-      payload: { contentType: 'image/jpeg', data: b64uEncode(PNG_BYTES) },
+      payload: { contentType: 'image/jpeg', data: b64uEncode(JPEG_BYTES) },
     });
 
     const list = await admin.inject({ method: 'GET', url: '/api/admin/users' });
@@ -118,7 +138,7 @@ test('admin: list flags, verify toggle, view + delete ID photo', async () => {
     const view = await admin.inject({ method: 'GET', url: '/api/admin/users/admuser/id-doc' });
     assert.equal(view.statusCode, 200);
     assert.equal(view.headers['content-type'], 'image/jpeg');
-    assert.deepEqual(Buffer.from(view.rawPayload), PNG_BYTES);
+    assert.deepEqual(Buffer.from(view.rawPayload), JPEG_BYTES);
 
     // toggle on -> app sees it; toggle off -> cold flag clears
     const on = await admin.inject({

@@ -72,6 +72,19 @@ export function createHome({ client, chat, onLogout }) {
     if (state) state.textContent = 'Not verified. Upload a photo of your ID so a human can confirm this account is really you.';
   }
 
+  // magic-byte sniffing matches the server (PNG signature; JPEG SOI+EOI):
+  // reject junk locally for instant feedback, but the server re-checks —
+  // client checks are courtesy, never trust.
+  async function sniffFile(file) {
+    const head = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+    if (head.length >= 8 && head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47
+      && head[4] === 0x0d && head[5] === 0x0a && head[6] === 0x1a && head[7] === 0x0a) return 'image/png';
+    if (file.size < 4) return null;
+    const tail = new Uint8Array(await file.slice(-2).arrayBuffer());
+    if (head[0] === 0xff && head[1] === 0xd8 && tail[0] === 0xff && tail[1] === 0xd9) return 'image/jpeg';
+    return null;
+  }
+
   async function uploadIdDoc(file) {
     const state = $('idverify-state');
     if (!file) return;
@@ -79,7 +92,14 @@ export function createHome({ client, chat, onLogout }) {
       return setStatus($('drawer-status'), 'ID photo must be a PNG or JPEG.', true);
     }
     if (file.size > 5 * 1024 * 1024) {
-      return setStatus($('drawer-status'), 'ID photo must be 5 MB or smaller.', true);
+      return setStatus($('drawer-status'), 'ID photo must be 5 MB or smaller — retake it closer instead of zooming.', true);
+    }
+    if (file.size < 128) {
+      return setStatus($('drawer-status'), 'That file is too small to be a readable ID photo.', true);
+    }
+    const sniffed = await sniffFile(file).catch(() => null);
+    if (!sniffed) {
+      return setStatus($('drawer-status'), 'That file is not a real PNG/JPEG image.', true);
     }
     const dataUrl = await new Promise((resolve, reject) => {
       const fr = new FileReader();
