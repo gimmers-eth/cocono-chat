@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # pnpm pinned to the devbox version (update.sh/deploys rely on it)
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 12.4.2
 
@@ -70,7 +70,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 12.4.2
       # reads the lockfile; no install or node runtime needed
