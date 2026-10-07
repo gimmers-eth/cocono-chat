@@ -433,7 +433,7 @@ img.own-avatar { border-radius: 50%; }
 .profile-id-state.trust { margin-top: .55rem; }
 #profile-app-state { margin-top: .3rem; }
 #profile-social-state, #profile-you-state { margin-top: .7rem; }
-#profile-coco.coco { color: var(--info); }
+#profile-coco.coco { color: var(--accent); font-weight: 700; }
 #profile-reputation.reputation { letter-spacing: .02em; margin: 0 0 .2rem; }
 
 /* Chat-head peer button: opens the profile view */
