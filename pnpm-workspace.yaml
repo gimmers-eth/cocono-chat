@@ -1,5 +1,8 @@
 packages:
   - be
   - client
+
+# pnpm 12: build-script approvals live in this file. mongodb-memory-server
+# needs its postinstall to fetch/verify the mongod binary used by tests.
 allowBuilds:
-  mongodb-memory-server: set this to true or false
+  mongodb-memory-server: true

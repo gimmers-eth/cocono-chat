@@ -1,0 +1,77 @@
+name: CI
+
+# Ops trio #3: independently prove every master commit on clean runners
+# before update.sh deploys it to the devbox. No deploy happens here — the
+# devbox IS the deployment; this workflow only gates and records.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22 = documented minimum, 24 = where the app is developed
+        node: ['22.x', '24.x']
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm pinned to the devbox version (update.sh/deploys rely on it)
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.4.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      # mongodb-memory-server fetches a real mongod binary on first use;
+      # caching keeps suite runs fast (dir matches the devbox layout).
+      - name: Cache mongodb-memory-server binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mms-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      # --frozen-lockfile also proves the lockfile matches the manifests —
+      # a drift class update.sh cannot catch.
+      - run: pnpm install --frozen-lockfile
+
+      - name: Backend suite (54)
+        run: pnpm test
+
+      - name: Client SDK + app graph suite (27, boots the real backend in-process)
+        run: pnpm test:client
+
+  audit:
+    name: dependency audit (high+ blocks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.4.2
+      # reads the lockfile; no install or node runtime needed
+      - run: pnpm audit --audit-level=high

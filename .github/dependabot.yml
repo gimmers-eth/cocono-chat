@@ -1,0 +1,18 @@
+# Dependabot (P1: dependency audit in CI). Version bumps arrive as ONE
+# grouped PR per week; GitHub Actions themselves monthly. CI runs on the
+# PRs, so a bad bump shows up red before anything is merged.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+    groups:
+      all-dependencies:
+        patterns:
+          - '*'
+
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: monthly

@@ -192,7 +192,8 @@ launch, P1 = strongly before/soon after, P2 = roadmap.
 - WS upgrade **origin allowlist** (defence-in-depth; tokens are the real gate).
 - **Mongo auth + Redis requirepass** even on loopback (one box-compromise away from
   total leak); app creds per-purpose.
-- Dependency audit in CI (`pnpm audit`, Dependabot) — CI itself is still missing (ops trio).
+- Dependency audit: **in CI** (`pnpm audit --audit-level=high` blocks;
+  Dependabot weekly grouped bumps + monthly actions) — done 2026-10-07.
 - Rate-limit rebaseline for internet scale + **per-device** msg caps (CGNAT/office
   shared-IP false positives — verify-ip already bumped to 50 for that reason).
 - **Safety numbers / explicit key-change verification** (pill exists; verification UI
@@ -242,7 +243,9 @@ replay dedup · envelope HMAC/sender-mismatch/unknown-recipient · auth flow hap
 - **DNS**: `dev.co.co.no` → 192.168.1.84 (EuroDNS hosts the zone; `co.no` is
   a CoDNS-operated public suffix — passkey-style grouping quirks on Apple
   came from there). Cert: LE via acme.sh DNS-01, cron renewal ~60d.
-- **CI**: none yet (proposed in Next up).
+- **CI**: GitHub Actions `ci.yml` (test matrix Node 22/24 + redis service,
+  frozen-lockfile install, blocking high-audit; Dependabot configured).
+  Green checks prove the sha; `update.sh` remains the local deploy gate.
 - **Test suite**: backend `pnpm test` (54), client `pnpm test:client` (26),
   `pnpm test:all` for both. Client suite runs the real backend in-process.
 
@@ -265,7 +268,7 @@ replay dedup · envelope HMAC/sender-mismatch/unknown-recipient · auth flow hap
 
 ## Next up (agreed order)
 
-1. **Ops trio — 2 of 3 DONE**:
+1. **Ops trio — ALL 3 DONE**:
    ✅ `update.sh` (pull → install → test-gate with auto-rollback → restart
    → verify served sha; `--dry-run` supported).
    ✅ **backup trio (LIVE, local-only)**: `ops/backup.sh hourly|daily`
@@ -280,8 +283,16 @@ replay dedup · envelope HMAC/sender-mismatch/unknown-recipient · auth flow hap
    rclone off-box sync is implemented — set `RCLONE_DEST` in
    `~/.config/cocono-backup.conf` when a second box/B2 exists (required
    before public launch).
-   ⬜ GitHub Actions CI (Node 22 + redis, both suites). No build step exists
-   (client is unbundled ES modules; there is no `dist/`).
+   ✅ **CI**: `.github/workflows/ci.yml` — every push to master/PR: test
+   matrix (Node 22.x + 24.x, redis:7-alpine service, pnpm pinned 12.4.2,
+   cached pnpm store + mongodb-memory-server binaries; `--frozen-lockfile`
+   also proves lockfile↔manifest sync) + a blocking
+   `pnpm audit --audit-level=high` job. `.github/dependabot.yml` set up.
+   Landed with a side fix: the pnpm-12 `allowBuilds` entry in
+   pnpm-workspace.yaml had an unfilled placeholder (frozen installs would
+   fail anywhere); `pnpm update` then cleared all 15 advisories
+   (fast-uri, brace-expansion, fastify transitives) to ZERO within
+   existing ranges — both suites green after.
 2. **Public-launch P0 list** (see Security posture): registration gate, queue
    caps, TRUST_PROXY/CDN decision, HSTS, encrypted backups, block/report.
 3. M4 files/media (DESIGN.md sketch exists).

@@ -9,10 +9,5 @@
     "test": "pnpm --filter @cocono/be test",
     "test:client": "pnpm --filter @cocono/client test",
     "test:all": "pnpm --filter @cocono/be test && pnpm --filter @cocono/client test"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "mongodb-memory-server"
-    ]
   }
 }
