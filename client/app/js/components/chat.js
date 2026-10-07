@@ -677,7 +677,7 @@ export function createChat({ client, onHomeRefresh }) {
     // show photo when present, else the initial circle
     const avatarEl = $('profile-avatar-img');
     const initialEl = $('profile-avatar');
-    const bioEl = $('profile-bio');
+    const bioEl = $('profile-peer-bio');
     avatarEl.hidden = true;
     initialEl.hidden = false;
     bioEl.hidden = true;
@@ -790,7 +790,7 @@ export function createChat({ client, onHomeRefresh }) {
       initial.hidden = false;
       initial.textContent = meUl.slice(0, 1);
     }
-    const bioEl = $('profile-bio');
+    const bioEl = $('profile-peer-bio');
     bioEl.hidden = !(prof?.bio && me?.verified);
     if (prof?.bio && me?.verified) bioEl.textContent = prof.bio;
     $('profile-status-icon').replaceChildren(peerStateIcon(PS.TRUSTED));
