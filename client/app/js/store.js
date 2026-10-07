@@ -14,11 +14,14 @@
 //   message store on purpose: clearing a chat never unfriends anyone.
 
 const DB_PREFIX = 'cocono-app';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 const MESSAGES = 'messages';
 const FRIENDS = 'friends';
 const PINS = 'pins';
 const PEERS = 'peers'; // lightweight facts seen via peerKeys (identity-verified badge)
+const AVATARS = 'peeravatars'; // {peer, avatar(base64|null), ts} — server only EVER
+                              // returns an avatar on mutual add, so the cache
+                              // can't leak one that wasn't earned
 
 let scope = 'anon';
 let dbPromise = null;
@@ -72,6 +75,9 @@ function openDb() {
         }
         if (!db.objectStoreNames.contains(PEERS)) {
           db.createObjectStore(PEERS, { keyPath: 'peer' });
+        }
+        if (!db.objectStoreNames.contains(AVATARS)) {
+          db.createObjectStore(AVATARS, { keyPath: 'peer' });
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -239,6 +245,25 @@ function notifyFriends() {
 
 export async function rememberPeerVerified(peer, verified) {
   await withStore('readwrite', (s) => s.put({ peer: String(peer).toLowerCase(), verified: !!verified }), PEERS);
+}
+
+// --- peer avatar cache (sidebar/chat-head photos without per-row fetches) ---
+export const AVATARS_EVENT = 'cocono:avatars';
+
+export async function loadPeerAvatars() {
+  const rows = await withStore('readonly', (s) => s.getAll(), AVATARS);
+  const map = new Map();
+  for (const r of rows ?? []) map.set(r.peer, r);
+  return map;
+}
+
+export async function rememberPeerAvatar(peer, avatar) {
+  await withStore('readwrite', (s) => s.put({
+    peer: String(peer).toLowerCase(),
+    avatar: typeof avatar === 'string' && avatar ? avatar : null,
+    ts: Date.now(),
+  }), AVATARS);
+  window.dispatchEvent(new Event(AVATARS_EVENT));
 }
 
 export async function loadPeerVerifications() {

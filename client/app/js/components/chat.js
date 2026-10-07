@@ -18,6 +18,7 @@ import { errorText, humanError } from '../errors.js';
 import {
   saveMessage, updateMessage, messagesWith, markRead, allMessages,
   getMessage, deleteMessage, clearMessages,
+  loadPeerAvatars, rememberPeerAvatar, AVATARS_EVENT,
   loadFriends, friendAdd, friendDel, friendMarkFlags, FRIENDS_EVENT,
   getPin, recordPinSeen, markPeerGone, rememberPeerVerified,
 } from '../store.js';
@@ -98,6 +99,20 @@ export function createChat({ client, onHomeRefresh }) {
     badgeEl.replaceChildren(...(peerIdentityKnown && !peerIdentityVerified ? [unverifiedBadgeEl()] : []));
   }
 
+  // chat-head avatar from the mutual-add cache (sidebar renders the same map)
+  async function renderChatAvatar() {
+    if (!currentPeer) return;
+    const avatars = await loadPeerAvatars();
+    const rec = avatars.get(currentPeer);
+    const img = $('chat-peer-avatar');
+    if (rec?.avatar) {
+      img.src = `data:image/jpeg;base64,${rec.avatar}`;
+      img.hidden = false;
+    } else {
+      img.hidden = true;
+    }
+  }
+
   // Nodes for the chat-head sub line: red "Unverified user"/"Account
   // deleted" flag first, device/offline info after — built from elements
   // (no innerHTML, no null-string coercion).
@@ -175,6 +190,13 @@ export function createChat({ client, onHomeRefresh }) {
         ts: m.ts,
         fromDeviceId: m.fromDeviceId,
       });
+      // prime profile for new/unknown peers, but only when our cache is
+      // missing or older than a day (busy chats must not hammer the server)
+      loadPeerAvatars().then((avatars) => {
+        const rec = avatars.get(m.peer.toLowerCase());
+        if (rec && Date.now() - (rec.ts ?? 0) < 86_400_000) return;
+        return client.viewProfile(m.peer).then((prof) => rememberPeerAvatar(m.peer, prof.avatar));
+      }).catch(() => {});
       if (currentPeer && currentPeer.toLowerCase() === m.peer.toLowerCase()) {
         await render();
         if (windowActive()) markRead(m.peer, m.ts);
@@ -628,6 +650,7 @@ export function createChat({ client, onHomeRefresh }) {
     try {
       const prof = await client.viewProfile(currentPeer);
       if (prof.bio) { bioEl.textContent = prof.bio; bioEl.hidden = false; }
+      rememberPeerAvatar(currentPeer, prof.avatar).catch(() => {});
       if (prof.avatar) {
         avatarEl.src = `data:${prof.avatarType || 'image/jpeg'};base64,${prof.avatar}`;
         avatarEl.hidden = false;
@@ -999,6 +1022,10 @@ export function createChat({ client, onHomeRefresh }) {
       // or something sent that the server accepted (sent/delivered). A
       // failed 'sending'/'failed' out-copy does NOT count — it would fake
       // the "account deleted" obituary for a peer we never actually talked to.
+      renderChatAvatar().catch(() => {});
+      client.viewProfile(currentPeer)
+        .then((prof) => rememberPeerAvatar(currentPeer, prof.avatar))
+        .catch(() => {});
       peerHadHistory = (await messagesWith(currentPeer)).some((m) =>
         m.dir === 'in' || (m.dir === 'out' && (m.state === 'sent' || m.state === 'delivered')));
       // Identity verification: compare the stored friend binding against the
@@ -1128,6 +1155,7 @@ export function createChat({ client, onHomeRefresh }) {
     $('btn-profile-close').addEventListener('click', closeProfileView);
     $('profile-overlay').addEventListener('click', closeProfileView);
     window.addEventListener(FRIENDS_EVENT, () => { updateTrustUI(); });
+    window.addEventListener(AVATARS_EVENT, () => { renderChatAvatar(); });
     $('btn-chat-clear').addEventListener('click', async () => {
       closeChatOpts();
       if (!currentPeer) return;

@@ -88,6 +88,7 @@
     <aside class="sidebar">
       <header class="side-head">
         <div class="me" id="btn-my-settings" role="button" tabindex="0" title="Settings">
+          <img id="me-avatar-img" class="avatar avatar-img" alt="" hidden />
           <span id="me-avatar" class="avatar" aria-hidden="true"></span>
           <span class="me-text">
             <span class="me-line"><span id="me-name" class="me-name"></span><span id="me-verify-badge"></span></span>
@@ -130,7 +131,7 @@
         <header class="chat-head">
           <button id="btn-chat-back" class="icon-btn back" title="Close conversation" data-icon="back"></button>
           <button type="button" id="btn-peer-profile" class="chat-peer peer-btn" title="View profile">
-            <span class="chat-peer-name"><span id="chat-peer-status" class="peer-status"></span><span id="chat-peer"></span><span id="chat-peer-badge" class="badge-slot"></span></span>
+            <span class="chat-peer-name"><img id="chat-peer-avatar" class="chat-avatar" alt="" hidden /><span id="chat-peer-status" class="peer-status"></span><span id="chat-peer"></span><span id="chat-peer-badge" class="badge-slot"></span></span>
             <span id="chat-sub" class="muted small"></span>
           </button>
           <button id="btn-chat-menu" class="icon-btn chat-menu-btn" title="Chat options" aria-haspopup="true" data-icon="menu"></button>
@@ -192,7 +193,7 @@
 
       <div id="tabpanel-profile" hidden>
         <h3>My profile</h3>
-        <div class="profile-id">
+        <div class="profile-id own-profile">
           <img id="profile-own-avatar" class="avatar own-avatar" alt="" hidden />
           <span id="profile-own-initial" class="avatar own-avatar" aria-hidden="true"></span>
           <span class="profile-idtext">
@@ -201,18 +202,17 @@
           </span>
         </div>
         <input id="profile-avatar-input" type="file" accept="image/png,image/jpeg" hidden />
-        <div class="row-actions">
+        <div class="row-actions profile-actions">
           <button id="btn-profile-avatar" class="btn btn-small">Change photo</button>
           <button id="btn-profile-avatar-clear" class="linkish danger" hidden>Remove photo</button>
+          <span id="profile-save-state" class="save-chip" hidden></span>
         </div>
-        <h3>About me</h3>
+        <h3 class="profile-h3">About me</h3>
         <textarea id="profile-bio" class="select bio" maxlength="250" rows="3"
                   placeholder="A line or two friends see on your profile (250 chars max)"></textarea>
-        <p class="muted small"><span id="profile-bio-count">0</span>/250</p>
-        <div class="row-actions">
-          <button id="btn-profile-save" class="btn btn-primary btn-small">Save profile</button>
-        </div>
-        <p class="muted small">Your photo is only shown to users you have added AND who have added you back — unfriending hides it both ways immediately.</p>
+        <p class="muted small bio-meta"><span id="profile-bio-count">0</span>/250</p>
+        <p class="muted small bio-meta">Photos and text save automatically — changes are yours to tweak, the chip confirms each one.</p>
+        <p class="muted small bio-meta">Your photo is only shown to users you have added <em>and</em> who have added you back — unfriending hides it both ways immediately.</p>
       </div>
 
       <div id="tabpanel-verify" hidden>

@@ -151,6 +151,16 @@ img.logo { object-fit: cover; background: none; }
 .me:hover, .me:focus-visible { background: var(--panel-raised); outline: none; }
 .own-avatar { width: 56px; height: 56px; object-fit: cover; font-size: 1.6rem; }
 img.own-avatar { border-radius: 50%; }
+#tabpanel-profile h3, .profile-h3 { margin: 1.1rem 0 .5rem; }
+#tabpanel-profile .profile-id.own-profile { margin: .6rem 0 1rem; }
+.profile-actions { margin: .2rem 0 .4rem; gap: .8rem; align-items: center; }
+.bio-meta { margin: .15rem 0 0; }
+.save-chip {
+  margin-left: auto; font-size: .72rem; font-weight: 700; color: var(--success);
+  background: rgba(0, 168, 132, 0.12); border-radius: 999px; padding: .18rem .6rem;
+  transition: opacity .3s ease;
+}
+.save-chip.bad { color: var(--danger); background: rgba(239, 105, 117, 0.12); }
 .bio { font-family: inherit; border-radius: 10px !important; padding: .55rem .8rem !important; width: 100%; resize: vertical; background: var(--panel-raised); border: 1px solid var(--border); color: var(--text); }
 .you-chip { color: var(--success); font-weight: 700; }
 #profile-own-avatar[hidden] + #profile-own-initial { display: inline-flex; }
@@ -435,6 +445,12 @@ img.own-avatar { border-radius: 50%; }
 }
 .peer-btn:hover, .peer-btn:focus-visible { background: var(--panel-raised); outline: none; }
 #profile-avatar-img { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; flex: none; }
+/* cached avatars rendered as circles anywhere an initial would sit */
+.avatar-img { object-fit: cover; }
+.chat-avatar {
+  width: 30px; height: 30px; border-radius: 50%; object-fit: cover;
+  flex: none; margin-right: .1rem; align-self: center;
+}
 .bio-line { margin-top: .15rem; white-space: pre-wrap; line-height: 1.4; }
 
 /* Profile view status lines */

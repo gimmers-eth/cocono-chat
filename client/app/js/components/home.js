@@ -6,7 +6,7 @@ import { $, setStatus, fmtTime, confirmModal } from '../ui.js';
 import { humanError } from '../errors.js';
 import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
-import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, loadPeerVerifications } from '../store.js';
+import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, loadPeerVerifications, loadPeerAvatars, rememberPeerAvatar, AVATARS_EVENT } from '../store.js';
 import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl } from './peername.js';
 import { refreshSettingsUI } from '../install.js';
 import { loadRegistry, applyTheme, savedTheme, wireThemeSelect } from '../theme.js';
@@ -88,6 +88,7 @@ export function createHome({ client, chat, onLogout }) {
     username = username.toLowerCase(); // display is always lowercase
     $('me-name').textContent = username;
     $('me-avatar').textContent = username.slice(0, 1);
+    paintOwnAvatar();
     renderIdentity();
   }
 
@@ -157,7 +158,8 @@ export function createHome({ client, chat, onLogout }) {
   }
 
   // ---- my-profile tab (bio + tiny avatar; avatar resized ON-DEVICE) ----
-  let pendingAvatar = null; // base64 jpeg awaiting save, or undefined=unchanged
+  let pendingAvatar = null; // 'clear' | base64 jpeg | null (nothing pending)
+  let pendingBioSaved = null; // last bio confirmed on the server
 
   function paintOwnAvatar(b64) {
     const img = $('profile-own-avatar');
@@ -180,8 +182,12 @@ export function createHome({ client, chat, onLogout }) {
       $('profile-own-name').textContent = client.username ?? '';
       $('profile-own-initial').textContent = String(client.username ?? '?').slice(0, 1);
       const bio = me.bio ?? '';
-      $('profile-bio').value = bio;
-      $('profile-bio-count').textContent = String(bio.length);
+      const field = $('profile-bio');
+      if (document.activeElement !== field || bio === (pendingBioSaved ?? field.value)) {
+        field.value = bio;
+      }
+      pendingBioSaved = pendingBioSaved ?? bio;
+      $('profile-bio-count').textContent = String(field.value.length);
       pendingAvatar = null;
       paintOwnAvatar(me.avatar);
     } catch (err) {
@@ -211,22 +217,33 @@ export function createHome({ client, chat, onLogout }) {
     return dataUrl.split(',')[1];
   }
 
-  async function saveProfile() {
-    const btn = $('btn-profile-save');
-    btn.disabled = true;
-    try {
-      const patch = { bio: $('profile-bio').value };
-      if (pendingAvatar === 'clear') patch.clearAvatar = true;
-      else if (pendingAvatar) patch.avatar = pendingAvatar;
-      await client.setProfile(patch);
-      pendingAvatar = null;
-      setStatus($('drawer-status'), 'Profile saved.');
-      await renderProfileTab();
-    } catch (err) {
-      setStatus($('drawer-status'), humanError(err), true);
-    } finally {
-      btn.disabled = false;
+  // ---- auto-save with visual feedback ----
+  let bioTimer = null;
+  let savingChain = Promise.resolve(); // serialise: last change wins, no overlap
+  function setSaveChip(state) {
+    const el = $('profile-save-state');
+    if (!el) return;
+    el.hidden = state === 'idle';
+    el.textContent = state === 'saving' ? 'Saving…' : state === 'saved' ? 'Saved ✓' : 'Failed';
+    el.classList.toggle('bad', state === 'error');
+    if (state === 'saved') {
+      setTimeout(() => { if (el.textContent === 'Saved ✓') { el.hidden = true; el.classList.remove('bad'); } }, 1800);
     }
+  }
+  function persistProfile(patch, { flash = true } = {}) {
+    setSaveChip('saving');
+    savingChain = savingChain
+      .then(async () => {
+        await client.setProfile(patch);
+        if (patch.bio !== undefined) pendingBioSaved = patch.bio;
+        if (patch.avatar !== undefined || patch.clearAvatar) pendingAvatar = null;
+        if (flash) setSaveChip('saved');
+      })
+      .catch((err) => {
+        setSaveChip('error');
+        setStatus($('drawer-status'), humanError(err), true);
+      });
+    return savingChain;
   }
 
   async function uploadIdDoc(file) {
@@ -270,10 +287,60 @@ export function createHome({ client, chat, onLogout }) {
     dot.title = state;
   }
 
+  // ---- avatar plumbing: cached (mutual-add) photos everywhere ----
+  const avatarPriming = new Map(); // peer -> last attempt ts (failure cooldown)
+  function peerAvatarEl(peer, avatars, cls = '') {
+    const rec = avatars.get(peer);
+    if (rec && rec.avatar) {
+      const img = document.createElement('img');
+      img.className = `avatar avatar-img ${cls}`.trim();
+      img.alt = '';
+      img.src = `data:image/jpeg;base64,${rec.avatar}`;
+      return img;
+    }
+    const span = document.createElement('span');
+    span.className = `avatar ${cls}`.trim();
+    span.setAttribute('aria-hidden', 'true');
+    span.textContent = peer.slice(0, 1);
+    return span;
+  }
+
+  // One profile fetch per peer per day: the server hands out the avatar
+  // ONLY when the add is mutual, so null results are cached too and simply
+  // render as initials.
+  function primeProfiles(peers) {
+    const selfUl = String(client.username ?? '').toLowerCase();
+    for (const peer of new Set([...peers, selfUl])) {
+      if (!peer) continue;
+      const last = avatarPriming.get(peer) ?? 0;
+      if (Date.now() - last < 5 * 60_000) continue;
+      avatarPriming.set(peer, Date.now());
+      client.viewProfile(peer)
+        .then((prof) => rememberPeerAvatar(peer, prof.avatar))
+        .catch(() => avatarPriming.delete(peer)); // retry after cooldown
+    }
+  }
+
+  async function paintOwnAvatar() {
+    const avatars = await loadPeerAvatars();
+    const selfUl = String(client.username ?? '').toLowerCase();
+    const rec = avatars.get(selfUl);
+    const img = $('me-avatar-img');
+    const initial = $('me-avatar');
+    if (rec?.avatar) {
+      img.src = `data:image/jpeg;base64,${rec.avatar}`;
+      img.hidden = false;
+      initial.hidden = true;
+    } else {
+      img.hidden = true;
+      initial.hidden = false;
+    }
+  }
+
   async function renderConversationList() {
     const list = $('conversation-list');
-    const [all, friends, pins, peerVerified] = await Promise.all(
-      [allMessages(), loadFriends(), loadPins(), loadPeerVerifications()],
+    const [all, friends, pins, peerVerified, avatars] = await Promise.all(
+      [allMessages(), loadFriends(), loadPins(), loadPeerVerifications(), loadPeerAvatars()],
     );
     const latestByPeer = new Map();
     for (const m of all) {
@@ -293,9 +360,7 @@ export function createHome({ client, chat, onLogout }) {
     for (const [peer, last] of entries) {
       const li = document.createElement('li');
       const btn = document.createElement('button');
-      const av = document.createElement('span');
-      av.className = 'avatar';
-      av.textContent = peer.slice(0, 1);
+      const av = peerAvatarEl(peer, avatars);
       const meta = document.createElement('span');
       meta.className = 'convo-meta';
       const name = document.createElement('span');
@@ -357,6 +422,7 @@ export function createHome({ client, chat, onLogout }) {
       frag.appendChild(li);
     }
     list.replaceChildren(frag);
+    primeProfiles(entries.map(([peer]) => peer));
   }
 
   async function renderDevices() {
@@ -471,6 +537,10 @@ export function createHome({ client, chat, onLogout }) {
     });
     document.querySelector('.drawer-tabs')?.addEventListener('scroll', updateTabFades, { passive: true });
     window.addEventListener('resize', updateTabFades);
+    window.addEventListener(AVATARS_EVENT, () => {
+      paintOwnAvatar();
+      renderConversationList().catch(() => {});
+    });
     $('btn-self-verify').addEventListener('click', (e) => { e.stopPropagation(); openSettings('verify'); });
     // the whole identity block opens settings (verified → Profile tab,
     // unverified → Verify tab; handled inside openSettings)
@@ -480,6 +550,7 @@ export function createHome({ client, chat, onLogout }) {
     });
 
     $('btn-profile-avatar').addEventListener('click', () => $('profile-avatar-input').click());
+    // photo: resize + save immediately (it was an explicit action)
     $('profile-avatar-input').addEventListener('change', async (e) => {
       const file = e.target.files?.[0];
       e.target.value = '';
@@ -487,18 +558,22 @@ export function createHome({ client, chat, onLogout }) {
       try {
         pendingAvatar = await resizeAvatar(file);
         paintOwnAvatar(pendingAvatar);
-        setStatus($('drawer-status'), 'Photo resized — press Save to publish it.');
+        persistProfile({ avatar: pendingAvatar });
       } catch (err) {
         setStatus($('drawer-status'), err.message ?? String(err), true);
       }
     });
     $('btn-profile-avatar-clear').addEventListener('click', () => {
-      pendingAvatar = 'clear';
       paintOwnAvatar(null);
+      persistProfile({ clearAvatar: true });
     });
-    $('btn-profile-save').addEventListener('click', saveProfile);
+    // typing: debounce 1.2 s, then auto-save
     $('profile-bio').addEventListener('input', (e) => {
       $('profile-bio-count').textContent = String(e.target.value.length);
+      clearTimeout(bioTimer);
+      const value = e.target.value;
+      if (value === pendingBioSaved) return; // unchanged vs last saved
+      bioTimer = setTimeout(() => persistProfile({ bio: value }, { flash: true }), 1200);
     });
     $('btn-id-doc').addEventListener('click', () => $('id-doc-input').click());
     $('id-doc-input').addEventListener('change', (e) => {
