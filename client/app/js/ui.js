@@ -32,11 +32,12 @@ let toastTimer = null;
 export function toast(message, kind = '') {
   const el = document.getElementById('toast');
   if (!el) return;
-  el.textContent = message ?? '';
+  clearTimeout(toastTimer);
+  if (!message) { el.hidden = true; return; } // empty = dismiss, never show
+  el.textContent = message;
   el.className = `toast ${kind}`;
   el.hidden = false;
-  clearTimeout(toastTimer);
-  if (message) toastTimer = setTimeout(() => { el.hidden = true; }, 4500);
+  toastTimer = setTimeout(() => { el.hidden = true; }, 4500);
 }
 
 export function setBusy(busy) {

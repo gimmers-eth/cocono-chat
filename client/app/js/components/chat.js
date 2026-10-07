@@ -209,7 +209,6 @@ export function createChat({ client, onHomeRefresh }) {
     const text = input.value.trim();
     if (!text || !currentPeer || peerGone) return;
     input.value = '';
-    toast('');
     try {
       const { localId } = await client.sendMessage(currentPeer, text);
       await saveMessage({ id: `out:${localId}`, peer: currentPeer, dir: 'out', text, ts: Date.now(), state: 'sending' });
@@ -800,7 +799,6 @@ export function createChat({ client, onHomeRefresh }) {
       // deleted"), then device count or the offline note
       $('chat-sub').replaceChildren(...chatSubNodes(peer));
       setComposerEnabled(!peerGone);
-      toast('');
       $('chat-empty').hidden = true;
       $('chat-view').hidden = false;
       setChatOpen(true);
