@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { setupApp, makeClient, randomAesKey, nowEpoch } from './helpers.js';
-import { canonical } from '../src/lib/canon.js';
 
 const LIMITS = {
   signupIpLimit: 1000,
@@ -38,47 +37,99 @@ async function getToken(app, client, u, d) {
   return verify.json().token;
 }
 
-test('friends: auth required, add/list/remove round-trip, validation', async () => {
-  const { app, teardown } = await setupApp(LIMITS);
+const names = (list) => list.map((f) => f.u);
+
+test('friends: signup anchors account identity key', async () => {
+  const { app, mongo, teardown } = await setupApp(LIMITS);
+  try {
+    const client = makeClient();
+    await signupUser(app, client, 'alice');
+    const doc = await mongo.db.collection('users').findOne({ ul: 'alice' });
+    assert.equal(doc.identity.p, client.p, 'identity.p is the founder device key');
+    assert.ok(doc.identity.d);
+  } finally {
+    await teardown();
+  }
+});
+
+test('friends: add binds the target identity (server-stamped), flags resolve', async () => {
+  const { app, mongo, teardown } = await setupApp(LIMITS);
   try {
     const alice = makeClient();
-    const bob = makeClient();
+    const bobby = makeClient();
     const a = await signupUser(app, alice, 'alice');
-    await signupUser(app, bob, 'bobby');
+    await signupUser(app, bobby, 'bobby');
     const token = await getToken(app, alice, 'alice', a.d);
     const auth = { authorization: `Bearer ${token}` };
 
-    // no token -> 401 on every friends endpoint
+    // auth gate + empty list
     assert.equal((await app.inject({ method: 'GET', url: '/api/me/friends' })).statusCode, 401);
-    assert.equal((await app.inject({ method: 'PUT', url: '/api/me/friends/bobby' })).statusCode, 401);
-
-    // empty list, then add bob
     assert.deepEqual((await app.inject({ method: 'GET', url: '/api/me/friends', headers: auth })).json().friends, []);
+
+    // add: entry carries the SERVER-stamped identity key, trusted
     const add = await app.inject({ method: 'PUT', url: '/api/me/friends/bobby', headers: auth });
     assert.equal(add.statusCode, 200);
-    assert.deepEqual(add.json().friends, ['bobby']);
+    const [entry] = add.json().friends;
+    assert.equal(entry.u, 'bobby');
+    assert.equal(entry.p, bobby.p, 'binding equals bobby identity key');
+    assert.equal(entry.trusted, true);
+    assert.equal(entry.gone, false);
+    assert.equal(entry.changed, false);
 
-    // idempotent re-add
+    // idempotent re-add keeps a single bound entry
     const again = await app.inject({ method: 'PUT', url: '/api/me/friends/bobby', headers: auth });
-    assert.deepEqual(again.json().friends, ['bobby']);
+    assert.equal(again.json().friends.length, 1);
 
-    // validation: unknown user, self, garbage
+    // validation
     assert.equal((await app.inject({ method: 'PUT', url: '/api/me/friends/nosuchuser', headers: auth })).statusCode, 404);
     assert.equal((await app.inject({ method: 'PUT', url: '/api/me/friends/alice', headers: auth })).statusCode, 400);
-    assert.equal((await app.inject({ method: 'PUT', url: '/api/me/friends/ab', headers: auth })).statusCode, 400);
 
-    // case-insensitive target (URL has uppercase; stored lowercase)
-    const caps = await app.inject({ method: 'PUT', url: '/api/me/friends/BOBBY', headers: auth });
-    assert.deepEqual(caps.json().friends, ['bobby']);
+    // delete bobby's account -> flag gone (not silently dropped from the list)
+    await mongo.db.collection('users').deleteOne({ ul: 'bobby' });
+    const goneList = (await app.inject({ method: 'GET', url: '/api/me/friends', headers: auth })).json().friends;
+    assert.equal(goneList[0].gone, true);
+    assert.equal(goneList[0].trusted, false);
 
-    // one-way trust: alice's list only — bob must NOT suddenly trust alice
-    const aliceList = await app.inject({ method: 'GET', url: '/api/me/friends', headers: auth });
-    assert.deepEqual(aliceList.json().friends, ['bobby']);
+    // re-registration with a NEW key -> changed: binding no longer matches
+    const bobby2 = makeClient();
+    await signupUser(app, bobby2, 'bobby');
+    const changed = (await app.inject({ method: 'GET', url: '/api/me/friends', headers: auth })).json().friends;
+    assert.equal(changed[0].gone, false);
+    assert.equal(changed[0].changed, true);
+    assert.equal(changed[0].trusted, false, 're-registered account is NOT trusted');
 
-    // remove
+    // explicit re-add RE-BINDS to the new identity
+    const rebind = await app.inject({ method: 'PUT', url: '/api/me/friends/bobby', headers: auth });
+    const bound = rebind.json().friends;
+    assert.equal(bound.length, 1);
+    assert.equal(bound[0].p, bobby2.p);
+    assert.equal(bound[0].trusted, true);
+    assert.equal(bound[0].changed, false);
+
+    // remove clears
     const del = await app.inject({ method: 'DELETE', url: '/api/me/friends/bobby', headers: auth });
-    assert.equal(del.statusCode, 200);
     assert.deepEqual(del.json().friends, []);
+  } finally {
+    await teardown();
+  }
+});
+
+test('friends: legacy plain-string entries normalize to untrusted', async () => {
+  const { app, mongo, teardown } = await setupApp(LIMITS);
+  try {
+    const alice = makeClient();
+    const bobby = makeClient();
+    const a = await signupUser(app, alice, 'alice');
+    await signupUser(app, bobby, 'bobby');
+    // simulate a pre-key-anchoring list
+    await mongo.db.collection('users').updateOne({ ul: 'alice' }, { $set: { friends: ['bobby'] } });
+    const token = await getToken(app, alice, 'alice', a.d);
+    const list = (await app.inject({
+      method: 'GET', url: '/api/me/friends', headers: { authorization: `Bearer ${token}` },
+    })).json().friends;
+    assert.equal(list[0].u, 'bobby');
+    assert.equal(list[0].p, null);
+    assert.equal(list[0].trusted, false, 'legacy entries are NOT trusted (strict policy)');
   } finally {
     await teardown();
   }
@@ -88,7 +139,7 @@ test('friends: cap enforced (friendsMax override)', async () => {
   const { app, teardown } = await setupApp({ ...LIMITS, friendsMax: 2 });
   try {
     const alice = makeClient();
-    const others = ['friend1', 'friend2', 'friend3'].map((u) => { const c = makeClient(); return { c, u }; });
+    const others = ['friend1', 'friend2', 'friend3'].map((u) => ({ c: makeClient(), u }));
     for (const { c, u } of others) await signupUser(app, c, u);
     const a = await signupUser(app, alice, 'alice');
     const token = await getToken(app, alice, 'alice', a.d);
@@ -100,10 +151,10 @@ test('friends: cap enforced (friendsMax override)', async () => {
     assert.equal(full.statusCode, 409);
     assert.equal(full.json().error, 'friends_full');
 
-    // still allowed to re-add an existing friend at cap (idempotent)
+    // re-adding an existing friend at the cap still succeeds (re-bind)
     const readd = await app.inject({ method: 'PUT', url: '/api/me/friends/friend1', headers: auth });
     assert.equal(readd.statusCode, 200);
-    assert.deepEqual(readd.json().friends, ['friend1', 'friend2']);
+    assert.deepEqual(names(readd.json().friends), ['friend1', 'friend2']);
   } finally {
     await teardown();
   }

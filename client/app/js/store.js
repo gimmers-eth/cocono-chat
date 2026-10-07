@@ -157,13 +157,19 @@ export function markRead(peer, ts = Date.now()) {
 export const isUnread = (peer, ts) => (ts ?? 0) > (reads()[String(peer).toLowerCase()] ?? 0);
 
 // --- friends (local mirror of the server list; see header comment) ---
+// record: { peer, pub, gone, changed, trusted } — pub is the identity-key
+// binding the SERVER recorded; trusted only when it matches the live
+// account. Legacy/unbound entries are NOT trusted (strict policy).
 
 export function loadFriends() {
   return withStore('readonly', (s) => s.getAll(), FRIENDS);
 }
 
-export async function friendAdd(peer) {
-  await withStore('readwrite', (s) => s.put({ peer: String(peer).toLowerCase() }), FRIENDS);
+export async function friendAdd(peer, pub = '') {
+  await withStore('readwrite', (s) => s.put({
+    peer: String(peer).toLowerCase(), pub,
+    gone: false, changed: false, trusted: !!pub,
+  }), FRIENDS);
   notifyFriends();
 }
 
@@ -172,14 +178,24 @@ export async function friendDel(peer) {
   notifyFriends();
 }
 
-/** Replace the whole local mirror with the authoritative server list. */
-export async function setFriends(list) {
+/** Replace the whole local mirror with the authoritative server entries. */
+export async function setFriends(entries) {
   const db = await openDb();
   await new Promise((resolve, reject) => {
     const tx = db.transaction(FRIENDS, 'readwrite');
     const store = tx.objectStore(FRIENDS);
     store.clear();
-    for (const peer of list ?? []) store.put({ peer: String(peer).toLowerCase() });
+    for (const e of entries ?? []) {
+      // tolerate legacy plain-string entries
+      const rec = typeof e === 'string' ? { u: e } : e;
+      store.put({
+        peer: String(rec.u).toLowerCase(),
+        pub: rec.p || '',
+        gone: !!rec.gone,
+        changed: !!rec.changed,
+        trusted: !!rec.trusted,
+      });
+    }
     tx.oncomplete = resolve;
     tx.onerror = () => reject(tx.error);
   });

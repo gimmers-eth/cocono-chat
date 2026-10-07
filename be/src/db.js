@@ -9,6 +9,14 @@ export async function connectMongo(url) {
   // Usernames are normalised to lowercase; migrate legacy docs that stored
   // the typed casing in `u` (idempotent — matches only mixed-case rows).
   await db.collection('users').updateMany({ u: /[A-Z]/ }, [{ $set: { u: '$ul' } }]);
+  // Account identity anchor (founder key) added alongside the friends
+  // feature: backfill from the first device for pre-existing docs (the
+  // founder device was historically devices[0]; no live accounts existed
+  // when this shipped, so the fallback is effectively test-only).
+  await db.collection('users').updateMany(
+    { identity: { $exists: false }, 'devices.0': { $exists: true } },
+    [{ $set: { identity: { d: '$devices.0.id', p: '$devices.0.pub' } } }],
+  );
   // Diagnostics reports ('Send diagnostics' button): auto-expire after 30 days.
   await db.collection('diagnostics').createIndex({ ts: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 });
   // Store-and-forward message queue (milestone 3): one doc per recipient

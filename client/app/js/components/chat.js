@@ -92,7 +92,7 @@ export function createChat({ client, onHomeRefresh }) {
       if (m.peer.toLowerCase() === selfUl && /^\{"sys":"friend[-+]"/.test(m.text)) {
         try {
           const p = JSON.parse(m.text);
-          if (p.sys === 'friend+') await friendAdd(p.ul);
+          if (p.sys === 'friend+') await friendAdd(p.ul, p.p || '');
           else if (p.sys === 'friend-') await friendDel(p.ul);
           await updateTrustUI();
           onHomeRefresh?.();
@@ -285,12 +285,18 @@ export function createChat({ client, onHomeRefresh }) {
   //     here later. Modal (not dropdown) so it survives any re-render and
   //     needs no outside-click machinery. ---
 
-  // --- trust UI: friends = one-way trust; strangers show a chat warning ---
+  // --- trust UI: friends = IDENTITY-BOUND one-way trust. Anything short of
+  //     a live-matching binding (stranger, legacy/unbound, changed, gone)
+  //     shows the stranger/gone marks — strict by policy (option B) ---
 
+  async function friendEntryFor(peer) {
+    if (!peer) return undefined;
+    return (await loadFriends()).find((f) => f.peer === peer);
+  }
+
+  // "is friend" = actually trusted: bound key matches the live account
   async function isCurrentPeerFriend() {
-    if (!currentPeer) return false;
-    const friends = await loadFriends();
-    return friends.some((f) => f.peer === currentPeer);
+    return !!(await friendEntryFor(currentPeer))?.trusted;
   }
 
   async function updateTrustUI() {
@@ -301,16 +307,17 @@ export function createChat({ client, onHomeRefresh }) {
       headStatus?.replaceChildren();
       return;
     }
-    // header identity mark: deleted account -> user-slash (red, italic name);
-    // otherwise green outlined user (friend) vs red user-with-an-x (stranger)
-    const friend = await isCurrentPeerFriend();
+    const ent = await friendEntryFor(currentPeer);
+    const gone = peerGone || !!ent?.gone;
+    const trusted = !!ent?.trusted;
+    // header identity mark: red user-slash + italic (deleted), green
+    // outlined user (trusted binding), red user-xmark (everything else)
     headStatus.replaceChildren(
-      peerGone
-        ? iconEl('userGone', 'icon-danger')
-        : iconEl(friend ? 'friend' : 'notFriend', friend ? 'icon-friend' : 'icon-danger'),
+      iconEl(gone ? 'userGone' : trusted ? 'friend' : 'notFriend',
+        gone || !trusted ? 'icon-danger' : 'icon-friend'),
     );
-    $('chat-peer').parentElement.classList.toggle('gone', peerGone);
-    if (peerGone) {
+    $('chat-peer').parentElement.classList.toggle('gone', gone);
+    if (gone) {
       // deleted account outranks the trust strip: this chat is history
       warn.classList.add('gone');
       warn.hidden = false;
@@ -322,12 +329,17 @@ export function createChat({ client, onHomeRefresh }) {
       return;
     }
     warn.classList.remove('gone');
-    warn.hidden = friend;
-    if (!friend) {
+    warn.hidden = trusted;
+    if (!trusted) {
+      const why = ent?.changed
+        ? `${currentPeer}'s account was re-created (identity key changed) — the old trust binding is stale`
+        : ent
+          ? `${currentPeer} is on your friends list but not identity-bound yet`
+          : `${currentPeer} is not on your friends list`;
       warn.replaceChildren(
         iconEl('notFriend', 'icon-danger'),
-        document.createTextNode(` ${currentPeer} is not on your friends list — messages are `
-          + 'end-to-end encrypted, but you have not marked this account as trusted.'),
+        document.createTextNode(` ${why}. Messages remain end-to-end encrypted, `
+          + 'but this account is not trusted — add it as a friend to bind its identity key.'),
       );
     }
   }
@@ -374,15 +386,20 @@ export function createChat({ client, onHomeRefresh }) {
   async function openChatOpts() {
     if (!currentPeer) return;
     $('chatopts-title').textContent = currentPeer;
-    const isFriend = await isCurrentPeerFriend();
-    friendMenuLabel(isFriend, currentPeer);
+    // status icon beside the name: slash (gone) > green user (trusted)
+    // > red x (stranger / unbound / stale binding)
+    const ent = await friendEntryFor(currentPeer);
+    const gone = peerGone || !!ent?.gone;
+    const trusted = !!ent?.trusted && !gone;
+    friendMenuLabel(trusted, currentPeer);
     // ghost chat (deleted account): friending is meaningless — the server
     // rejects unknown users; hide the row, keep Clear
-    $('btn-chat-friend').closest('.menu-row').hidden = peerGone;
+    $('btn-chat-friend').closest('.menu-row').hidden = gone;
     // trust status sits RIGHT BEFORE the peer name in the title: green
     // outlined user (friend) vs red person-with-an-x (stranger)
     $('chatopts-peer-status').replaceChildren(
-      iconEl(isFriend ? 'friend' : 'notFriend', isFriend ? 'icon-friend' : 'icon-danger'),
+      iconEl(gone ? 'userGone' : trusted ? 'friend' : 'notFriend',
+        trusted ? 'icon-friend' : 'icon-danger'),
     );
     $('chatopts-overlay').hidden = false;
     $('chatopts-modal').hidden = false;
@@ -491,6 +508,18 @@ export function createChat({ client, onHomeRefresh }) {
       $('chat-view').hidden = false;
       setChatOpen(true);
       const last = await render();
+      // Identity verification: compare the stored friend binding against the
+      // LIVE account key from this very lookup. Mismatch (or server-flagged
+      // 'changed') = the username was re-registered: drop trust on EVERY
+      // device of ours — server delete + our own sys broadcast converge the
+      // mirrors; the warning strip then shows the stranger state.
+      const ent = await friendEntryFor(currentPeer);
+      if (peer && ent && (ent.changed || (peer.id && ent.pub && ent.pub !== peer.id))) {
+        client.removeFriend(currentPeer).catch(() => {});
+        await friendDel(currentPeer);
+        setStatus($('chat-status'),
+          `Trust removed — ${currentPeer}'s account identity changed (username re-registered). Re-add to re-bind.`);
+      }
       await updateTrustUI();
       // Read up to the newest DISPLAYED message (server-assigned ts): marking
       // with the local clock could miss messages the server stamped a few ms

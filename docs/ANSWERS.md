@@ -77,3 +77,22 @@
 2. 1 account, 2 multi-device, 3 1:1 messages (text), 4 files (images etc), 5 groups, 6 PWA polish, 7 subgroups.
 3. Yes!
 4. Monorepo
+## 11. Friends — Identity-Key Anchored Trust (2026-10-07)
+Friends are a per-account, ONE-WAY trust list ("I trust this user").
+1. Server is the source of truth (`/api/me/friends` GET/PUT/DELETE). Devices
+   mirror locally (IndexedDB) and sync live via E2EE system messages the
+   acting device broadcasts to its OWN account — the server cannot forge or
+   read them and never relays account-wide events itself.
+2. Trust is anchored to the ACCOUNT IDENTITY KEY: each user doc carries
+   `identity.p` (the founder device Ed25519 key, frozen for the account's
+   lifetime; a re-registered username gets a NEW one). The SERVER stamps the
+   binding on add — clients cannot claim keys.
+3. Reads resolve against the live directory and flag entries:
+   `gone` (account deleted), `changed` (username re-registered — binding
+   stale), `trusted` (binding matches). Users of a changed/ghost account
+   auto-untrust on every device (client verifies via userKeys `id` at chat
+   open; server flags cover reconcile-on-entry).
+4. Re-add = explicit re-bind to the new identity. Deletion never silently
+   strips holders' lists — mark, don't erase (it is THEIR trust history).
+5. Legacy unbound entries are UNTRUSTED (strict option B) until re-added.
+   Chosen 2026-10-07: no live users existed, so strictness costs nothing.

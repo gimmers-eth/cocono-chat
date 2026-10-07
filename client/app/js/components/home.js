@@ -72,16 +72,22 @@ export function createHome({ client, chat, onLogout }) {
       meta.className = 'convo-meta';
       const name = document.createElement('span');
       name.className = 'convo-name';
-      // leading identity icon replaces the old @-prefix: solid user = you,
-      // outlined user (green) = friend, red user-with-an-x = stranger
+      // header identity mark (sidebar): solid user = you; user-slash +
+      // italic = deleted friend; green outlined user = trusted binding;
+      // red person-with-an-x = everyone else (stranger/unbound/stale)
       const selfUl = String(client.username ?? '').toLowerCase();
+      const ent = friends.find((f) => f.peer === peer);
+      const gone = !!ent?.gone;
       const mark = peer === selfUl
         ? iconEl('userSolid')
-        : friends.some((f) => f.peer === peer)
-          ? iconEl('friend', 'icon-friend')
-          : iconEl('notFriend', 'icon-danger');
+        : gone
+          ? iconEl('userGone', 'icon-danger')
+          : ent?.trusted
+            ? iconEl('friend', 'icon-friend')
+            : iconEl('notFriend', 'icon-danger');
       name.replaceChildren(mark);
       name.append(peer);
+      if (name.classList) name.classList.toggle('gone', gone);
       const preview = document.createElement('span');
       preview.className = 'convo-last';
       preview.textContent = '';

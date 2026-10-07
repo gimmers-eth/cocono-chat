@@ -167,6 +167,7 @@ img.logo { object-fit: cover; background: none; }
 .convo-list li > button:hover { background: var(--panel-raised); }
 .convo-list .convo-meta { flex: 1; min-width: 0; display: grid; gap: .1rem; }
 .convo-list .convo-name { font-weight: 600; }
+.convo-list .convo-name.gone { font-style: italic; }
 .convo-list .convo-name i { font-size: .72rem; margin-right: .5em; vertical-align: .05em; }
 .convo-list .convo-last {
   color: var(--muted); font-size: .85rem; overflow: hidden;

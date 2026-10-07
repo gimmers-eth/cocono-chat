@@ -64,6 +64,11 @@ export default async function signupRoutes(app, { users, redis, config }) {
       await users.insertOne({
         u: ul,
         ul,
+        // ACCOUNT identity anchor: the founder device's Ed25519 key, frozen
+        // for the account's lifetime (devices may come and go; a
+        // re-registered username gets a NEW identity). Friend trust bindings
+        // reference this value — see routes/app-routes/friends.js.
+        identity: { d, p, createdAt: now },
         devices: [{ id: d, pub: p, x, aes: a, main: true, createdAt: now, lastSeenAt: now }],
         maxDevices: config.maxDevicesDefault,
         createdAt: now,

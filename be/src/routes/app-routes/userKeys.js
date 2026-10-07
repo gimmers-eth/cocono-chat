@@ -25,6 +25,9 @@ export default async function userKeysRoutes(app, { users, redis, config }) {
 
     return {
       u: user.u,
+      // account identity anchor (see friends.js): clients compare this
+      // against their stored friend binding to detect re-registration
+      id: user.identity?.p ?? user.devices?.[0]?.pub ?? null,
       devices: user.devices.map((dev) => ({ d: dev.id, p: dev.pub, x: dev.x ?? null })),
     };
   });

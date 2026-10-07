@@ -366,22 +366,25 @@ export class CoconoClient extends Emitter {
   }
 
   /**
-   * Mark a user as trusted (one-way). Server first (authority), then a
-   * best-effort E2EE system message to our OWN account's devices so open
-   * ones update live; offline ones reconcile via listFriends().
-   * @returns {Promise<string[]>} the authoritative friends list
+   * Bind a user's CURRENT account identity as trusted (one-way). The SERVER
+   * stamps the identity key itself (ground truth); then a best-effort E2EE
+   * system message to our OWN devices updates open ones live, and offline
+   * ones reconcile via listFriends().
+   * @returns {Promise<Array<{u, p, gone, changed, trusted}>>} authoritative entries
    */
   async addFriend(username) {
     const ul = String(username).toLowerCase();
     const res = await this.api.addFriend(this.#requireToken(), ul);
-    this.#broadcastFriend('friend+', ul);
-    return res.friends ?? [];
+    const entries = res.friends ?? [];
+    const entry = entries.find((f) => f.u === ul);
+    this.#broadcastFriend('friend+', ul, entry?.p ?? null);
+    return entries;
   }
 
   async removeFriend(username) {
     const ul = String(username).toLowerCase();
     const res = await this.api.removeFriend(this.#requireToken(), ul);
-    this.#broadcastFriend('friend-', ul);
+    this.#broadcastFriend('friend-', ul, null);
     return res.friends ?? [];
   }
 
@@ -390,10 +393,11 @@ export class CoconoClient extends Emitter {
   // recognises the {"sys":"friend+|friend-"} payload and keeps it out of
   // the transcript. Server never sees this content and cannot forge it
   // (relay HMAC is keyed with our transport key).
-  #broadcastFriend(kind, ul) {
+  #broadcastFriend(kind, ul, p) {
     const identity = this.#identity;
     if (!identity || !this.#transport || this.#transport.state !== 'open') return;
-    this.sendMessage(identity.username, JSON.stringify({ sys: kind, ul })).catch((err) => {
+    const payload = p ? { sys: kind, ul, p } : { sys: kind, ul };
+    this.sendMessage(identity.username, JSON.stringify(payload)).catch((err) => {
       this.logger.debug(`friend live-sync broadcast failed: ${err?.message ?? err}`);
     });
   }
