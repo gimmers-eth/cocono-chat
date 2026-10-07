@@ -95,7 +95,8 @@ export async function buildApp({ mongo, redis, config, feRoot, sdkRoot }) {
         .send({ ...manifestTemplate, name, short_name: name });
     });
 
-    await app.register(fastifyStatic, { root: feRoot });
+    await app.register(fastifyStatic, { root: feRoot ,
+      cacheControl: 'no-cache'});
     // The client SDK is imported by the app as '/sdk/index.js' (no bundler).
     // Wrapped in an anonymous (encapsulated) plugin: a second @fastify/static
     // in the same scope would collide on the 'sendFile' decorator.

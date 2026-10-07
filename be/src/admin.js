@@ -71,7 +71,8 @@ await app.register(async function adminScope(instance) {
   });
 });
 
-await app.register(fastifyStatic, { root: path.resolve(import.meta.dirname, '..', 'admin') });
+await app.register(fastifyStatic, { root: path.resolve(import.meta.dirname, '..', 'admin') ,
+      cacheControl: 'no-cache'});
 
 await app.listen({ port: config.adminPort, host: config.adminHost });
 console.log(
