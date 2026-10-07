@@ -44,6 +44,27 @@ const STATE_MARK = { sending: 'stateSending', sent: 'stateSent', delivered: 'sta
 // fleeting toast — it lands in the conversation timeline (dir:'sys') AND
 // syncs to every device of this account (live via self-broadcast, offline
 // via the normal store-and-forward queue). Keep codes/texts here.
+// Account age stage shown in Safety: New (<30d, red) · Newish (30–149d,
+// orange) · Established (>=150d, green) — age is its own trust signal,
+// separate from App verification and Social vouches.
+const ACCOUNT_STAGES = [
+  [150, 'ok', 'Account: Established'],
+  [30, 'warn', 'Account: Newish'],
+  [0, 'bad', 'Account: New'],
+];
+function renderAccountStage(createdMs) {
+  const state = $('profile-account-state');
+  const joined = $('profile-joined');
+  if (!state || !joined) return;
+  if (!createdMs) { state.hidden = joined.hidden = true; return; }
+  const days = (Date.now() - createdMs) / 86_400_000;
+  const [, cls, title] = ACCOUNT_STAGES.find(([min]) => days >= min);
+  state.hidden = joined.hidden = false;
+  state.textContent = title;
+  state.className = `profile-id-state ${cls}`;
+  joined.textContent = `Joined — ${new Date(createdMs).toLocaleDateString()}`;
+}
+
 const NOTICE_TEXT = {
   'trust-revoked': (peer) => `Heads up: trust in ${peer} was revoked — the account behind this username changed its identity key (possibly re-registered by someone else). Verify the safety number again before trusting new messages.`,
   'account-deleted': (peer) => `Heads up: the ${peer} account was deleted. This conversation is read-only now; your saved messages remain here.`,
@@ -636,8 +657,7 @@ export function createChat({ client, onHomeRefresh }) {
     const pin = await getPin(currentPeer);
     const state = trustState(ent, pin);
     $('profile-status-icon').replaceChildren(peerStateIcon(state));
-    $('profile-joined').textContent = peerJoinedAt ? `Joined ${new Date(peerJoinedAt).toLocaleDateString()}` : '';
-    $('profile-joined').hidden = !peerJoinedAt;
+    renderAccountStage(peerJoinedAt ? new Date(peerJoinedAt).getTime() : null);
 
     // peer profile (bio public; avatar ONLY on mutual add — server rule):
     // show photo when present, else the initial circle
@@ -683,6 +703,9 @@ export function createChat({ client, onHomeRefresh }) {
           ? 'This account no longer exists. Your saved messages stay readable, but nothing new can be sent.'
           : 'No account with this name exists — nothing you send can be delivered.');
       [socialState, socialNote, youState, youNote].forEach((el) => { el.hidden = true; });
+      $('profile-account-state').hidden = true;
+      $('profile-joined').hidden = true;
+      $('profile-coco').hidden = true;
       return;
     }
     [socialState, socialNote, youState, youNote].forEach((el) => { el.hidden = false; });
@@ -755,8 +778,7 @@ export function createChat({ client, onHomeRefresh }) {
     bioEl.hidden = !prof?.bio;
     if (prof?.bio) bioEl.textContent = prof.bio;
     $('profile-status-icon').replaceChildren(peerStateIcon(PS.TRUSTED));
-    $('profile-joined').hidden = !me?.createdAt;
-    if (me?.createdAt) $('profile-joined').textContent = `Joined ${new Date(me.createdAt).toLocaleDateString()}`;
+    renderAccountStage(me?.createdAt ? new Date(me.createdAt).getTime() : null);
 
     const setRow = (s, n, cls, title, note) => {
       s.textContent = title;
