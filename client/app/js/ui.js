@@ -110,11 +110,12 @@ export function openLightbox(src) {
   const img = $('lightbox-img');
   if (!overlay || !img || !src) return;
   img.src = src;
+  img.hidden = false;   // the <img> ships hidden — un-hide it or the zoom is invisible
   overlay.hidden = false;
 }
 export function closeLightbox() {
   const overlay = $('lightbox-overlay');
   const img = $('lightbox-img');
   if (overlay) overlay.hidden = true;
-  if (img) img.removeAttribute('src');
+  if (img) { img.hidden = true; img.removeAttribute('src'); }
 }
