@@ -417,12 +417,10 @@ img.own-avatar { border-radius: 50%; }
 }
 .sheet-body { padding-top: .4rem; }
 .profile-id { display: flex; align-items: center; gap: .9rem; margin: .4rem 0 1rem; }
-/* sheet hero: photo, name, joined + description stacked above Safety */
-.profile-hero { flex-direction: column; align-items: center; text-align: center; gap: .45rem; margin: .5rem 0 1rem; }
-.profile-hero .profile-idtext { align-items: center; }
+/* sheet header: photo beside name+joined+description, whole block above Safety */
+.profile-hero { align-items: center; text-align: left; gap: 1rem; margin: .5rem 0 1rem; }
 .profile-hero .profile-nameline { font-size: 1.05rem; }
-.profile-hero .bio-line { max-width: 34ch; }
-#profile-avatar-img, .profile-hero #profile-avatar { width: 68px; height: 68px; font-size: 1.8rem; }
+#profile-avatar-img, .profile-hero #profile-avatar { width: 60px; height: 60px; font-size: 1.7rem; flex: none; }
 .profile-preview-row { margin-top: 1.1rem; }
 .profile-preview-row .btn { margin-left: auto; margin-right: auto; }
 .profile-idtext { display: flex; flex-direction: column; min-width: 0; }
