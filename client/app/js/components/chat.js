@@ -133,11 +133,16 @@ export function createChat({ client, onHomeRefresh }) {
     const avatars = await loadPeerAvatars();
     const rec = avatars.get(currentPeer);
     const img = $('chat-peer-avatar');
+    const initial = $('chat-peer-initial');
     if (rec?.avatar) {
       img.src = `data:image/jpeg;base64,${rec.avatar}`;
       img.hidden = false;
+      initial.hidden = true;
     } else {
+      img.removeAttribute('src');
       img.hidden = true;
+      initial.hidden = false;
+      initial.textContent = currentPeer.slice(0, 1);
     }
   }
 
@@ -678,7 +683,9 @@ export function createChat({ client, onHomeRefresh }) {
     bioEl.hidden = true;
     try {
       const prof = await client.viewProfile(currentPeer);
-      if (prof.bio) { bioEl.textContent = prof.bio; bioEl.hidden = false; }
+      // descriptions are surfaced only for ID-verified accounts (an
+      // unverified stranger gets no broadcast channel for their text)
+      if (prof.bio && peerIdentityVerified) { bioEl.textContent = prof.bio; bioEl.hidden = false; }
       rememberPeerAvatar(currentPeer, prof.avatar).catch(() => {});
       if (prof.avatar) {
         avatarEl.src = `data:${prof.avatarType || 'image/jpeg'};base64,${prof.avatar}`;
@@ -784,8 +791,8 @@ export function createChat({ client, onHomeRefresh }) {
       initial.textContent = meUl.slice(0, 1);
     }
     const bioEl = $('profile-bio');
-    bioEl.hidden = !prof?.bio;
-    if (prof?.bio) bioEl.textContent = prof.bio;
+    bioEl.hidden = !(prof?.bio && me?.verified);
+    if (prof?.bio && me?.verified) bioEl.textContent = prof.bio;
     $('profile-status-icon').replaceChildren(peerStateIcon(PS.TRUSTED));
     renderAccountStage(me?.createdAt ? new Date(me.createdAt).getTime() : null);
 

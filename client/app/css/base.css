@@ -471,6 +471,8 @@ img.own-avatar { border-radius: 50%; }
 /* cached avatars rendered as circles anywhere an initial would sit */
 .avatar-img { object-fit: cover; }
 .chat-avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; flex: none; }
+span.avatar.chat-avatar { display: inline-grid; place-items: center; font-size: .85rem;
+  background: var(--accent-strong); color: var(--on-accent); text-transform: uppercase; }
 .bio-line { margin-top: .15rem; white-space: pre-wrap; line-height: 1.4; }
 
 /* Profile view status lines */
