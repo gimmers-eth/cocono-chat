@@ -13,7 +13,7 @@ import { setScope } from './store.js';
 import { initKeyboardFit } from './keyboard.js';
 import { mountDiagnostics } from './diag.js';
 import { initInstallAndNotify } from './install.js';
-import { putAppTitle } from './swkv.js';
+import { putAppTitle, takePendingChat } from './swkv.js';
 
 // Debug console logging: flip localStorage.setItem('cocono.debug','1') or use
 // ?debug=1 before load.
@@ -90,6 +90,12 @@ async function enterApp({ gesture = false, offline = false } = {}) {
   home.paintConnection(offline ? 'closed' : client.connectionState);
   if (!offline) client.connect(); // offline mode: browse the local store only
   await home.renderConversationList();
+
+  // A notification click that cold-booted the app parked the peer in the
+  // SW's IDB kv (delete-on-read): open exactly that conversation.
+  takePendingChat().then((peer) => {
+    if (peer) chat.openChat(peer).catch(() => {});
+  }).catch(() => {});
 
   // OS notifications: from a gesture (login/signup button) this may prompt
   // for permission; on silent boot-resume it only re-registers a

@@ -41,3 +41,24 @@ export async function readSwLog(n = 8) {
     return rows.slice(-n);
   } catch { return []; }
 }
+
+/**
+ * Consume the 'pendingchat' entry (a notification click that cold-booted
+ * the app — the SW parks the peer there, see sw.js notificationclick).
+ * Returns the username AT MOST ONCE (delete-on-read), or null.
+ */
+export async function takePendingChat() {
+  try {
+    const db = await openSwDb();
+    const value = await new Promise((res, rej) => {
+      const tx = db.transaction('kv', 'readwrite');
+      const store = tx.objectStore('kv');
+      const get = store.get('pendingchat');
+      get.onsuccess = () => { if (get.result != null) store.delete('pendingchat'); };
+      tx.oncomplete = () => res(get.result ?? null);
+      tx.onerror = () => rej(tx.error);
+    });
+    db.close();
+    return typeof value === 'string' && value ? value : null;
+  } catch { return null; }
+}

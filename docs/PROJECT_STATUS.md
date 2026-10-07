@@ -259,4 +259,6 @@ replay dedup · envelope HMAC/sender-mismatch/unknown-recipient · auth flow hap
 4. M5 groups, then M7 subgroups/tags.
 5. Small backlog: registration invite gate, offline outbox (queue unsent
    messages), per-conversation mute, admin over TLS, v2→v4 migration prompt
-   for macOS Safari users, notification click-routing to specific chats.
+   for macOS Safari users. (Done: notification click now routes to the
+   sender's chat — postMessage when a window exists, `pendingchat` IDB
+   hand-off + delete-on-read consume on cold boot.)

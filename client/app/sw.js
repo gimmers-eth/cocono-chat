@@ -194,13 +194,20 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  const info = event.notification.data || {};
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const client of windows) {
       if ('focus' in client) {
-        client.postMessage({ from: 'sw', type: 'notification-click', eventType: event.notification.data?.type, peer: event.notification.data?.peer });
+        client.postMessage({ from: 'sw', type: 'notification-click', eventType: info.type, peer: info.peer });
         return client.focus();
       }
+    }
+    // No window open: the app cold-boots from openWindow and can never
+    // receive this postMessage — park the peer in the shared IDB kv and
+    // let the page consume it once it is logged in (swkv.takePendingChat).
+    if (info.peer) {
+      try { await swLib().kvSet('pendingchat', String(info.peer)); } catch { /* best effort */ }
     }
     return self.clients.openWindow ? self.clients.openWindow('/') : null;
   })());
