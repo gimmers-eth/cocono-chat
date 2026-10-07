@@ -320,7 +320,8 @@ img.logo { object-fit: cover; background: none; }
    visible on dark themes where shadows disappear. .fade-left/.fade-right
    are toggled by JS and only appear while content is actually clipped
    that way. */
-.drawer-tabs-wrap { position: relative; margin: .2rem 0 .6rem; }
+.drawer-tabs-wrap { position: relative; margin: .2rem 0 .6rem; min-width: 0; }
+.drawer-tabs { min-width: 0; max-width: 100%; }
 .drawer-tabs-wrap::before, .drawer-tabs-wrap::after {
   content: ''; position: absolute; top: 0; bottom: 1px; width: 34px;
   pointer-events: none; z-index: 1; opacity: 0; transition: opacity .15s ease;
@@ -360,7 +361,7 @@ img.logo { object-fit: cover; background: none; }
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 50;
   width: min(320px, 84vw);
   background: var(--panel); border-left: 1px solid var(--border);
-  box-shadow: var(--shadow); overflow-y: auto;
+  box-shadow: var(--shadow); overflow-y: auto; overflow-x: hidden;
   padding: calc(1.1rem + env(safe-area-inset-top)) 1rem 1.2rem 1rem;
   animation: side-menu-in .22s cubic-bezier(.2, .8, .3, 1);
 }

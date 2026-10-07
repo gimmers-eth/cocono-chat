@@ -107,8 +107,8 @@ export function createHome({ client, chat, onLogout }) {
       // no facts fetched: hide all affordances, assume nothing
       link.hidden = true; btn.hidden = true; return;
     }
-    $('me-verify-badge').replaceChildren(); // no badge on our own name;
-    // the "Get verified" link conveys the unverified state
+    $('me-verify-badge').replaceChildren(...(me.verified ? [] : [unverifiedBadgeEl()]));
+    // our own name carries the same red mark contacts see — until verified
     link.hidden = !!me.verified; // the top-left entry only while unverified
     if (me.verified) {
       btn.hidden = true;
