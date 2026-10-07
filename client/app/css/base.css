@@ -206,7 +206,7 @@ img.logo { object-fit: cover; background: none; }
 }
 .drawer-head h2 { font-size: 1.05rem; }
 .drawer-body { display: grid; gap: .6rem; }
-.drawer-body h3 { font-size: .85rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-top: .6rem; }
+.drawer-body h3 { font-size: .85rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: .6rem 0 .55rem; }
 
 .chat-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
