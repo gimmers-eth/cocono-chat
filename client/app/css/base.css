@@ -171,6 +171,7 @@ img.logo { object-fit: cover; background: none; }
   color: var(--muted); font-size: .85rem; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap;
 }
+.convo-list .convo-last.empty { font-style: italic; }
 .convo-list .convo-side { display: grid; justify-items: end; gap: .3rem; }
 .convo-list .convo-time { color: var(--muted); font-size: .75rem; }
 .unread { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }

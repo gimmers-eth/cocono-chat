@@ -77,7 +77,9 @@ export function createHome({ client, chat, onLogout }) {
       preview.className = 'convo-last';
       preview.textContent = '';
       if (last === null) {
-        preview.textContent = 'Friend — no messages yet';
+        // message-less friend entry (or empty chat): plain italic placeholder
+        preview.classList.add('empty');
+        preview.textContent = 'No messages';
       } else {
         if (last.dir === 'out') {
           preview.append('You: ');
