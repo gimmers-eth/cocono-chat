@@ -43,7 +43,7 @@ function swLib() {
 // workers have NO localStorage — that ReferenceError once ate every push)
 self.addEventListener('error', (e) => {
   try {
-    swLib().swLog('workererror', `${e.message} @${e.filename ?? '?'}:${e.lineno ?? 0}`);
+    swLib().swLog('workererror', `${e.message} ${e.filename ?? '?'}:${e.lineno ?? 0}`);
   } catch { /* lib not loaded — nothing available to log with */ }
 });
 
@@ -156,7 +156,7 @@ async function showMsgNotification() {
     const snippet = (rich.text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
     const more = rich.extra > 0 ? ` (+${rich.extra} more)` : '';
     pendingPeerTag = rich.peer;
-    await showOnce(cachedTitle, `@${rich.peer}: ${snippet || '(message)'}${more}`);
+    await showOnce(cachedTitle, `${rich.peer}: ${snippet || '(message)'}${more}`);
   })().catch(async (err) => {
     const why = String(err?.message ?? err).slice(0, 160);
     console.warn('[sw] enrich failed:', why);

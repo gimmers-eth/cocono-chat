@@ -30,9 +30,9 @@ export function createPeerSuggestions(listEl, { max = Infinity, floating = false
       av.className = 'avatar';
       av.textContent = p.slice(0, 1);
       const name = document.createElement('span');
-      name.textContent = `@${p}`;
+      name.textContent = `${p}`;
       btn.append(av, name);
-      btn.title = `@${p}`;
+      btn.title = `${p}`;
       btn.addEventListener('click', () => {
         dismissed = true; // collapse after picking (re-shows on next focus)
         onPick(p);

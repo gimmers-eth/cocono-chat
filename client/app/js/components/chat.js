@@ -51,7 +51,7 @@ function notifyOS(peer, text) {
   const snippet = (text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
   navigator.serviceWorker?.getRegistration?.()?.then((reg) => {
     reg?.showNotification?.(document.title || 'co.co.no', {
-      body: `@${peer}: ${snippet || '(message)'}`,
+      body: `${peer}: ${snippet || '(message)'}`,
       tag: 'cocono-activity',
       data: { type: 'msg', peer },
     })?.catch?.(() => {});
@@ -121,14 +121,14 @@ export function createChat({ client, onHomeRefresh }) {
       const catchUp = Date.now() - lastOpenAt < 3000;
       if (windowActive() && !viewingThis && !catchUp) {
         const snippet = (m.text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
-        showBanner(`@${m.peer}: ${snippet || '(message)'}`, m.peer);
+        showBanner(`${m.peer}: ${snippet || '(message)'}`, m.peer);
       } else if (!windowActive()) {
         notifyOS(m.peer, m.text);
       }
     });
 
     client.on('peerIdentityChanged', ({ peer }) => {
-      showBanner(`@${peer}: key material refreshed (account re-created or device re-paired)`, peer);
+      showBanner(`${peer}: key material refreshed (account re-created or device re-paired)`, peer);
     });
 
     client.on('ack', async ({ localId, ok, error }) => {
@@ -217,7 +217,7 @@ export function createChat({ client, onHomeRefresh }) {
   function openMsgModal(rec) {
     msgId = rec.id;
     $('msg-modal-title').textContent = rec.dir === 'out' ? 'Sent message' : 'Message';
-    $('msg-modal-time').textContent = `@${rec.peer} · ${new Date(rec.ts).toLocaleString()}`;
+    $('msg-modal-time').textContent = `${rec.peer} · ${new Date(rec.ts).toLocaleString()}`;
     const textEl = $('msg-modal-text');
     textEl.textContent = rec.text;
     textEl.scrollTop = 0;
@@ -298,7 +298,7 @@ export function createChat({ client, onHomeRefresh }) {
     if (!friend) {
       warn.replaceChildren(
         iconEl('notFriend', 'icon-danger'),
-        document.createTextNode(` @${currentPeer} is not on your friends list — messages are `
+        document.createTextNode(` ${currentPeer} is not on your friends list — messages are `
           + 'end-to-end encrypted, but you have not marked this account as trusted.'),
       );
     }
@@ -311,7 +311,7 @@ export function createChat({ client, onHomeRefresh }) {
     const btn = $('btn-chat-friend');
     btn.replaceChildren(
       iconEl(isFriend ? 'friendRemove' : 'friendAdd'),
-      document.createTextNode(isFriend ? ` Remove @${peer} as friend` : ` Add @${peer} as friend`),
+      document.createTextNode(isFriend ? ` Remove ${peer} as friend` : ` Add ${peer} as friend`),
     );
     btn.classList.toggle('danger', isFriend);
   }
@@ -328,8 +328,8 @@ export function createChat({ client, onHomeRefresh }) {
         await friendAdd(currentPeer);
       }
       setStatus($('chat-status'), wasFriend
-        ? `@${currentPeer} removed from friends`
-        : `@${currentPeer} added as friend`);
+        ? `${currentPeer} removed from friends`
+        : `${currentPeer} added as friend`);
       await updateTrustUI();
       onHomeRefresh?.();
     } catch (err) {
@@ -345,11 +345,11 @@ export function createChat({ client, onHomeRefresh }) {
 
   async function openChatOpts() {
     if (!currentPeer) return;
-    $('chatopts-title').textContent = `Chat options — @${currentPeer}`;
+    $('chatopts-title').textContent = currentPeer;
     const isFriend = await isCurrentPeerFriend();
     friendMenuLabel(isFriend, currentPeer);
-    // trust status right next to the peer's name: green check-user vs the
-    // red person-with-an-x (stranger)
+    // trust status sits RIGHT BEFORE the peer name in the title: green
+    // outlined user (friend) vs red person-with-an-x (stranger)
     $('chatopts-peer-status').replaceChildren(
       iconEl(isFriend ? 'friend' : 'notFriend', isFriend ? 'icon-friend' : 'icon-danger'),
     );
@@ -419,7 +419,7 @@ export function createChat({ client, onHomeRefresh }) {
       const { localId } = await client.sendMessage(target, rec.text);
       await saveMessage({ id: `out:${localId}`, peer: target, dir: 'out', text: rec.text, ts: Date.now(), state: 'sending' });
       closeForward();
-      setStatus($('chat-status'), `Forwarded to @${target}`);
+      setStatus($('chat-status'), `Forwarded to ${target}`);
       onHomeRefresh?.();
       if (currentPeer === target) await render();
     } catch (err) {
@@ -443,7 +443,7 @@ export function createChat({ client, onHomeRefresh }) {
         else throw err;
       }
       currentPeer = (peer?.u ?? username).toLowerCase();
-      $('chat-peer').textContent = `@${currentPeer}`;
+      $('chat-peer').textContent = `${currentPeer}`;
       $('chat-sub').textContent = peer
         ? `${peer.devices.length} device${peer.devices.length === 1 ? '' : 's'}`
         : 'Offline — stored messages only';
@@ -532,7 +532,7 @@ export function createChat({ client, onHomeRefresh }) {
       if (!currentPeer) return;
       const ok = await confirmModal({
         title: 'Clear messages',
-        body: `Delete all messages with @${currentPeer} on this device? Other devices and the other user keep their copies.`,
+        body: `Delete all messages with ${currentPeer} on this device? Other devices and the other user keep their copies.`,
         okLabel: 'Clear', danger: true,
       });
       if (!ok || !currentPeer) return;

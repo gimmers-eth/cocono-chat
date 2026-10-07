@@ -21,7 +21,7 @@ export function createAuth({ client, onLoggedIn }) {
     els.waiting.hidden = true;
     $('btn-show-pair').hidden = Boolean(identity);
     $('btn-show-signup').hidden = Boolean(identity);
-    if (identity) els.btnLogin.textContent = `Log in as @${identity.username.toLowerCase()}`;
+    if (identity) els.btnLogin.textContent = `Log in as ${identity.username.toLowerCase()}`;
     setStatus(els.status, '');
     renderAccounts();
   }
@@ -42,7 +42,7 @@ export function createAuth({ client, onLoggedIn }) {
     list.replaceChildren(...accounts.map((a) => {
       const row = document.createElement('li');
       const who = document.createElement('span');
-      who.append(document.createTextNode(`@${a.username}`));
+      who.append(document.createTextNode(`${a.username}`));
       const dev = document.createElement('span');
       dev.className = 'dim small';
       dev.textContent = ` ${String(a.deviceId).slice(0, 8)}…${a.current ? ' (active)' : ''}`;
@@ -194,7 +194,7 @@ export function createAuth({ client, onLoggedIn }) {
 
   async function removeWithWarning(removeName) {
     const { count, prev } = await probeAccount(removeName);
-    let title = `Remove @${removeName}?`;
+    let title = `Remove ${removeName}?`;
     let body;
     let okLabel = 'Remove';
     let danger = false;
@@ -202,14 +202,14 @@ export function createAuth({ client, onLoggedIn }) {
       // Only device: detaching it server-side leaves the account ORPHANED —
       // username still reserved, but no device can sign in or approve
       // pairing, and there is no recovery yet.
-      title = `Delete @${removeName}?`;
+      title = `Delete ${removeName}?`;
       body = 'This browser holds @' + removeName + "'s ONLY device. Removing it deletes the "
         + 'account on the server as well (accounts with no devices are not kept): every message '
         + 'is gone and the username becomes free to register again.';
       okLabel = 'Remove and delete the account';
       danger = true;
     } else if (count === null) {
-      body = `Could not reach @${removeName}'s account (it may already be deleted on the server). `
+      body = `Could not reach ${removeName}'s account (it may already be deleted on the server). `
         + 'Its keys and local messages will be erased from this browser only.';
       danger = true;
     } else {
@@ -239,7 +239,7 @@ export function createAuth({ client, onLoggedIn }) {
     if (!next) {
       showMode('signup');
       if (!els.status.textContent) {
-        setStatus(els.status, `@${removeName} removed from this browser`
+        setStatus(els.status, `${removeName} removed from this browser`
           + (count === 1 ? ' and its account deleted on the server.' : '.'));
       }
     }

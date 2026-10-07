@@ -167,7 +167,7 @@ img.logo { object-fit: cover; background: none; }
 .convo-list li > button:hover { background: var(--panel-raised); }
 .convo-list .convo-meta { flex: 1; min-width: 0; display: grid; gap: .1rem; }
 .convo-list .convo-name { font-weight: 600; }
-.convo-list .convo-name i { font-size: .72rem; margin-left: .5em; vertical-align: .05em; }
+.convo-list .convo-name i { font-size: .72rem; margin-right: .5em; vertical-align: .05em; }
 .convo-list .convo-last {
   color: var(--muted); font-size: .85rem; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap;
@@ -300,7 +300,7 @@ img.logo { object-fit: cover; background: none; }
   font-size: .8rem; font-weight: 600; color: var(--muted);
   text-transform: uppercase; letter-spacing: .07em; margin: 0 0 .6rem .55rem;
 }
-.peer-status i { font-size: .95rem; }
+.peer-status i { font-size: .95rem; margin-right: .3em; }
 .peer-status:empty { display: none; }
 
 /* Menu rows: one icon per row (the action), full-width tap targets. */

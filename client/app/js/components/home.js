@@ -34,7 +34,7 @@ export function createHome({ client, chat, onLogout }) {
 
   function paintMe(username) {
     username = username.toLowerCase(); // display is always lowercase
-    $('me-name').textContent = `@${username}`;
+    $('me-name').textContent = username;
     $('me-avatar').textContent = username.slice(0, 1);
   }
 
@@ -72,13 +72,16 @@ export function createHome({ client, chat, onLogout }) {
       meta.className = 'convo-meta';
       const name = document.createElement('span');
       name.className = 'convo-name';
-      name.textContent = peer;
-      // stranger marker: red person-with-an-x next to the name of any peer
-      // NOT on the friends list (friends stay clean)
+      // leading identity icon replaces the old @-prefix: solid user = you,
+      // outlined user (green) = friend, red user-with-an-x = stranger
       const selfUl = String(client.username ?? '').toLowerCase();
-      if (peer !== selfUl && !friends.some((f) => f.peer === peer)) {
-        name.append(iconEl('notFriend', 'icon-danger'));
-      }
+      const mark = peer === selfUl
+        ? iconEl('userSolid')
+        : friends.some((f) => f.peer === peer)
+          ? iconEl('friend', 'icon-friend')
+          : iconEl('notFriend', 'icon-danger');
+      name.replaceChildren(mark);
+      name.append(peer);
       const preview = document.createElement('span');
       preview.className = 'convo-last';
       preview.textContent = '';

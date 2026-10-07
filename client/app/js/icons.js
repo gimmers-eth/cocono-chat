@@ -24,9 +24,10 @@ export const ICONS = {
   forward: 'fa-share',
   delete: 'fa-trash-can',
 
-  // friendship (one-way trust)
-  friend: 'fa-user-check',          // trusted state (green)
-  notFriend: 'fa-user-xmark',       // stranger marker (red, .icon-danger)
+  // friendship (one-way trust) — sidebar + menu identity marks
+  userSolid: 'fa-user',              // you (solid)
+  friend: 'fa-regular fa-user',      // trusted peer (outlined, green)
+  notFriend: 'fa-user-xmark',        // stranger marker (red)
   friendAdd: 'fa-user-shield',      // action: add as friend
   friendRemove: 'fa-user-minus',    // action: remove friend (red)
 
