@@ -60,6 +60,10 @@ function notifyOS(peer, text) {
 
 export function createChat({ client, onHomeRefresh }) {
   let currentPeer = null; // display-cased
+  // true when the peer's account has been deleted server-side: the local
+  // transcript stays readable, but sending is disabled (no keys to encrypt
+  // to — the account is gone forever).
+  let peerGone = false;
 
   // --- SDK event wiring (once) ---
 
@@ -158,7 +162,7 @@ export function createChat({ client, onHomeRefresh }) {
   async function sendCurrent() {
     const input = $('chat-input');
     const text = input.value.trim();
-    if (!text || !currentPeer) return;
+    if (!text || !currentPeer || peerGone) return;
     input.value = '';
     setStatus($('chat-status'), '');
     try {
@@ -293,6 +297,18 @@ export function createChat({ client, onHomeRefresh }) {
     const warn = $('chat-warn');
     if (!warn) return;
     if (!currentPeer) { warn.hidden = true; return; }
+    if (peerGone) {
+      // deleted account outranks the trust strip: this chat is history
+      warn.classList.add('gone');
+      warn.hidden = false;
+      warn.replaceChildren(
+        iconEl('notFriend', 'icon-danger'),
+        document.createTextNode(` ${currentPeer} no longer exists — this account was deleted. `
+          + 'Your stored messages remain readable, but sending is disabled.'),
+      );
+      return;
+    }
+    warn.classList.remove('gone');
     const friend = await isCurrentPeerFriend();
     warn.hidden = friend;
     if (!friend) {
@@ -348,6 +364,9 @@ export function createChat({ client, onHomeRefresh }) {
     $('chatopts-title').textContent = currentPeer;
     const isFriend = await isCurrentPeerFriend();
     friendMenuLabel(isFriend, currentPeer);
+    // ghost chat (deleted account): friending is meaningless — the server
+    // rejects unknown users; hide the row, keep Clear
+    $('btn-chat-friend').closest('.menu-row').hidden = peerGone;
     // trust status sits RIGHT BEFORE the peer name in the title: green
     // outlined user (friend) vs red person-with-an-x (stranger)
     $('chatopts-peer-status').replaceChildren(
@@ -435,18 +454,26 @@ export function createChat({ client, onHomeRefresh }) {
     const status = $('home-status');
     try {
       let peer = null;
+      peerGone = false;
       try {
         peer = await client.peerKeys(username); // validates existence, caches
       } catch (err) {
+        // Deleted account (last device removed => account deleted):
+        // enter read-only ghost mode over the local transcript instead of
+        // throwing — the user must still be able to READ the history.
+        if (err?.code === 'unknown_account' || err?.status === 404) peerGone = true;
         // Offline read-only mode (no session): fall back to the local store.
-        if (navigator.onLine === false && !client.token) peer = null;
+        else if (navigator.onLine === false && !client.token) peer = null;
         else throw err;
       }
       currentPeer = (peer?.u ?? username).toLowerCase();
       $('chat-peer').textContent = `${currentPeer}`;
-      $('chat-sub').textContent = peer
-        ? `${peer.devices.length} device${peer.devices.length === 1 ? '' : 's'}`
-        : 'Offline — stored messages only';
+      $('chat-sub').textContent = peerGone
+        ? 'Account deleted — history only'
+        : peer
+          ? `${peer.devices.length} device${peer.devices.length === 1 ? '' : 's'}`
+          : 'Offline — stored messages only';
+      setComposerEnabled(!peerGone);
       setStatus($('chat-status'), '');
       $('chat-empty').hidden = true;
       $('chat-view').hidden = false;
@@ -458,10 +485,20 @@ export function createChat({ client, onHomeRefresh }) {
       // 'ahead', which would leave the unread dot stubbornly on.
       markRead(currentPeer, last?.ts ?? Date.now());
       onHomeRefresh?.(); // repaint the list NOW: the dot must go with it
-      $('chat-input').focus();
+      if (!peerGone) $('chat-input').focus();
     } catch (err) {
       setStatus(status, err.message ?? String(err), true);
     }
+  }
+
+  // Composer lock for deleted-account ghost chats: input + send disabled
+  // (sendCurrent also guards, so Enter can't bypass the dead button).
+  function setComposerEnabled(enabled) {
+    const input = $('chat-input');
+    const btn = $('btn-send');
+    input.disabled = !enabled;
+    btn.disabled = !enabled;
+    input.placeholder = enabled ? 'Type a message' : `${currentPeer ?? 'This user'} no longer exists`;
   }
 
   function wire() {

@@ -256,6 +256,8 @@ img.logo { object-fit: cover; background: none; }
   background: rgba(255, 163, 85, 0.12); color: var(--warning);
   border-bottom: 1px solid var(--border);
 }
+/* deleted-account variant: stronger, danger-toned — this is final */
+.chat-warn.gone { background: rgba(239, 105, 117, 0.12); color: var(--danger); }
 
 /* Font Awesome icons: every glyph comes from js/icons.js (vendored FA Free,
    /vendor/fontawesome). Sizing + tint helpers only — no per-view magic. */
