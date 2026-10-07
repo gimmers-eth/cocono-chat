@@ -294,9 +294,12 @@ img.logo { object-fit: cover; background: none; }
 }
 @keyframes side-menu-in { from { transform: translateX(100%); } to { transform: none; } }
 .side-menu-title {
+  display: flex; align-items: center; gap: .45rem;
   font-size: .8rem; font-weight: 600; color: var(--muted);
   text-transform: uppercase; letter-spacing: .07em; margin: 0 0 .6rem .55rem;
 }
+.peer-status i { font-size: .95rem; }
+.peer-status:empty { display: none; }
 
 /* Menu rows: one icon per row (the action), full-width tap targets. */
 .menu-list { display: grid; gap: .1rem; margin: 0; }

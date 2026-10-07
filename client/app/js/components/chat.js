@@ -346,7 +346,13 @@ export function createChat({ client, onHomeRefresh }) {
   async function openChatOpts() {
     if (!currentPeer) return;
     $('chatopts-title').textContent = `Chat options — @${currentPeer}`;
-    friendMenuLabel(await isCurrentPeerFriend(), currentPeer);
+    const isFriend = await isCurrentPeerFriend();
+    friendMenuLabel(isFriend, currentPeer);
+    // trust status right next to the peer's name: green check-user vs the
+    // red person-with-an-x (stranger)
+    $('chatopts-peer-status').replaceChildren(
+      iconEl(isFriend ? 'friend' : 'notFriend', isFriend ? 'icon-friend' : 'icon-danger'),
+    );
     $('chatopts-overlay').hidden = false;
     $('chatopts-modal').hidden = false;
     setMenuBtnOpen(true);
