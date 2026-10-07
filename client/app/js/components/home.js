@@ -73,6 +73,12 @@ export function createHome({ client, chat, onLogout }) {
       const name = document.createElement('span');
       name.className = 'convo-name';
       name.textContent = peer;
+      // stranger marker: red person-with-an-x next to the name of any peer
+      // NOT on the friends list (friends stay clean)
+      const selfUl = String(client.username ?? '').toLowerCase();
+      if (peer !== selfUl && !friends.some((f) => f.peer === peer)) {
+        name.append(iconEl('notFriend', 'icon-danger'));
+      }
       const preview = document.createElement('span');
       preview.className = 'convo-last';
       preview.textContent = '';
