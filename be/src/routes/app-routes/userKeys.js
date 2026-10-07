@@ -25,8 +25,9 @@ export default async function userKeysRoutes(app, { users, redis, config }) {
 
     return {
       u: user.u,
-      // account identity anchor (see friends.js): clients compare this
-      // against their stored friend binding to detect re-registration
+      // public account facts like this are directory-visible metadata (JWT
+      // gate already required); drives the grey certificate badge in clients
+      verified: !!user.verified,
       id: user.identity?.p ?? user.devices?.[0]?.pub ?? null,
       devices: user.devices.map((dev) => ({ d: dev.id, p: dev.pub, x: dev.x ?? null })),
     };

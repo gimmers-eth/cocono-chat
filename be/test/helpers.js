@@ -13,7 +13,13 @@ export async function setupApp(overrides = {}) {
   const mongo = await connectMongo(mongod.getUri('cocono-chat-test'));
   const redis = await connectRedis(TEST_REDIS_URL);
   await redis.flushDb();
-  const app = await buildApp({ mongo, redis, config: { ...config, ...overrides }, feRoot: null });
+  // Identity policy OFF by default so message tests stay about transport;
+  // verification.test/messaging policy tests opt back in via overrides.
+  const app = await buildApp({
+    mongo, redis,
+    config: { ...config, coldSendRequiresVerification: false, ...overrides },
+    feRoot: null,
+  });
   return {
     app,
     mongo,

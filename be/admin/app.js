@@ -66,6 +66,12 @@ function renderUsers(users) {
       (u) => `<tr>
         <td><strong>@${esc(u.u)}</strong><br /><span class="dim mono">${esc(u.ul)}</span></td>
         <td>${fmtDate(u.createdAt)}</td>
+        <td><input type="checkbox" class="verify-toggle" data-verify="${esc(u.ul)}" ${u.verified ? 'checked' : ''} title="${u.verified && u.verifiedAt ? 'verified ' + esc(fmtDate(u.verifiedAt)) : 'not verified'}" /></td>
+        <td>${u.idDoc
+          ? `<span class="dim">${esc(u.idDoc.contentType.replace('image/', ''))} · ${fmtDate(u.idDoc.uploadedAt)}</span><br />
+             <button class="tiny" data-view-id="${esc(u.ul)}">view</button>
+             <button class="danger tiny" data-del-id="${esc(u.ul)}">delete photo</button>`
+          : '<span class="dim">none</span>'}</td>
         <td>
           <input type="number" min="1" max="1000" value="${u.maxDevices}" class="max-devices" data-max-for="${esc(u.ul)}" />
           <button class="tiny" data-set-max="${esc(u.ul)}">set</button>
@@ -298,6 +304,42 @@ document.addEventListener('click', (e) => {
     if (!confirm(`Remove device ${device.slice(0, 8)}… from @${ul}?` + orphanNote(ul))) return;
     return run(`Removed device from @${ul}`, () =>
       api(`/api/admin/users/${encodeURIComponent(ul)}/devices/${encodeURIComponent(device)}`, { method: 'DELETE' }));
+  }
+});
+
+// ---- identity verification controls ----
+document.addEventListener('change', (e) => {
+  const ul = e.target.closest?.('.verify-toggle')?.dataset.verify;
+  if (!ul) return;
+  const on = e.target.checked === true;
+  run(`@${ul} ${on ? 'marked verified' : 'verification revoked'}`, () =>
+    api(`/api/admin/users/${encodeURIComponent(ul)}/verified`, {
+      method: 'PUT', body: JSON.stringify({ verified: on }),
+    }));
+});
+
+document.addEventListener('click', async (e) => {
+  const viewUl = e.target.closest?.('[data-view-id]')?.dataset.viewId;
+  if (viewUl) {
+    // token-gated image: fetch as blob, open in a new tab
+    try {
+      const res = await fetch(`/api/admin/users/${encodeURIComponent(viewUl)}/id-doc`, {
+        headers: { 'x-admin-token': tokenInput.value.trim() },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const url = URL.createObjectURL(await res.blob());
+      window.open(url, '_blank', 'noopener');
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      setStatus(`Viewing ID failed: ${err.message}`, 'error');
+    }
+    return;
+  }
+  const delUl = e.target.closest?.('[data-del-id]')?.dataset.delId;
+  if (delUl) {
+    if (!confirm(`Delete the ID photo for @${delUl}? Verification state is kept.`)) return;
+    run('ID photo deleted', () =>
+      api(`/api/admin/users/${encodeURIComponent(delUl)}/id-doc`, { method: 'DELETE' }));
   }
 });
 

@@ -275,7 +275,14 @@ img.logo { object-fit: cover; background: none; }
 }
 .identity-number.copied .identity-copy-tag { color: var(--accent); }
 
-/* Trust warning strip (non-friend chat): stays under the header, above the
+/* Grey certificate: admin-verified real person (independent of the peer
+   trust ladder) — shown after names wherever they appear. */
+.verify-badge { color: var(--muted) !important; font-size: .72em; margin-left: .4em; }
+.badge-slot { display: inline; }
+.badge-slot .verify-badge { margin-left: .35em; }
+.verify-link { font-size: .72rem; margin-left: .5rem; opacity: .85; }
+
+/* Trust warning strip (unverified chat): stays under the header, above the
    transcript. Amber = caution, not danger — encryption still holds. */
 .chat-warn {
   flex: none; padding: .4rem .9rem; font-size: .82rem; text-align: center;

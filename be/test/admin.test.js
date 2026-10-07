@@ -18,6 +18,7 @@ async function setupAdmin() {
     diagnostics: ctx.mongo.db.collection('diagnostics'),
     settings: ctx.mongo.db.collection('settings'),
     messages: ctx.mongo.db.collection('messages'),
+    idDocs: ctx.mongo.db.collection('id_docs'),
   });
 
   const now = new Date();

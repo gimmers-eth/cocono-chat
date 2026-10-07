@@ -5,8 +5,8 @@
 import { $, setStatus, fmtTime, confirmModal } from '../ui.js';
 import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
-import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData } from '../store.js';
-import { PS, resolvePeerState, peerStateIcon } from './peername.js';
+import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, loadPeerVerifications } from '../store.js';
+import { PS, resolvePeerState, peerStateIcon, verifiedBadgeEl } from './peername.js';
 import { refreshSettingsUI } from '../install.js';
 import { loadRegistry, applyTheme, savedTheme, wireThemeSelect } from '../theme.js';
 
@@ -37,6 +37,65 @@ export function createHome({ client, chat, onLogout }) {
     username = username.toLowerCase(); // display is always lowercase
     $('me-name').textContent = username;
     $('me-avatar').textContent = username.slice(0, 1);
+    renderIdentity();
+  }
+
+  // --- identity verification (admin-checked real person; grey certificate) ---
+  // Entry points: the "Verify" link next to our own name, and the settings
+  // drawer section. Unverified is the DEFAULT; the link disappears once the
+  // admin flips the flag (with or without an ID on file).
+  async function renderIdentity() {
+    const state = $('idverify-state');
+    const btn = $('btn-id-doc');
+    const link = $('btn-self-verify');
+    let me = null;
+    try { me = await client.identity(); } catch { /* offline/no session */ }
+    if (!me) {
+      // no facts fetched: hide all affordances, assume nothing
+      link.hidden = true; btn.hidden = true; return;
+    }
+    $('me-verify-badge').replaceChildren(me.verified ? verifiedBadgeEl() : null);
+    link.hidden = !!me.verified; // the top-left entry only while unverified
+    if (me.verified) {
+      btn.hidden = true;
+      if (state) state.textContent = 'Verified — your name carries the grey certificate.';
+      return;
+    }
+    if (me.idDoc) {
+      btn.hidden = false; // re-upload allowed before review
+      if (state) state.textContent = `ID photo submitted ${new Date(me.idDoc.uploadedAt).toLocaleDateString()} — waiting for review.`;
+      return;
+    }
+    btn.hidden = false;
+    if (state) state.textContent = 'Not verified. Upload a photo of your ID so a human can confirm this account is really you.';
+  }
+
+  async function uploadIdDoc(file) {
+    const state = $('idverify-state');
+    if (!file) return;
+    if (!['image/png', 'image/jpeg'].includes(file.type)) {
+      return setStatus($('drawer-status'), 'ID photo must be a PNG or JPEG.', true);
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      return setStatus($('drawer-status'), 'ID photo must be 5 MB or smaller.', true);
+    }
+    const dataUrl = await new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result);
+      fr.onerror = () => reject(fr.error ?? new Error('read failed'));
+      fr.readAsDataURL(file);
+    });
+    const b64 = String(dataUrl).split(',')[1] ?? '';
+    const b64u = b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    try {
+      setStatus(state, 'Uploading…');
+      await client.submitIdDoc(file.type, b64u);
+      setStatus($('drawer-status'), 'ID photo uploaded — the admin will review it.');
+      await renderIdentity();
+    } catch (err) {
+      setStatus($('drawer-status'), err.message ?? String(err), true);
+      await renderIdentity();
+    }
   }
 
   function paintConnection(state) {
@@ -47,7 +106,9 @@ export function createHome({ client, chat, onLogout }) {
 
   async function renderConversationList() {
     const list = $('conversation-list');
-    const [all, friends, pins] = await Promise.all([allMessages(), loadFriends(), loadPins()]);
+    const [all, friends, pins, peerVerified] = await Promise.all(
+      [allMessages(), loadFriends(), loadPins(), loadPeerVerifications()],
+    );
     const latestByPeer = new Map();
     for (const m of all) {
       const cur = latestByPeer.get(m.peer);
@@ -93,6 +154,7 @@ export function createHome({ client, chat, onLogout }) {
       });
       name.replaceChildren(peerStateIcon(state));
       name.append(peer);
+      if (peerVerified.get(peer)?.verified) name.append(verifiedBadgeEl());
       name.classList.toggle('gone', state === PS.GONE);
       const preview = document.createElement('span');
       preview.className = 'convo-last';
@@ -231,6 +293,19 @@ export function createHome({ client, chat, onLogout }) {
       peerInput.value = '';
       newChat.paint();
       chat.openChat(p);
+    });
+
+    // Identity verification: the top-left link is a shortcut into the
+    // settings section; the drawer handles the actual upload.
+    $('btn-self-verify').addEventListener('click', () => {
+      openSettings();
+      $('id-doc-input')?.closest('.drawer-body')?.scrollIntoView?.({ block: 'center' });
+    });
+    $('btn-id-doc').addEventListener('click', () => $('id-doc-input').click());
+    $('id-doc-input').addEventListener('change', (e) => {
+      const file = e.target.files?.[0];
+      e.target.value = ''; // allow re-picking the same file
+      uploadIdDoc(file);
     });
 
     $('btn-logout').addEventListener('click', () => {

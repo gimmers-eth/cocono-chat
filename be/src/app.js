@@ -72,6 +72,7 @@ export async function buildApp({ mongo, redis, config, feRoot, sdkRoot }) {
     diagnostics: mongo.db.collection('diagnostics'),
     settings: mongo.db.collection('settings'),
     messages: mongo.db.collection('messages'),
+    idDocs: mongo.db.collection('id_docs'),
   };
   await app.register(appRoutes, ctx);
   await app.register(wsRoutes, ctx);

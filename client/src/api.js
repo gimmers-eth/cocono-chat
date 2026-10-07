@@ -42,6 +42,10 @@ export class Api {
     return this.#request('/api/me', { token });
   }
 
+  submitIdDoc(token, { contentType, data }) {
+    return this.#request('/api/me/verify-id', { method: 'POST', body: { contentType, data }, token });
+  }
+
   // --- friends (one-way trust list; server = source of truth) ---
   listFriends(token) {
     return this.#request('/api/me/friends', { token });

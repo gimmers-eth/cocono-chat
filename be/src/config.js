@@ -121,6 +121,18 @@ export const config = {
   diagAccountLimit: numOf(env.DIAG_ACCOUNT_LIMIT, 30),
   diagAccountWindowSec: numOf(env.DIAG_ACCOUNT_WINDOW_SEC, 24 * 3600),
   wsHeartbeatSec: numOf(env.WS_HEARTBEAT_SEC, 30),
+
+  // Identity verification (real-person check by the admin, distinct from
+  // the peer trust ladder):
+  // - unverified accounts may only message people who ADDED them as a
+  //   friend, or who MESSAGED them first — no cold-messaging the directory.
+  // - users upload an ID photo (image only, size-capped) via the app;
+  //   only the admin can flip the verified flag, and can purge the image.
+  coldSendRequiresVerification: env.COLD_SEND_REQUIRES_VERIFICATION !== 'false',
+  idDocMaxBytes: numOf(env.ID_DOC_MAX_BYTES, 5 * 1024 * 1024),
+  idDocIpLimit: numOf(env.ID_DOC_IP_LIMIT, 10),
+  idDocAccountLimit: numOf(env.ID_DOC_ACCOUNT_LIMIT, 5),
+  idDocWindowSec: numOf(env.ID_DOC_WINDOW_SEC, 24 * 3600),
 };
 
 config.jwtSecretInsecure = config.jwtSecret === 'dev-secret-change-me' || config.jwtSecret.length < 32;

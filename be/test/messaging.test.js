@@ -482,3 +482,58 @@ test('ws presence frame: blur releases presence, focus restores it', async () =>
     await ctx.teardown();
   }
 });
+
+test('messaging: cold-send policy — unverified senders only reach friend-adders and prior contacts', async () => {
+  const ctx = await setupLive({ coldSendRequiresVerification: true });
+  try {
+    const alice = await createUser(ctx, makeClient(), 'alice');
+    const bobby = await createUser(ctx, makeClient(), 'bobby');
+    const carol = await createUser(ctx, makeClient(), 'carol');
+    const wsA = await connectWs(ctx.port, alice.token);
+    const wsB = await connectWs(ctx.port, bobby.token);
+    await wsA.waitFor((m) => m.type === 'hello');
+    await wsB.waitFor((m) => m.type === 'hello');
+
+    // 1) stranger cold send is rejected for the unverified
+    const cid1 = 'cid-cold-1';
+    wsA.send({ type: 'msg', msg: buildEnvelope(alice, bobby, bobby.d, cid1).env });
+    const ack1 = await wsA.waitFor((m) => m.type === 'ack' && m.cid === cid1);
+    assert.equal(ack1.ok, false);
+    assert.equal(ack1.error, 'verify_required');
+
+    // 2) same in the other direction while nothing connects them
+    const cid2 = 'cid-cold-2';
+    wsB.send({ type: 'msg', msg: buildEnvelope(bobby, alice, alice.d, cid2).env });
+    const ack2 = await wsB.waitFor((m) => m.type === 'ack' && m.cid === cid2);
+    assert.equal(ack2.ok, false);
+
+    // 3) recipient ADDS the sender as friend -> sender may now message them
+    const add = await ctx.app.inject({
+      method: 'PUT', url: `/api/me/friends/${alice.ul}`,
+      headers: { authorization: `Bearer ${bobby.token}` },
+    });
+    assert.equal(add.statusCode, 200);
+    const cid3 = 'cid-friend-1';
+    wsA.send({ type: 'msg', msg: buildEnvelope(alice, bobby, bobby.d, cid3).env });
+    const ack3 = await wsA.waitFor((m) => m.type === 'ack' && m.cid === cid3);
+    assert.equal(ack3.ok, true, JSON.stringify(ack3));
+
+    // 4) once someone messaged you first, you may ALWAYS reply (even unverified)
+    const cid4 = 'cid-reply-1';
+    wsB.send({ type: 'msg', msg: buildEnvelope(bobby, alice, alice.d, cid4).env });
+    const ack4 = await wsB.waitFor((m) => m.type === 'ack' && m.cid === cid4);
+    assert.equal(ack4.ok, true, JSON.stringify(ack4));
+
+    // 5) verified accounts cold-send freely (admin flipped the flag)
+    await ctx.mongo.db.collection('users').updateOne({ ul: 'alice' }, { $set: { verified: true } });
+    const cid5 = 'cid-verified-1';
+    wsA.send({ type: 'msg', msg: buildEnvelope(alice, carol, carol.d, cid5).env });
+    const ack5 = await wsA.waitFor((m) => m.type === 'ack' && m.cid === cid5);
+    assert.equal(ack5.ok, true, JSON.stringify(ack5));
+
+    wsA.ws.close();
+    wsB.ws.close();
+  } finally {
+    await ctx.teardown();
+  }
+});

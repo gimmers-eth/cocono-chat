@@ -58,6 +58,12 @@ export function peerStateIcon(state) {
   return iconEl(key, cls);
 }
 
+/** Grey certificate shown after names of ID-verified accounts (admin-
+ *  checked real persons) — independent of the peer trust ladder. */
+export function verifiedBadgeEl() {
+  return iconEl('verifyBadge', 'verify-badge');
+}
+
 /**
  * Inline-flex tag: icon + username (italic for gone). Returns the wrapper
  * so callers can drop it straight into a row/title.

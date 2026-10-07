@@ -14,10 +14,11 @@
 //   message store on purpose: clearing a chat never unfriends anyone.
 
 const DB_PREFIX = 'cocono-app';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const MESSAGES = 'messages';
 const FRIENDS = 'friends';
 const PINS = 'pins';
+const PEERS = 'peers'; // lightweight facts seen via peerKeys (identity-verified badge)
 
 let scope = 'anon';
 let dbPromise = null;
@@ -68,6 +69,9 @@ function openDb() {
         }
         if (!db.objectStoreNames.contains(PINS)) {
           db.createObjectStore(PINS, { keyPath: 'peer' });
+        }
+        if (!db.objectStoreNames.contains(PEERS)) {
+          db.createObjectStore(PEERS, { keyPath: 'peer' });
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -220,6 +224,21 @@ export async function setFriends(entries) {
 export const FRIENDS_EVENT = 'cocono:friends';
 function notifyFriends() {
   window.dispatchEvent(new Event(FRIENDS_EVENT));
+}
+
+// --- peer facts cache (grey "identity verified" certificate badge) ---
+// Filled whenever we resolve a peer's keys (chat open/send); the sidebar
+// renders badges from here without per-row network calls.
+
+export async function rememberPeerVerified(peer, verified) {
+  await withStore('readwrite', (s) => s.put({ peer: String(peer).toLowerCase(), verified: !!verified }), PEERS);
+}
+
+export async function loadPeerVerifications() {
+  const rows = await withStore('readonly', (s) => s.getAll(), PEERS);
+  const map = new Map();
+  for (const r of rows ?? []) map.set(r.peer, !!r.verified);
+  return map;
 }
 
 // --- identity pins (TOFU + change detection; independent of friendship) ---

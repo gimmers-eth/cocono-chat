@@ -389,6 +389,23 @@ export class CoconoClient extends Emitter {
   }
 
   /**
+   * Own identity-verification state (admin-reviewed real-person check,
+   * distinct from the peer trust ladder): {verified, idDoc}.
+   */
+  async identity() {
+    return this.api.me(this.#requireToken());
+  }
+
+  /**
+   * Upload an ID-document photo for the admin to review.
+   * @param {string} contentType image/png or image/jpeg
+   * @param {string} data base64url bytes
+   */
+  async submitIdDoc(contentType, data) {
+    return this.api.submitIdDoc(this.#requireToken(), { contentType, data });
+  }
+
+  /**
    * Record "we compared the safety numbers" for a bound user. Stored on
    * the SERVER (account-level) so it propagates to every device: live ones
    * via the friend-v sys message, offline/new ones via listFriends().

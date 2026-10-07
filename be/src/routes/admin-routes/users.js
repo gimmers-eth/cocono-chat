@@ -6,15 +6,21 @@ import { cleanupAccountState, purgeFriendReferences } from '../../lib/accountSta
 // existing devices keep working, no new ones can be added).
 const MAX_DEVICES_CAP = 1000;
 
-// GET /api/admin/users, PATCH max-devices, DELETE user, DELETE device.
-export default async function usersRoutes(app, { users, redis, messages }) {
+// GET /api/admin/users, PATCH max-devices, DELETE user, DELETE device,
+// PUT verified (identity-verification toggle), GET/DELETE id-doc (review).
+export default async function usersRoutes(app, { users, redis, messages, idDocs }) {
   app.get('/api/admin/users', async () => {
     const docs = await users.find({}, { projection: { _id: 0 } }).sort({ ul: 1 }).toArray();
+    const metas = await idDocs.find({}, { projection: { ul: 1, contentType: 1, uploadedAt: 1, _id: 0 } }).toArray();
+    const byUl = new Map(metas.map((d) => [d.ul, d]));
     return docs.map((doc) => ({
       u: doc.u,
       ul: doc.ul,
       createdAt: doc.createdAt,
       maxDevices: doc.maxDevices,
+      verified: !!doc.verified,
+      verifiedAt: doc.verifiedAt ?? null,
+      idDoc: byUl.get(doc.ul) ?? null,
       devices: (doc.devices ?? []).map((dev) => ({
         id: dev.id,
         main: dev.main ?? false,
@@ -22,6 +28,40 @@ export default async function usersRoutes(app, { users, redis, messages }) {
         lastSeenAt: dev.lastSeenAt,
       })),
     }));
+  });
+
+  // PUT /api/admin/users/:username/verified {verified} — the admin toggle.
+  // Admins may verify with or without an ID document on file.
+  app.put('/api/admin/users/:username/verified', async (request, reply) => {
+    const ul = request.params.username.toLowerCase();
+    const { verified } = request.body ?? {};
+    if (typeof verified !== 'boolean') {
+      return fail(reply, 'invalid_request', 'verified must be a boolean', 400);
+    }
+    const res = await users.updateOne(
+      { ul },
+      { $set: { verified, ...(verified ? { verifiedAt: new Date() } : { verifiedAt: null }) } },
+    );
+    if (!res.matchedCount) return fail(reply, 'unknown_account', 'No such user', 404);
+    return { ul, verified };
+  });
+
+  // GET /api/admin/users/:username/id-doc — the photo itself (admin-only,
+  // token-gated + loopback-bound surface).
+  app.get('/api/admin/users/:username/id-doc', async (request, reply) => {
+    const ul = request.params.username.toLowerCase();
+    const doc = await idDocs.findOne({ ul });
+    if (!doc?.data) return fail(reply, 'no_id_doc', 'No ID document for this user', 404);
+    return reply.type(doc.contentType ?? 'image/jpeg').send(Buffer.from(doc.data.buffer ?? doc.data));
+  });
+
+  // DELETE /api/admin/users/:username/id-doc — purge the photo once the
+  // review is done (verification state itself is kept).
+  app.delete('/api/admin/users/:username/id-doc', async (request, reply) => {
+    const ul = request.params.username.toLowerCase();
+    const { deletedCount } = await idDocs.deleteOne({ ul });
+    if (!deletedCount) return fail(reply, 'no_id_doc', 'No ID document for this user', 404);
+    return { deleted: true };
   });
 
   app.patch('/api/admin/users/:username/max-devices', async (request, reply) => {
@@ -41,6 +81,7 @@ export default async function usersRoutes(app, { users, redis, messages }) {
     if (!deletedCount) {
       return fail(reply, 'unknown_account', 'No such user', 404);
     }
+    await idDocs.deleteOne({ ul }); // never orphan an ID photo
     await cleanupAccountState(redis, ul);
     await purgeFriendReferences(users, ul);
     if (messages) {
@@ -69,6 +110,7 @@ export default async function usersRoutes(app, { users, redis, messages }) {
     // hook re-checks membership and the account is gone.
     if (after.devices.length === 0) {
       await users.deleteOne({ ul });
+      await idDocs.deleteOne({ ul }); // never orphan an ID photo
       await cleanupAccountState(redis, ul);
       await purgeFriendReferences(users, ul);
       if (messages) await messages.deleteMany({ $or: [{ 'to.ul': ul }, { 'from.ul': ul }] });

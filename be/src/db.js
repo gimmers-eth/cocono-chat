@@ -19,6 +19,9 @@ export async function connectMongo(url) {
   );
   // Diagnostics reports ('Send diagnostics' button): auto-expire after 30 days.
   await db.collection('diagnostics').createIndex({ ts: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 });
+  // Identity-verification document photos (image binaries; ONLY the admin
+  // reads them; deleted on demand after review — see VERIFICATION docs).
+  await db.collection('id_docs').createIndex({ ul: 1 }, { unique: true });
   // Store-and-forward message queue (milestone 3): one doc per recipient
   // device, deleted once that device pulls it.
   const messages = db.collection('messages');

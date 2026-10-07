@@ -35,10 +35,23 @@ export function createHandlers({ users, redis, pub, config, messages }) {
 
     // Recipient account + device must exist.
     const rul = m.u.toLowerCase();
-    const recipient = await users.findOne({ ul: rul }, { projection: { devices: 1 } });
+    const recipient = await users.findOne({ ul: rul }, { projection: { devices: 1, friends: 1 } });
     const recipientDevice = recipient?.devices.find((dev) => dev.id === m.dv);
     if (!recipient || !recipientDevice) {
       return ack(false, 'unknown_recipient');
+    }
+
+    // Cold-send policy (identity verification): an UNVERIFIED account may
+    // only message someone who added them as a friend, or who messaged
+    // them first (so replies always work). Verified accounts may message
+    // anyone. This is the anti-spam gate a public messenger needs (P0 #1
+    // sibling): names alone cannot harvest the directory.
+    if (config.coldSendRequiresVerification && !sender.verified && rul !== auth.sub) {
+      const addedMe = (recipient.friends ?? []).some((f) => (typeof f === 'string' ? f : f.u) === auth.sub);
+      if (!addedMe) {
+        const firstContact = await messages.findOne({ 'from.ul': rul, 'to.ul': auth.sub }, { projection: { _id: 1 } });
+        if (!firstContact) return ack(false, 'verify_required');
+      }
     }
 
     const doc = {

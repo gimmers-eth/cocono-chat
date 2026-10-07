@@ -12,13 +12,13 @@
 import { $, setStatus, setChatOpen, fmtTime, confirmModal } from '../ui.js';
 import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
-import { PS, resolvePeerState, peerStateIcon } from './peername.js';
+import { PS, resolvePeerState, peerStateIcon, verifiedBadgeEl } from './peername.js';
 import { safetyNumber } from '../identity.js';
 import {
   saveMessage, updateMessage, messagesWith, markRead, allMessages,
   getMessage, deleteMessage, clearMessages,
   loadFriends, friendAdd, friendDel, friendMarkFlags, FRIENDS_EVENT,
-  getPin, recordPinSeen, markPeerGone,
+  getPin, recordPinSeen, markPeerGone, rememberPeerVerified,
 } from '../store.js';
 
 // In-app banner (visible-but-other-chat) + OS notification (app hidden or
@@ -71,6 +71,8 @@ export function createChat({ client, onHomeRefresh }) {
   // recordPinSeen) and the live identity key seen from peerKeys
   let pinState = 'ok';
   let peerIdentity = null;
+  // admin-checked real-person flag of the open peer (grey certificate)
+  let peerIdentityVerified = false;
 
   // --- SDK event wiring (once) ---
 
@@ -495,6 +497,7 @@ export function createChat({ client, onHomeRefresh }) {
     $('chatopts-menu-view').hidden = false;
     $('chatopts-identity-view').hidden = true;
     $('chatopts-title').textContent = currentPeer;
+    $('chatopts-badge').replaceChildren(peerIdentityVerified ? verifiedBadgeEl() : null);
     const ent = await friendEntryFor(currentPeer);
     const pin = await getPin(currentPeer);
     const state = trustState(ent, pin);
@@ -702,6 +705,9 @@ export function createChat({ client, onHomeRefresh }) {
       // device of ours — server delete + our own sys broadcast converge the
       // mirrors; the warning strip then shows the stranger state.
       peerIdentity = peer?.id ?? null;
+      peerIdentityVerified = !!peer?.verified;
+      $('chat-peer-badge').replaceChildren(peerIdentityVerified ? verifiedBadgeEl() : null);
+      if (peer) await rememberPeerVerified(currentPeer, peerIdentityVerified);
       // Persist "this account is gone / is back" for the sidebar: it only
       // learns from the local mirror, and the server purges dead names from
       // friends lists. Skipped in pure-offline mode (no facts learned).

@@ -90,6 +90,8 @@
         <div class="me">
           <span id="me-avatar" class="avatar" aria-hidden="true"></span>
           <span id="me-name" class="me-name"></span>
+          <span id="me-verify-badge"></span>
+          <button id="btn-self-verify" class="linkish verify-link" hidden title="Verify your identity">Verify</button>
         </div>
         <div class="side-actions">
           <span id="ws-dot" class="dot dot-off" title="connection"></span>
@@ -127,7 +129,7 @@
         <header class="chat-head">
           <button id="btn-chat-back" class="icon-btn back" title="Close conversation" data-icon="back"></button>
           <div class="chat-peer">
-            <span class="chat-peer-name"><span id="chat-peer-status" class="peer-status"></span><span id="chat-peer"></span></span>
+            <span class="chat-peer-name"><span id="chat-peer-status" class="peer-status"></span><span id="chat-peer"></span><span id="chat-peer-badge" class="badge-slot"></span></span>
             <span id="chat-sub" class="muted small"></span>
           </div>
           <button id="btn-chat-menu" class="icon-btn chat-menu-btn" title="Chat options" aria-haspopup="true" data-icon="menu"></button>
@@ -188,6 +190,14 @@
       </label>
       <p id="notify-hint" class="muted small"></p>
 
+      <h3>Identity verification</h3>
+      <p id="idverify-state" class="muted small">…</p>
+      <div class="row-actions">
+        <input id="id-doc-input" type="file" accept="image/png,image/jpeg" hidden />
+        <button id="btn-id-doc" class="btn btn-small" hidden>Upload ID photo</button>
+      </div>
+      <p class="muted small">A photo of your ID is shown only to the service admin so a human can confirm the account belongs to a real person. Once confirmed it can be deleted; verified accounts get a grey certificate. You can also be verified without an ID at the admin's discretion. This does not replace verifying a contact's safety number.</p>
+
       <h3>Diagnostics</h3>
       <button id="btn-diag-send-drawer" class="btn btn-small">Send diagnostics</button>
 
@@ -234,7 +244,7 @@
   <div id="chatopts-overlay" class="overlay" hidden></div>
   <aside id="chatopts-modal" class="side-menu" role="dialog" aria-modal="true" aria-labelledby="chatopts-title" tabindex="-1" hidden>
     <div id="chatopts-menu-view">
-      <h2 class="side-menu-title">Chat options — <span id="chatopts-peer-status" class="peer-status"></span><span id="chatopts-title"></span></h2>
+      <h2 class="side-menu-title">Chat options — <span id="chatopts-peer-status" class="peer-status"></span><span id="chatopts-title"></span><span id="chatopts-badge" class="badge-slot"></span></h2>
       <ul class="menu-list">
         <li class="menu-row">
           <button id="btn-chat-friend" class="menu-action"></button>
