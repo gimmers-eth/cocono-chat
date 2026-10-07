@@ -51,6 +51,14 @@ export async function buildApp({ mongo, redis, config, feRoot, sdkRoot }) {
   // M4 fix: strict same-origin security headers on every response.
   registerSecurityHeaders(app);
 
+// API data (bios, avatars, friends, stats) changes server-side at any time —
+// heuristic browser caching of these JSON GETs makes profiles show stale
+// photos. Statics keep their no-cache/ETag handling; /api/* is never cached.
+app.addHook('onSend', async (request, reply, payload) => {
+  if (request.url.startsWith('/api/')) reply.header('cache-control', 'no-store');
+  return payload;
+});
+
   // Parse the bearer token up front; routes decide whether to require it.
   // H4 fix: also re-check that the token's device is still registered — a
   // removed device loses access immediately, not at token expiry.

@@ -191,6 +191,10 @@ export function createHome({ client, chat, onLogout }) {
       }
       pendingBioSaved = pendingBioSaved ?? bio;
       $('profile-bio-count').textContent = String(field.value.length);
+      // the owner fetch is the freshest source there is — push it into the
+      // shared cache so side-head + sidebar + preview all agree immediately
+      const selfUl = String(client.username ?? '').toLowerCase();
+      if (selfUl) rememberPeerAvatar(selfUl, me.avatar ?? null);
       pendingAvatar = null;
       paintOwnAvatar(me.avatar);
     } catch (err) {

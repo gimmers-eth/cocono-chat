@@ -779,6 +779,7 @@ export function createChat({ client, onHomeRefresh }) {
     let me = null, prof = null, stats = null;
     try { me = await client.identity(); } catch { /* offline */ }
     try { prof = await client.viewProfile(meUl); } catch { /* offline */ }
+    if (prof) Promise.resolve(rememberPeerAvatar(meUl, prof.avatar ?? null)).catch(() => {});
     try { stats = await client.userStats(meUl); } catch { /* offline */ }
     $('profile-name').textContent = meUl;
     // No me.verified gate here: the profile endpoint already IS the policy
@@ -1265,7 +1266,7 @@ export function createChat({ client, onHomeRefresh }) {
     // delegated lightbox: ANY rendered avatar photo zooms, whenever it exists
     document.addEventListener('click', (e) => {
       const el = e.target;
-      if (el && el.tagName === 'IMG' && el.src && !el.hidden && el.closest('#profile-modal, #tabpanel-profile, #chat-head')) {
+      if (el && el.tagName === 'IMG' && el.src && !el.hidden && el.closest('#profile-modal, #tabpanel-profile')) {
         openLightbox(el.src);
       }
     });
