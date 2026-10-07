@@ -58,10 +58,13 @@ export function peerStateIcon(state) {
   return iconEl(key, cls);
 }
 
-/** Grey certificate shown after names of ID-verified accounts (admin-
- *  checked real persons) — independent of the peer trust ladder. */
-export function verifiedBadgeEl() {
-  return iconEl('verifyBadge', 'verify-badge');
+/**
+ * Red exclamation shown after the name of accounts WITHOUT admin identity
+ * verification. Verified accounts render clean; the grey certificate is
+ * RESERVED for future premium status — do not reuse it here.
+ */
+export function unverifiedBadgeEl() {
+  return iconEl('identityAlert', 'verify-badge');
 }
 
 /**

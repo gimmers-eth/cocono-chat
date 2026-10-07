@@ -6,7 +6,7 @@ import { $, setStatus, fmtTime, confirmModal } from '../ui.js';
 import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
 import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, loadPeerVerifications } from '../store.js';
-import { PS, resolvePeerState, peerStateIcon, verifiedBadgeEl } from './peername.js';
+import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl } from './peername.js';
 import { refreshSettingsUI } from '../install.js';
 import { loadRegistry, applyTheme, savedTheme, wireThemeSelect } from '../theme.js';
 
@@ -40,10 +40,11 @@ export function createHome({ client, chat, onLogout }) {
     renderIdentity();
   }
 
-  // --- identity verification (admin-checked real person; grey certificate) ---
-  // Entry points: the "Verify" link next to our own name, and the settings
-  // drawer section. Unverified is the DEFAULT; the link disappears once the
-  // admin flips the flag (with or without an ID on file).
+  // --- identity verification (admin-checked real person; red notice until done) ---
+  // Entry points: the "Get verified" link next to our own name, and the
+  // settings drawer section. Unverified is the DEFAULT. (The admin can also
+  // verify an account directly — internal ops capability, not advertised
+  // in user-facing copy.)
   async function renderIdentity() {
     const state = $('idverify-state');
     const btn = $('btn-id-doc');
@@ -54,11 +55,12 @@ export function createHome({ client, chat, onLogout }) {
       // no facts fetched: hide all affordances, assume nothing
       link.hidden = true; btn.hidden = true; return;
     }
-    $('me-verify-badge').replaceChildren(me.verified ? verifiedBadgeEl() : null);
+    $('me-verify-badge').replaceChildren(); // no badge on our own name;
+    // the "Get verified" link conveys the unverified state
     link.hidden = !!me.verified; // the top-left entry only while unverified
     if (me.verified) {
       btn.hidden = true;
-      if (state) state.textContent = 'Verified — your name carries the grey certificate.';
+      if (state) state.textContent = 'Verified — the red notice no longer appears next to your name.';
       return;
     }
     if (me.idDoc) {
@@ -154,7 +156,9 @@ export function createHome({ client, chat, onLogout }) {
       });
       name.replaceChildren(peerStateIcon(state));
       name.append(peer);
-      if (peerVerified.get(peer)?.verified) name.append(verifiedBadgeEl());
+      // red circle for accounts WITHOUT admin identity verification;
+      // only when we actually looked the peer up (Map value false, not undefined)
+      if (peerVerified.get(peer) === false) name.append(unverifiedBadgeEl());
       name.classList.toggle('gone', state === PS.GONE);
       const preview = document.createElement('span');
       preview.className = 'convo-last';

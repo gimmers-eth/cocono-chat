@@ -152,16 +152,21 @@ is the only FE (audits mentioning `fe/` are historical).
   them as a friend, or who MESSAGED them first (cold-send gate, config
   `COLD_SEND_REQUIRES_VERIFICATION`, enforced in the WS send path — ack
   `verify_required` surfaces as the failed state on the bubble). Users start
-  the process from the "Verify" link next to their own name or the settings
-  drawer: upload an ID photo (PNG/JPEG ≤ `ID_DOC_MAX_BYTES`, bodyLimit
-  route-scoped, rate-limited per IP + account, never returned to the app).
-  The admin panel lists the photo per user (view → blob in a new tab,
-  delete after review) and can flip **verified** for anyone, with or without
-  an ID (404-guarded; account purge deletes the photo too). Verified accounts
-  carry a grey `fa-certificate` badge after their name everywhere: sidebar,
-  chat header, chat options (peerKeys now exposes `verified`; cached in the
-  per-account IDB `peers` store, DB v4). Tests: `be/test/verification.test.js`
-  + the cold-send policy suite in `messaging.test.js`.
+  the process from the orange "Get verified" link next to their own name or
+  the settings drawer: upload an ID photo (PNG/JPEG ≤ `ID_DOC_MAX_BYTES`,
+  bodyLimit route-scoped, rate-limited per IP + account, never returned to
+  the app). The admin panel lists the photo per user (view → blob in a new
+  tab, delete after review) and can flip **verified** for anyone — including
+  WITHOUT an ID on file, a need-to-know ops capability deliberately absent
+  from user-facing copy (404-guarded; account purge deletes the photo too).
+  UNverified accounts carry a red `fa-circle-exclamation` after their name
+  everywhere (sidebar, chat header, chat options); verified ones render
+  clean, and the grey `fa-certificate` is RESERVED for future premium
+  status (peerKeys exposes `verified`; cached in the per-account IDB
+  `peers` store, DB v4; rendered via `peername.js`, which also fixed a
+  literal-"null" text-node bug in the badge slots). Tests:
+  `be/test/verification.test.js` + the cold-send policy suite in
+  `messaging.test.js`.
 - **Offline shell**: network-first SW caching of statics; app boots offline
   into read-only mode from IndexedDB (login failure w/ network error enters
   the app); online event promotes to live session.

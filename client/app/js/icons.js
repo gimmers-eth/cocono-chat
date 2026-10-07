@@ -36,8 +36,8 @@ export const ICONS = {
   friendAdd: 'fa-user-shield',      // action: add as friend
   friendRemove: 'fa-user-minus',    // action: remove (red)
   identity: 'fa-fingerprint',       // safety-number panel
-  verifyBadge: 'fa-certificate',    // ID-verified account (grey, after name)
-  idUpload: 'fa-id-card',           // identity verification (ID photo)
+  verifyBadge: 'fa-certificate',    // RESERVED for premium status — not ID verification
+  identityAlert: 'fa-circle-exclamation', // peer is NOT identity-verified (red)
 
   // message status marks
   stateSending: 'fa-clock',

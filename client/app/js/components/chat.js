@@ -12,7 +12,7 @@
 import { $, setStatus, setChatOpen, fmtTime, confirmModal } from '../ui.js';
 import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
-import { PS, resolvePeerState, peerStateIcon, verifiedBadgeEl } from './peername.js';
+import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl } from './peername.js';
 import { safetyNumber } from '../identity.js';
 import {
   saveMessage, updateMessage, messagesWith, markRead, allMessages,
@@ -71,8 +71,16 @@ export function createChat({ client, onHomeRefresh }) {
   // recordPinSeen) and the live identity key seen from peerKeys
   let pinState = 'ok';
   let peerIdentity = null;
-  // admin-checked real-person flag of the open peer (grey certificate)
+  // admin-checked real-person flag of the open peer; KNOWN only when a
+  // key lookup actually succeeded (offline/ghost chats show no badge)
   let peerIdentityVerified = false;
+  let peerIdentityKnown = false;
+
+  // red circle for unverified peers, clean for verified — never pass null
+  // into replaceChildren (it stringifies to a literal "null" text node)
+  function renderIdentityBadge(badgeEl) {
+    badgeEl.replaceChildren(...(peerIdentityKnown && !peerIdentityVerified ? [unverifiedBadgeEl()] : []));
+  }
 
   // --- SDK event wiring (once) ---
 
@@ -497,7 +505,7 @@ export function createChat({ client, onHomeRefresh }) {
     $('chatopts-menu-view').hidden = false;
     $('chatopts-identity-view').hidden = true;
     $('chatopts-title').textContent = currentPeer;
-    $('chatopts-badge').replaceChildren(peerIdentityVerified ? verifiedBadgeEl() : null);
+    renderIdentityBadge($('chatopts-badge'));
     const ent = await friendEntryFor(currentPeer);
     const pin = await getPin(currentPeer);
     const state = trustState(ent, pin);
@@ -705,8 +713,9 @@ export function createChat({ client, onHomeRefresh }) {
       // device of ours — server delete + our own sys broadcast converge the
       // mirrors; the warning strip then shows the stranger state.
       peerIdentity = peer?.id ?? null;
+      peerIdentityKnown = !!peer;
       peerIdentityVerified = !!peer?.verified;
-      $('chat-peer-badge').replaceChildren(peerIdentityVerified ? verifiedBadgeEl() : null);
+      renderIdentityBadge($('chat-peer-badge'));
       if (peer) await rememberPeerVerified(currentPeer, peerIdentityVerified);
       // Persist "this account is gone / is back" for the sidebar: it only
       // learns from the local mirror, and the server purges dead names from
