@@ -162,47 +162,60 @@
       <button id="btn-settings-close" class="icon-btn" title="Close" data-icon="close"></button>
     </header>
     <div class="drawer-body">
-      <h3>Devices</h3>
-      <ul id="device-list" class="device-list"></ul>
-
-      <h3>Approve a new device</h3>
-      <div class="approve-code">
-        <input id="approve-input" type="text" inputmode="numeric" maxlength="6"
-               placeholder="6-digit pairing code" autocomplete="off" />
-        <button id="btn-approve" class="btn btn-accent">Review</button>
-      </div>
-      <p id="approve-preview" class="muted small" hidden></p>
-      <button id="btn-approve-confirm" class="btn btn-primary" hidden>Approve</button>
-
-      <h3>Appearance</h3>
-      <select id="theme-select" class="select" aria-label="Theme"></select>
-
-      <h3>App</h3>
-      <div class="row-actions">
-        <button id="btn-install-drawer" class="btn btn-small" hidden>Install app</button>
-        <span id="install-state" class="muted small"></span>
+      <div class="drawer-tabs" role="tablist" aria-label="Settings sections">
+        <button class="drawer-tab" data-tab="devices" role="tab" data-icon="tabDevices">Devices</button>
+        <button class="drawer-tab" data-tab="verify" role="tab" data-icon="tabVerify">Verify</button>
+        <button class="drawer-tab" data-tab="general" role="tab" data-icon="tabGeneral">General</button>
+        <button class="drawer-tab" data-tab="diagnostics" role="tab" data-icon="tabDiagnostics">Diagnostics</button>
       </div>
 
-      <h3>Notifications</h3>
-      <label class="switch-row">
-        <input id="notify-toggle" type="checkbox" />
-        <span>Push notifications on this device</span>
-      </label>
-      <p id="notify-hint" class="muted small"></p>
-
-      <h3>Identity verification</h3>
-      <p id="idverify-state" class="muted small">…</p>
-      <div class="row-actions">
-        <input id="id-doc-input" type="file" accept="image/png,image/jpeg" hidden />
-        <button id="btn-id-doc" class="btn btn-small" hidden>Upload ID photo</button>
+      <div id="tabpanel-devices">
+        <h3>Devices</h3>
+        <ul id="device-list" class="device-list"></ul>
+        <h3>Approve a new device</h3>
+        <div class="approve-code">
+          <input id="approve-input" type="text" inputmode="numeric" maxlength="6"
+                 placeholder="6-digit pairing code" autocomplete="off" />
+          <button id="btn-approve" class="btn btn-accent">Review</button>
+        </div>
+        <p id="approve-preview" class="muted small" hidden></p>
+        <button id="btn-approve-confirm" class="btn btn-primary" hidden>Approve</button>
       </div>
-      <p class="muted small">A photo of your ID is shown only to the service admin, so a human can confirm the account belongs to a real person. Once reviewed it is deleted. While unverified, your name carries a red notice to your contacts — verifying a contact's safety number is separate and remains your own check.</p>
 
-      <h3>Diagnostics</h3>
-      <button id="btn-diag-send-drawer" class="btn btn-small">Send diagnostics</button>
+      <div id="tabpanel-verify" hidden>
+        <h3>Identity verification</h3>
+        <p id="idverify-state" class="muted small">…</p>
+        <div class="row-actions">
+          <input id="id-doc-input" type="file" accept="image/png,image/jpeg" hidden />
+          <button id="btn-id-doc" class="btn btn-small" hidden>Upload ID photo</button>
+        </div>
+        <p class="muted small">A photo of your ID is shown only to the service admin, so a human can confirm the account belongs to a real person. Once reviewed it is deleted. While unverified, your name carries a red notice to your contacts — verifying a contact's safety number is separate and remains your own check.</p>
+      </div>
 
-      <!-- In-drawer feedback (devices, pairing codes…) — the sidebar status
-           line is hidden behind this drawer, so settings actions report here. -->
+      <div id="tabpanel-general" hidden>
+        <h3>Appearance</h3>
+        <select id="theme-select" class="select" aria-label="Theme"></select>
+        <h3>App</h3>
+        <div class="row-actions">
+          <button id="btn-install-drawer" class="btn btn-small" hidden>Install app</button>
+          <span id="install-state" class="muted small"></span>
+        </div>
+        <h3>Notifications</h3>
+        <label class="switch-row">
+          <input id="notify-toggle" type="checkbox" />
+          <span>Push notifications on this device</span>
+        </label>
+        <p id="notify-hint" class="muted small"></p>
+      </div>
+
+      <div id="tabpanel-diagnostics" hidden>
+        <h3>Diagnostics</h3>
+        <button id="btn-diag-send-drawer" class="btn btn-small">Send diagnostics</button>
+      </div>
+
+      <!-- In-drawer feedback (devices, pairing codes, verification…) — the
+           sidebar status line is hidden behind this drawer, so settings
+           actions report here; visible on every tab. -->
       <p id="drawer-status" class="status" role="status"></p>
     </div>
   </section>

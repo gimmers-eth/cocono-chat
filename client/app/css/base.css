@@ -314,6 +314,20 @@ img.logo { object-fit: cover; background: none; }
 .convo-last i { font-size: .72rem; margin: 0 .15em; color: var(--muted); }
 .chat-warn i { margin-right: .45em; }
 
+/* Settings drawer tabs (Devices / Verify / General / Diagnostics) */
+.drawer-tabs {
+  display: flex; gap: .2rem; border-bottom: 1px solid var(--border);
+  margin: .2rem 0 .6rem; overflow-x: auto; scrollbar-width: none;
+}
+.drawer-tab {
+  background: none; border: 0; border-bottom: 2px solid transparent;
+  color: var(--muted); padding: .45rem .65rem; white-space: nowrap;
+  border-radius: 8px 8px 0 0; font-size: .9rem;
+}
+.drawer-tab i { margin-right: .4em; }
+.drawer-tab:hover { color: var(--text); background: var(--panel-raised); }
+.drawer-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
 /* Chat options: right-hand side menu over the translucent scrim. */
 .side-menu {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 50;

@@ -15,15 +15,42 @@ const MSG_STATE_ICON = { sending: 'stateSending', sent: 'stateSent', delivered: 
 export function createHome({ client, chat, onLogout }) {
   let settingsOpen = false;
 
-  function openSettings() {
-    if (settingsOpen) return;
-    settingsOpen = true;
-    $('drawer-overlay').hidden = false;
-    $('settings-drawer').hidden = false;
-    renderDevices();
-    refreshSettingsUI();
-    wireThemePicker();
-    $('btn-settings-close').focus?.();
+  // ---- settings drawer tabs ----
+  const SETTINGS_TABS = ['devices', 'verify', 'general', 'diagnostics'];
+  let settingsTab = 'devices';
+  try { settingsTab = localStorage.getItem('cocono.settings.tab') || 'devices'; } catch { /* private mode */ }
+  if (!SETTINGS_TABS.includes(settingsTab)) settingsTab = 'devices';
+
+  function showSettingsTab() {
+    for (const t of SETTINGS_TABS) {
+      const panel = $(`tabpanel-${t}`);
+      if (panel) panel.hidden = t !== settingsTab;
+    }
+    for (const btn of document.querySelectorAll('.drawer-tab')) {
+      const on = btn.dataset.tab === settingsTab;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-selected', String(on));
+    }
+  }
+
+  function selectSettingsTab(tab) {
+    settingsTab = SETTINGS_TABS.includes(tab) ? tab : 'devices';
+    try { localStorage.setItem('cocono.settings.tab', settingsTab); } catch { /* private mode */ }
+    showSettingsTab();
+  }
+
+  function openSettings(tab) {
+    if (settingsOpen && tab) selectSettingsTab(tab); // deep-link while open
+    if (!settingsOpen) {
+      settingsOpen = true;
+      $('drawer-overlay').hidden = false;
+      $('settings-drawer').hidden = false;
+      renderDevices();
+      refreshSettingsUI();
+      wireThemePicker();
+      $('btn-settings-close').focus?.();
+    }
+    showSettingsTab();
   }
 
   function closeSettings() {
@@ -319,12 +346,13 @@ export function createHome({ client, chat, onLogout }) {
       chat.openChat(p);
     });
 
-    // Identity verification: the top-left link is a shortcut into the
-    // settings section; the drawer handles the actual upload.
-    $('btn-self-verify').addEventListener('click', () => {
-      openSettings();
-      $('id-doc-input')?.closest('.drawer-body')?.scrollIntoView?.({ block: 'center' });
+    // Identity verification: the top-left "Get verified" link deep-links
+    // straight into the drawer's Verify tab; tabs persist across opens.
+    document.querySelector('.drawer-tabs')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.drawer-tab');
+      if (btn) selectSettingsTab(btn.dataset.tab);
     });
+    $('btn-self-verify').addEventListener('click', () => openSettings('verify'));
     $('btn-id-doc').addEventListener('click', () => $('id-doc-input').click());
     $('id-doc-input').addEventListener('change', (e) => {
       const file = e.target.files?.[0];
