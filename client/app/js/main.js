@@ -10,6 +10,7 @@ import { createAuth } from './components/auth.js';
 import { createHome } from './components/home.js';
 import { createChat } from './components/chat.js';
 import { setScope } from './store.js';
+import { initKeyboardFit } from './keyboard.js';
 import { mountDiagnostics } from './diag.js';
 import { initInstallAndNotify } from './install.js';
 import { putAppTitle } from './swkv.js';
@@ -125,6 +126,7 @@ async function showAuth() {
 
 // Boot — wire every component exactly once, then route.
 startSingleTabGuard();
+initKeyboardFit(); // pin the app shell to the visible viewport (soft keyboard)
 await initTheme(); // dark fallback already linked in index.html
 mountDiagnostics({ client });
 initInstallAndNotify({ client });

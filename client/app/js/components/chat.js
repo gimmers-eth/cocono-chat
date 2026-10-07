@@ -151,6 +151,9 @@ export function createChat({ client, onHomeRefresh }) {
       markRead(currentPeer, Date.now());
       await render();
       onHomeRefresh?.();
+      // Multi-message sessions: keep typing — re-claim focus (belt and
+      // braces for the send button, which must not steal it; see wire()).
+      input.focus({ preventScroll: true });
     } catch (err) {
       setStatus(
         $('chat-status'),
@@ -353,7 +356,13 @@ export function createChat({ client, onHomeRefresh }) {
   }
 
   function wire() {
-    $('btn-send').addEventListener('click', sendCurrent);
+    const sendBtn = $('btn-send');
+    // Mobile: a button tap normally moves focus off the input, tearing the
+    // soft keyboard down after every send. Suppressing the pointerdown
+    // DEFAULT keeps focus on the input (click still fires) — send therefore
+    // does NOT hide the keyboard; tapping elsewhere/chat chrome still does.
+    sendBtn.addEventListener('pointerdown', (e) => e.preventDefault());
+    sendBtn.addEventListener('click', sendCurrent);
     $('chat-input').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') sendCurrent();
     });

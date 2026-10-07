@@ -124,7 +124,11 @@ img.logo { object-fit: cover; background: none; }
 
 /* ---------- app shell: two panes ---------- */
 
-.app-shell { display: flex; height: 100dvh; overflow: hidden; }
+/* --app-h tracks the ACTUALLY visible viewport (keyboard excluded) — set by
+   js/keyboard.js; 100dvh is the boot/no-VisualViewport fallback. Result:
+   opening the keyboard shrinks the conversation between the header and the
+   keys instead of pushing the header off-screen. */
+.app-shell { display: flex; height: var(--app-h, 100dvh); overflow: hidden; transition: height .18s ease-out; }
 
 .sidebar {
   width: 100%; min-width: 0; display: flex; flex-direction: column;
