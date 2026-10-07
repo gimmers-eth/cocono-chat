@@ -14,6 +14,7 @@ import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
 import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl } from './peername.js';
 import { safetyNumber } from '../identity.js';
+import { errorText, humanError } from '../errors.js';
 import {
   saveMessage, updateMessage, messagesWith, markRead, allMessages,
   getMessage, deleteMessage, clearMessages,
@@ -201,7 +202,7 @@ export function createChat({ client, onHomeRefresh }) {
       if (!localId) return;
       const rec = await updateMessage(`out:${localId}`, { state: ok ? 'sent' : 'failed' });
       if (!ok) {
-        toast(`Send rejected: ${error ?? 'unknown'}`, 'error');
+        toast(errorText(error, () => `Message not sent (${error ?? 'unknown'}).`), 'error');
         // unknown_recipient on a chat that opened fine means our cached view
         // is stale — almost always: their account was deleted while we sat
         // here. Re-resolve and let the icons/ghost state catch up.
@@ -222,7 +223,7 @@ export function createChat({ client, onHomeRefresh }) {
       }
     });
 
-    client.on('error', ({ error }) => toast(error?.message ?? String(error), true));
+    client.on('error', ({ error }) => toast(humanError(error), 'error'));
   }
 
   // --- sending ---
@@ -254,7 +255,7 @@ export function createChat({ client, onHomeRefresh }) {
       }
       toast(navigator.onLine === false
         ? 'Offline — messages cannot be sent yet. They stay unsent until you reconnect.'
-        : err.message ?? String(err), 'error');
+        : humanError(err), 'error');
     }
   }
 
@@ -497,7 +498,7 @@ export function createChat({ client, onHomeRefresh }) {
       await updateTrustUI();
       onHomeRefresh?.();
     } catch (err) {
-      toast(err.message ?? String(err), 'error');
+      toast(humanError(err), 'error');
     }
   }
 
@@ -515,7 +516,7 @@ export function createChat({ client, onHomeRefresh }) {
       await updateTrustUI();
       onHomeRefresh?.();
     } catch (err) {
-      toast(err.message ?? String(err), 'error');
+      toast(humanError(err), 'error');
     }
   }
 
@@ -538,7 +539,7 @@ export function createChat({ client, onHomeRefresh }) {
       await updateTrustUI();
       onHomeRefresh?.();
     } catch (err) {
-      toast(err.message ?? String(err), 'error');
+      toast(humanError(err), 'error');
     }
   }
 
@@ -729,7 +730,7 @@ export function createChat({ client, onHomeRefresh }) {
       await updateTrustUI();
       onHomeRefresh?.();
     } catch (err) {
-      toast(err.message ?? String(err), 'error');
+      toast(humanError(err), 'error');
     }
   }
 
@@ -797,7 +798,7 @@ export function createChat({ client, onHomeRefresh }) {
       onHomeRefresh?.();
       if (currentPeer === target) await render();
     } catch (err) {
-      setStatus(status, err.message ?? String(err), true);
+      setStatus(status, humanError(err), true);
     } finally {
       btn.disabled = false;
     }
@@ -919,7 +920,7 @@ export function createChat({ client, onHomeRefresh }) {
       onHomeRefresh?.(); // repaint the list NOW: the dot must go with it
       if (!peerGone) $('chat-input').focus();
     } catch (err) {
-      setStatus(status, err.message ?? String(err), true);
+      setStatus(status, humanError(err), true);
     }
   }
 
