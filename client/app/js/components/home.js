@@ -88,7 +88,7 @@ export function createHome({ client, chat, onLogout }) {
     username = username.toLowerCase(); // display is always lowercase
     $('me-name').textContent = username;
     $('me-avatar').textContent = username.slice(0, 1);
-    paintOwnAvatar();
+    paintOwnHeadAvatar();
     renderIdentity();
   }
 
@@ -327,7 +327,7 @@ export function createHome({ client, chat, onLogout }) {
     }
   }
 
-  async function paintOwnAvatar() {
+  async function paintOwnHeadAvatar() {
     const avatars = await loadPeerAvatars();
     const selfUl = String(client.username ?? '').toLowerCase();
     const rec = avatars.get(selfUl);
@@ -544,7 +544,7 @@ export function createHome({ client, chat, onLogout }) {
     document.querySelector('.drawer-tabs')?.addEventListener('scroll', updateTabFades, { passive: true });
     window.addEventListener('resize', updateTabFades);
     window.addEventListener(AVATARS_EVENT, () => {
-      paintOwnAvatar();
+      paintOwnHeadAvatar();
       renderConversationList().catch(() => {});
     });
     $('btn-self-verify').addEventListener('click', (e) => { e.stopPropagation(); openSettings('verify'); });
