@@ -101,7 +101,7 @@ export async function buildApp({ mongo, redis, config, feRoot, sdkRoot }) {
     // Wrapped in an anonymous (encapsulated) plugin: a second @fastify/static
     // in the same scope would collide on the 'sendFile' decorator.
     if (sdkRoot) {
-      await app.register((instance) => instance.register(fastifyStatic, { root: sdkRoot, prefix: '/sdk/' }));
+      await app.register((instance) => instance.register(fastifyStatic, { root: sdkRoot, prefix: '/sdk/', cacheControl: 'no-cache' }));
     }
   }
 
