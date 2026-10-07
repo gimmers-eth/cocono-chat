@@ -57,6 +57,7 @@ export const ERROR_TEXT = {
 
   // --- identity verification / ID photo ---
   already_verified: 'Already verified.',
+  needs_trusted_verifier: 'ID upload unlocks once a verified user trusts you — ask a friend to trust you.',
   bad_content_type: 'Photo must be a PNG or JPEG.',
   not_an_image: 'That file isn’t a real photo.',
   too_large: 'Photo too large.',

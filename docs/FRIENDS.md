@@ -95,6 +95,13 @@ orange warnings in the chat, no strip once trusted:
 | trusted | shield user | GREEN | “Safety number” (view again) | none |
 | account deleted | user-slash + italic name | RED | — (rows hidden) | red: history only |
 
+Trust stage 3 doubles as **vouching**: a trust carries weight only once the
+truster is themselves ID-verified, profiles expose reputation COUNTS
+(`addedBy / trustedBy / verifiedBy` — never identities), and ID upload for a
+new account unlocks only after at least one VERIFIED user trusts it
+(`ID_UPLOAD_REQUIRES_TRUSTED_VERIFIER`). Trusting a scammer is therefore a
+reputational risk for the truster, and the trust modal says so.
+
 Server enforcement mirrors the ladder: `verify` requires the add (404
 `not_friends`), `trust` requires `verify` (409 `stage_required`),
 un-verifying revokes trust, and RE-BIND (re-add after a key change) resets

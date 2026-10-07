@@ -388,6 +388,18 @@ export class CoconoClient extends Emitter {
     return res.friends ?? [];
   }
 
+  /** Profile reputation COUNTS for a peer (never identities): addedBy,
+   *  trustedBy, verifiedBy (vouching weight: trusters who are themselves
+   *  ID-verified). null when unknown/offline. */
+  async userStats(username) {
+    try {
+      return await this.api.userStats(this.#requireToken(), String(username).toLowerCase());
+    } catch (err) {
+      if (err?.status === 404 || err?.code === 'unknown_account') return null;
+      throw err;
+    }
+  }
+
   /**
    * Own identity-verification state (admin-reviewed real-person check,
    * distinct from the peer trust ladder): {verified, idDoc}.

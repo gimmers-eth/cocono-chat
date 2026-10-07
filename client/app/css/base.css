@@ -414,6 +414,8 @@ img.logo { object-fit: cover; background: none; }
 #profile-id-note { margin: 0 0 .7rem; line-height: 1.45; }
 .profile-id-state.trust { margin-top: .2rem; }
 #profile-trust-note { margin: 0; line-height: 1.45; }
+.profile-id-state.trust { margin-top: .55rem; }
+#profile-reputation.reputation { letter-spacing: .02em; margin: 0 0 .2rem; }
 
 /* Chat-head peer button: opens the profile view */
 .peer-btn {

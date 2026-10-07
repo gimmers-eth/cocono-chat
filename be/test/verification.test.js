@@ -56,7 +56,7 @@ function adminApp(ctx) {
 }
 
 test('identity: upload ID photo, state surfaces in /api/me, guards hold', async () => {
-  const { app, mongo, teardown } = await setupApp({ idDocMaxBytes: 320, idDocAccountLimit: 50, idDocIpLimit: 50 });
+  const { app, mongo, teardown } = await setupApp({ idDocMaxBytes: 320, idDocAccountLimit: 50, idDocIpLimit: 50, idUploadRequiresTrustedVerifier: false });
   try {
     const c = makeClient();
     const a = await signupUser(app, c, 'iduser');
@@ -118,7 +118,7 @@ test('identity: upload ID photo, state surfaces in /api/me, guards hold', async 
 });
 
 test('admin: list flags, verify toggle, view + delete ID photo', async () => {
-  const ctx = await setupApp();
+  const ctx = await setupApp({ idUploadRequiresTrustedVerifier: false });
   const admin = await adminApp(ctx);
   try {
     const c = makeClient();
@@ -164,5 +164,85 @@ test('admin: list flags, verify toggle, view + delete ID photo', async () => {
   } finally {
     await admin.close();
     await ctx.teardown();
+  }
+});
+
+
+// --- vouching gate + reputation stats (feature adds) ---
+
+const LIMITS = {
+  signupIpLimit: 1000, challengeIpLimit: 1000, verifyAccountLimit: 1000, verifyIpLimit: 1000,
+  friendsIpLimit: 1000, friendsChangeIpLimit: 1000, idDocIpLimit: 50, idDocAccountLimit: 50,
+  userKeysIpLimit: 1000,
+};
+
+async function trustAndVerifyTarget(app, target, token) {
+  const h = { authorization: `Bearer ${token}` };
+  await app.inject({ method: 'PUT', url: `/api/me/friends/${target}`, headers: h });
+  await app.inject({ method: 'PUT', url: `/api/me/friends/${target}/verify`, headers: h, payload: { verified: true } });
+  return app.inject({ method: 'PUT', url: `/api/me/friends/${target}/trust`, headers: h, payload: { trust: true } });
+}
+
+test('ID upload requires a VERIFIED user to trust you first (vouching gate)', async () => {
+  const { app, mongo, teardown } = await setupApp(LIMITS);
+  try {
+    const alice = makeClient(); const bob = makeClient();
+    const a = await signupUser(app, alice, 'alice');
+    const b = await signupUser(app, bob, 'bobby');
+    const tA = await getToken(app, alice, 'alice', a.d);
+    const tB = await getToken(app, bob, 'bobby', b.d);
+    const hA = { authorization: `Bearer ${tA}` };
+    const png = { contentType: 'image/png', data: b64uEncode(PNG_BYTES) };
+
+    // 1) cold: no vouch -> gate closed
+    const denied = await app.inject({ method: 'POST', url: '/api/me/verify-id', headers: hA, payload: png });
+    assert.equal(denied.statusCode, 403);
+    assert.equal(denied.json().error, 'needs_trusted_verifier');
+    let me = await app.inject({ method: 'GET', url: '/api/me', headers: hA });
+    assert.equal(me.json().canUploadId, false);
+
+    // 2) bob trusts alice but is NOT verified himself -> still locked
+    await trustAndVerifyTarget(app, 'alice', tB);
+    me = await app.inject({ method: 'GET', url: '/api/me', headers: hA });
+    assert.equal(me.json().canUploadId, false, 'unverified vouch must not unlock');
+
+    // 3) admin verifies bob -> alice unlocked
+    await mongo.db.collection('users').updateOne({ ul: 'bobby' }, { $set: { verified: true } });
+    me = await app.inject({ method: 'GET', url: '/api/me', headers: hA });
+    assert.equal(me.json().canUploadId, true);
+    const up = await app.inject({ method: 'POST', url: '/api/me/verify-id', headers: hA, payload: png });
+    assert.equal(up.statusCode, 200, up.body);
+  } finally {
+    await teardown();
+  }
+});
+
+test('user stats: added/trusted/verifiedBy counts (numbers only)', async () => {
+  const { app, mongo, teardown } = await setupApp(LIMITS);
+  try {
+    const alice = makeClient(); const bob = makeClient(); const carol = makeClient();
+    const a = await signupUser(app, alice, 'alice');
+    const b = await signupUser(app, bob, 'bobby');
+    const c = await signupUser(app, carol, 'carol');
+    const tB = await getToken(app, bob, 'bobby', b.d);
+    const tC = await getToken(app, carol, 'carol', c.d);
+    const hB = { authorization: `Bearer ${tB}` };
+
+    // bob adds + verifies + trusts carol (the only vouch in this scenario)
+    await trustAndVerifyTarget(app, 'carol', tB);
+
+    const stats = await app.inject({ method: 'GET', url: '/api/users/carol/stats', headers: hB });
+    assert.equal(stats.statusCode, 200);
+    assert.deepEqual(stats.json(), { u: 'carol', addedBy: 1, trustedBy: 1, verifiedBy: 0 });
+
+    // verifying bob makes his vouch count as a verifiedBy
+    await mongo.db.collection('users').updateOne({ ul: 'bobby' }, { $set: { verified: true } });
+    const stats2 = await app.inject({ method: 'GET', url: '/api/users/carol/stats', headers: { authorization: `Bearer ${tC}` } });
+    assert.equal(stats2.json().verifiedBy, 1);
+
+    // unknown -> 404, self-stats fine, counts never expose WHO
+    assert.equal((await app.inject({ method: 'GET', url: '/api/users/nosuchuser/stats', headers: hB })).statusCode, 404);
+  } finally {
+    await teardown();
   }
 });

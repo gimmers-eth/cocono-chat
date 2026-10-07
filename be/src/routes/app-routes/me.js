@@ -20,6 +20,18 @@ function sniffImage(buf) {
 // GET /api/me — who am I + identity-verification state. POST /api/me/verify-id
 // — upload the ID-document photo the admin reviews (image only, size-capped,
 // never readable by the app again once uploaded, deleted on admin demand).
+// True when at least one VERIFIED user has TRUSTED this account (their
+// friend entry carries t:true and their own account is verified). This is
+// the ID-upload gate: vouching must come from someone checked first.
+async function hasTrustedVerifier(users, ul) {
+  return users.findOne({
+    ul: { $ne: ul },
+    verified: true,
+    friends: { $elemMatch: { u: ul, t: true } },
+  }, { projection: { _id: 1 } })
+    .then((doc) => !!doc);
+}
+
 export default async function meRoutes(app, { users, redis, config, idDocs }) {
   app.get('/api/me', async (request, reply) => {
     const denied = requireAuth(request, reply);
@@ -28,12 +40,15 @@ export default async function meRoutes(app, { users, redis, config, idDocs }) {
     const user = await users.findOne({ ul: request.auth.sub });
     if (!user) return fail(reply, 'unknown_account', 'Account not found', 404);
     const idDoc = await idDocs.findOne({ ul: user.ul }, { projection: { contentType: 1, uploadedAt: 1, _id: 0 } });
+    const canUploadId = !config.idUploadRequiresTrustedVerifier || !!idDoc || user.verified === true
+      || (await hasTrustedVerifier(users, user.ul));
     return {
       u: user.u,
       d: request.auth.d,
       createdAt: user.createdAt,
       verified: !!user.verified,
       idDoc,
+      canUploadId,
     };
   });
 
@@ -53,6 +68,12 @@ export default async function meRoutes(app, { users, redis, config, idDocs }) {
     const user = await users.findOne({ ul }, { projection: { verified: 1 } });
     if (!user) return fail(reply, 'unknown_account', 'Account not found', 404);
     if (user.verified) return fail(reply, 'already_verified', 'Account is already verified', 400);
+    // Gate: ID upload unlocks only after a verified user has trusted us
+    // (already-uploaded users may re-upload; the admin sees the pending doc)
+    if (config.idUploadRequiresTrustedVerifier && !(await hasTrustedVerifier(users, ul))) {
+      return fail(reply, 'needs_trusted_verifier',
+        'ID upload unlocks once a verified user trusts you', 403);
+    }
 
     const { contentType, data } = request.body ?? {};
     if (!ID_DOC_TYPES.has(contentType)) {

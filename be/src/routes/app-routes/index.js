@@ -4,6 +4,7 @@ import me from './me.js';
 import friends from './friends.js';
 import devices from './devices.js';
 import userKeys from './userKeys.js';
+import userStats from './userStats.js';
 import diagnostics from './diagnostics.js';
 import appInfo from './appInfo.js';
 
@@ -16,6 +17,7 @@ export default async function appRoutes(app, ctx) {
   await app.register(friends, ctx);
   await app.register(devices, ctx);
   await app.register(userKeys, ctx);
+  await app.register(userStats, ctx);
   await app.register(diagnostics, ctx);
   await app.register(appInfo, ctx);
 }

@@ -123,6 +123,12 @@ export function createHome({ client, chat, onLogout }) {
       show('Verified', 'ok', null);
       return;
     }
+    if (btn) btn.disabled = me.canUploadId === false;
+    if (me.canUploadId === false) {
+      btn.hidden = false;
+      if (state) state.textContent = 'Not verified — ID upload unlocks once a verified user trusts you.';
+      return;
+    }
     btn.hidden = false;
     if (me.idDoc) {
       // re-upload allowed before review

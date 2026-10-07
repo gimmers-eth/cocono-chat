@@ -538,10 +538,10 @@ export function createChat({ client, onHomeRefresh }) {
   async function confirmTrust() {
     const ok = await confirmModal({
       title: `Trust ${currentPeer}?`,
-      body: 'Only trust people you actually know. Trusting means you’ll treat this '
-        + 'account as the real person behind the name. If you haven’t compared the '
-        + 'safety number together yet, do that first — verifying the key is what '
-        + 'protects you; trusting is the human decision on top of it.',
+      body: 'Trusting someone is also vouching for them on this platform. '
+        + 'Verified users who trust scammer accounts put their own account at risk '
+        + 'of being banned — your vouch counts toward this profile’s reputation. '
+        + 'Only trust people you actually know, after comparing safety numbers.',
       okLabel: 'I know and trust them', danger: false,
     });
     if (!ok) return;
@@ -637,6 +637,19 @@ export function createChat({ client, onHomeRefresh }) {
     trustStateEl.textContent = title;
     trustStateEl.className = `profile-id-state trust ${cls}`;
     $('profile-trust-note').textContent = state === PS.GONE ? '' : desc;
+
+    // reputation counts for this profile (never identities)
+    const rep = $('profile-reputation');
+    rep.hidden = true;
+    if (!(peerGone || state === PS.GONE)) {
+      let stats = null;
+      try { stats = await client.userStats(currentPeer); } catch { /* offline: leave hidden */ }
+      if (stats) {
+        rep.textContent = `Added by ${stats.addedBy} · Trusted by ${stats.trustedBy} · `
+          + `Trusted by verified users: ${stats.verifiedBy}`;
+        rep.hidden = false;
+      }
+    }
   }
 
   async function openProfileView() {

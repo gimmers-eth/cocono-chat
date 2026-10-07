@@ -320,6 +320,23 @@ paths:
         '200':
           description: Updated friends entries (schema as in GET).
 
+  /api/users/{username}/stats:
+    get:
+      tags: [accounts]
+      operationId: userStats
+      summary: Reputation counts for a profile (numbers only, never identities)
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema: { type: string }
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: addedBy / trustedBy / verifiedBy (vouching weight).
+        '404': { description: 'No such user.' }
+
   /api/me/verify-id:
     post:
       tags: [auth]
@@ -327,7 +344,9 @@ paths:
       summary: Upload an ID-document photo for admin review
       description: >
         image/png or image/jpeg only, ID_DOC_MAX_BYTES capped (default 5 MB).
-        Rejected once the account is verified. Stored server-side, readable
+        Rejected once the account is verified. UNLOCKS only after at least
+        one VERIFIED user has TRUSTED this account (vouching gate,
+        ID_UPLOAD_REQUIRES_TRUSTED_VERIFIER). Stored server-side, readable
         only by the admin API; the admin can verify with or without it and
         deletes the photo after review.
       security:

@@ -42,6 +42,10 @@ export class Api {
     return this.#request('/api/me', { token });
   }
 
+  userStats(token, ul) {
+    return this.#request(`/api/users/${encodeURIComponent(ul)}/stats`, { token });
+  }
+
   submitIdDoc(token, { contentType, data }) {
     return this.#request('/api/me/verify-id', { method: 'POST', body: { contentType, data }, token });
   }

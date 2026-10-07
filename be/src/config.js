@@ -130,6 +130,9 @@ export const config = {
   //   only the admin can flip the verified flag, and can purge the image.
   coldSendRequiresVerification: env.COLD_SEND_REQUIRES_VERIFICATION !== 'false',
   idDocMaxBytes: numOf(env.ID_DOC_MAX_BYTES, 5 * 1024 * 1024),
+  // ID upload unlocks once at least one VERIFIED user has TRUSTED this
+  // account (trusting = vouching on the platform; see friends trust stage)
+  idUploadRequiresTrustedVerifier: env.ID_UPLOAD_REQUIRES_TRUSTED_VERIFIER !== 'false',
   idDocIpLimit: numOf(env.ID_DOC_IP_LIMIT, 10),
   idDocAccountLimit: numOf(env.ID_DOC_ACCOUNT_LIMIT, 5),
   idDocWindowSec: numOf(env.ID_DOC_WINDOW_SEC, 24 * 3600),
