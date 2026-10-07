@@ -416,7 +416,7 @@ export function createChat({ client, onHomeRefresh }) {
     const MSG = {
       [PS.GONE]: ['danger', 'userGone', peerHadHistory
         ? 'This account was deleted. Your saved messages stay readable, but you can’t send new ones.'
-        : ` ${'@'}${currentPeer} doesn’t exist — no account with this name was found.`],
+        : `${currentPeer} doesn’t exist — no account with this name was found.`],
       [PS.STRANGER]: ['danger', 'notFriend', `You haven’t added ${currentPeer} yet. Messages are private, but anyone can sign up with a name — add them, then verify, to be sure it’s really them.`],
       [PS.UNVERIFIED]: ['warn', 'friend', `You’ve added ${currentPeer}, but haven’t verified them. Read the safety number aloud together (a call works) — when both screens match, nobody is in between. Open ⋮ and tap “Verify user”.`],
       [PS.VERIFIED]: ['warn', 'friendVerified', `You’ve verified ${currentPeer}’s key, but haven’t trusted them yet. Only trust accounts you actually know in person — open ⋮ and tap “Trust user” when you’re sure.`],
