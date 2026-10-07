@@ -387,7 +387,7 @@ export function createChat({ client, onHomeRefresh }) {
       [PS.UNVERIFIED]: ['friendVerify', 'icon-warn', 'Verify user'],
       [PS.VERIFIED]: ['friendVerified', 'icon-friend', 'Trust user'],
       [PS.TRUSTED]: ['identity', 'icon-friend', 'Safety number'],
-      [PS.GONE]: ['userGone', 'icon-danger', 'This user is gone'],
+      [PS.GONE]: ['userGone', 'icon-danger', 'User deleted'],
       [PS.SELF]: ['userSolid', '', 'This is you'],
     };
     const [icon, cls, label] = LABELS[state] ?? LABELS[PS.STRANGER];
