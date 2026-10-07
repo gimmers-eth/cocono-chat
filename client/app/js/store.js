@@ -189,9 +189,12 @@ export function markRead(peer, ts = Date.now()) {
 export const isUnread = (peer, ts) => (ts ?? 0) > (reads()[String(peer).toLowerCase()] ?? 0);
 
 // --- friends (local mirror of the server list; see header comment) ---
-// record: { peer, pub, gone, changed, trusted } — pub is the identity-key
-// binding the SERVER recorded; trusted only when it matches the live
-// account. Legacy/unbound entries are NOT trusted (strict policy).
+// record: { peer, pub, gone, changed, trusted, verified, trust, at } — pub
+// is the identity-key binding the SERVER recorded; trusted only when it
+// matches the live account. Legacy/unbound entries are NOT trusted (strict
+// policy). `at` = last friend-STATE activity on this device (add / verify /
+// trust / gone transitions): device-local only, never synced — the sidebar
+// floats freshly-acted-upon peers up even when there are zero messages.
 
 export function loadFriends() {
   return withStore('readonly', (s) => s.getAll(), FRIENDS);
@@ -201,6 +204,7 @@ export async function friendAdd(peer, pub = '') {
   await withStore('readwrite', (s) => s.put({
     peer: String(peer).toLowerCase(), pub,
     gone: false, changed: false, trusted: !!pub, verified: false, trust: false,
+    at: Date.now(),
   }), FRIENDS);
   notifyFriends();
 }
@@ -210,7 +214,14 @@ export async function friendMarkFlags(peer, patch) {
   const ul = String(peer).toLowerCase();
   const cur = (await withStore('readonly', (s) => s.get(ul), FRIENDS))
     ?? { peer: ul, pub: '', gone: false, changed: false, trusted: false };
-  await withStore('readwrite', (s) => s.put({ ...cur, ...patch }), FRIENDS);
+  const next = { ...cur, ...patch };
+  // stamp ONLY a genuine state transition — re-writing the same value (or
+  // a no-op revoke) must not bump the peer up the sidebar
+  const touched = ['verified', 'trust', 'trusted', 'gone', 'changed'].some(
+    (k) => k in patch && !!next[k] !== !!cur[k],
+  );
+  if (touched) next.at = Date.now();
+  await withStore('readwrite', (s) => s.put(next), FRIENDS);
   notifyFriends();
 }
 
@@ -222,6 +233,10 @@ export async function friendDel(peer) {
 /** Replace the whole local mirror with the authoritative server entries. */
 export async function setFriends(entries) {
   const db = await openDb();
+  // carry device-local activity stamps across a re-sync; bump one when the
+  // server reports a flag this device never saw live (event missed while
+  // offline). Brand-new-to-this-device entries start at 0 — no fake "top".
+  const prev = new Map((await loadFriends()).map((e) => [e.peer, e]));
   await new Promise((resolve, reject) => {
     const tx = db.transaction(FRIENDS, 'readwrite');
     const store = tx.objectStore(FRIENDS);
@@ -229,14 +244,22 @@ export async function setFriends(entries) {
     for (const e of entries ?? []) {
       // tolerate legacy plain-string entries
       const rec = typeof e === 'string' ? { u: e } : e;
-      store.put({
-        peer: String(rec.u).toLowerCase(),
-        pub: rec.p || '',
+      const ul = String(rec.u).toLowerCase();
+      const flags = {
         gone: !!rec.gone,
         changed: !!rec.changed,
         trusted: !!rec.trusted,
         verified: !!rec.verified, // server-account-level: propagates to all devices
         trust: !!rec.trust,       // third stage: "I know this person"
+      };
+      const old = prev.get(ul);
+      let at = old?.at ?? 0;
+      if (old && Object.keys(flags).some((k) => !!old[k] !== flags[k])) at = Date.now();
+      store.put({
+        peer: ul,
+        pub: rec.p || '',
+        ...flags,
+        at,
       });
     }
     tx.oncomplete = resolve;

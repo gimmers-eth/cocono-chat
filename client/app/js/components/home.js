@@ -6,7 +6,7 @@ import { $, setStatus, fmtTime, confirmModal, openLightbox } from '../ui.js';
 import { humanError } from '../errors.js';
 import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
-import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, clearAllMessages, loadPeerVerifications, loadPeerAvatars, rememberPeerAvatar, AVATARS_EVENT } from '../store.js';
+import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, clearAllMessages, loadPeerVerifications, loadPeerAvatars, rememberPeerAvatar, AVATARS_EVENT, FRIENDS_EVENT } from '../store.js';
 import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl } from './peername.js';
 import { refreshSettingsUI } from '../install.js';
 import { loadRegistry, applyTheme, savedTheme, wireThemeSelect } from '../theme.js';
@@ -360,11 +360,15 @@ export function createHome({ client, chat, onLogout }) {
     // Friends are REAL entries even with zero messages: clearing a chat (or
     // never having written one) must never drop them from the menu.
     for (const f of friends) if (!latestByPeer.has(f.peer)) latestByPeer.set(f.peer, null);
+    // Recency = last message OR last friend-state action (add / verify /
+    // trust stamps `at` on the mirror — freshly-acted peers float up even
+    // with zero messages). Peers with no activity at all sink alphabetically.
+    const friendBy = new Map(friends.map((f) => [f.peer, f]));
+    const recency = (peer, last) => Math.max(last?.ts ?? 0, friendBy.get(peer)?.at ?? 0);
     const entries = [...latestByPeer.entries()].sort((a, b) => {
-      if (!a[1] && !b[1]) return a[0].localeCompare(b[0]);
-      if (!a[1]) return 1; // message-less friends sit below the active list
-      if (!b[1]) return -1;
-      return b[1].ts - a[1].ts;
+      const ka = recency(a[0], a[1]);
+      const kb = recency(b[0], b[1]);
+      return ka !== kb ? kb - ka : a[0].localeCompare(b[0]);
     });
     const frag = document.createDocumentFragment();
     for (const [peer, last] of entries) {
@@ -379,7 +383,7 @@ export function createHome({ client, chat, onLogout }) {
       // italic = deleted friend; green outlined user = trusted binding;
       // red person-with-an-x = everyone else (stranger/unbound/stale)
       const selfUl = String(client.username ?? '').toLowerCase();
-      const ent = friends.find((f) => f.peer === peer);
+      const ent = friendBy.get(peer);
       const pin = pins.find((p) => p.peer === peer);
       // one shared ladder: red (not added/conflict) → orange (added) →
       // orange shield (verified) → green shield (trusted); deleted =
@@ -589,6 +593,11 @@ export function createHome({ client, chat, onLogout }) {
     window.addEventListener('resize', updateTabFades);
     window.addEventListener(AVATARS_EVENT, () => {
       paintOwnHeadAvatar();
+      renderConversationList().catch(() => {});
+    });
+    // friend add/verify/trust stamps the mirror — repaint immediately so the
+    // acted-upon peer floats up the moment the chip changes, not at next boot
+    window.addEventListener(FRIENDS_EVENT, () => {
       renderConversationList().catch(() => {});
     });
     $('btn-self-verify').addEventListener('click', (e) => { e.stopPropagation(); openSettings('verify'); });
