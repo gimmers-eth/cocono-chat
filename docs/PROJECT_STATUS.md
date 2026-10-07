@@ -7,7 +7,7 @@ section links here.
 
 **Docs layout (since 2026-10-06):** every document lives in `docs/`
 (`DESIGN/QUESTIONS/ANSWERS/PROJECT_STATUS/CLIENT_SDK/MESSAGES/SIGNUP/
-BE_TECH/THEMES/GO_LIVE_PROCESS`, audits in `docs/audits/`). Only
+BE_TECH/THEMES/GO_LIVE_PROCESS/FRIENDS`, audits in `docs/audits/`). Only
 `README.md` files stay beside code (root + `be/`, `client/`) and
 they point into `docs/`. The legacy `fe/` PWA and its
 `FE_LEGACY_TECH.md` doc were **deleted 2026-10-06** — `client/app`
@@ -118,6 +118,21 @@ is the only FE (audits mentioning `fe/` are historical).
   filled at boot; NO glyph/emoji characters remain in components, no
   innerHTML. SW caches `/vendor/` (shell v4). serve-test asserts css+woff2
   are delivered with right content types.
+- **Identity verification (pins + safety numbers)**: every device keeps a
+  device-local TOFU **pin** per peer (IDB `pins` store, DB v3): first-seen
+  identity key, change history (`prevP`, `changedAt`), and a `verified` flag
+  bound to the exact key. Opening a chat re-checks the live key: any change
+  revokes trust automatically (friend removed + sys broadcast) and raises a
+  red SECURITY ALERT; a pin disagreeing with the SERVER's binding is flagged
+  as a possible hostile/inconsistent server. **Safety numbers**
+  (`client/app/js/identity.js`: SHA-256 → 8 hex groups, fixed test vector)
+  are viewable/copyable in the chat side menu with a **Mark verified**
+  flow (compare out of band first — the panel says so). Verified peers show
+  a green shield in sidebar/header/menu. `toggleFriend` REFUSES to bind when
+  the server-stamped key contradicts the local pin. Full model + honest
+  threat limits in **docs/FRIENDS.md**. (Signed append-only friend-event log
+  — tamper-evident history — remains deliberately deferred to P2; groups
+  will force it.)
 - **Offline shell**: network-first SW caching of statics; app boots offline
   into read-only mode from IndexedDB (login failure w/ network error enters
   the app); online event promotes to live session.
@@ -227,8 +242,10 @@ launch, P1 = strongly before/soon after, P2 = roadmap.
   Dependabot weekly grouped bumps + monthly actions) — done 2026-10-07.
 - Rate-limit rebaseline for internet scale + **per-device** msg caps (CGNAT/office
   shared-IP false positives — verify-ip already bumped to 50 for that reason).
-- **Safety numbers / explicit key-change verification** (pill exists; verification UI
-  does not — TOFU-only today; `peerIdentityChanged` is the hook).
+- Safety numbers / explicit key-change verification: **DONE** — pins +
+  safety numbers + verified flags shipped (see What's built above +
+  docs/FRIENDS.md). Out-of-band comparison remains a user habit; the
+  signed-event-log hardening stays P2 (groups will force it).
 - JWT: add rotation runbook (swap `JWT_SECRET` ⇒ all sessions drop; acceptable, document
   it), later consider per-device key derivation of tokens.
 - Decide publicly-exposed metadata honestly: `/api/app-info` reveals build sha + VAPID

@@ -252,6 +252,14 @@ img.logo { object-fit: cover; background: none; }
 /* Off-screen selection helper for the clipboard fallback (never visible). */
 .copy-helper { position: fixed; top: -100vw; left: -100vw; opacity: 0; }
 
+/* Safety number panel: big readable groups, easy to compare aloud. */
+.identity-number {
+  margin: .6rem 0 .3rem; padding: .8rem .6rem;
+  font-family: ui-monospace, monospace; font-size: 1.05rem; letter-spacing: .06em;
+  line-height: 1.9; text-align: center; word-break: break-all;
+  background: rgba(127, 127, 127, .08); border-radius: 10px; user-select: all;
+}
+
 /* Trust warning strip (non-friend chat): stays under the header, above the
    transcript. Amber = caution, not danger — encryption still holds. */
 .chat-warn {

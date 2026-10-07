@@ -28,9 +28,11 @@ export const ICONS = {
   userSolid: 'fa-user',              // you (solid)
   userGone: 'fa-user-slash',         // deleted account (red, italic name)
   friend: 'fa-regular fa-user',      // trusted peer (outlined, green)
+  friendVerified: 'fa-user-shield',  // trust explicitly verified (green)
   notFriend: 'fa-user-xmark',        // stranger marker (red)
   friendAdd: 'fa-user-shield',      // action: add as friend
   friendRemove: 'fa-user-minus',    // action: remove friend (red)
+  identity: 'fa-fingerprint',       // safety-number panel
 
   // message status marks
   stateSending: 'fa-clock',

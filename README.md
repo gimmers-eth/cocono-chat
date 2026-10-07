@@ -76,6 +76,7 @@ example and adjust when needed.
 - [docs/GO_LIVE_PROCESS.md](./docs/GO_LIVE_PROCESS.md) — the ordered runbook from dev box to public launch (read before anything goes public)
 - [docs/DESIGN.md](./docs/DESIGN.md) — architecture, encryption model, delivery, milestones
 - [docs/CLIENT_SDK.md](./docs/CLIENT_SDK.md) — client SDK: usage, events, pairing, storage, logging
+- [docs/FRIENDS.md](./docs/FRIENDS.md) — friends & identity verification: model, sync, pins, safety numbers, threat limits
 - [docs/THEMES.md](./docs/THEMES.md) — bootstrapping FE themes
 - [docs/SIGNUP.md](./docs/SIGNUP.md) — signup, passwordless login and multi-device pairing (with API examples)
 - [docs/MESSAGES.md](./docs/MESSAGES.md) — message sending & delivery: online, offline, multi-device (with protocol examples)

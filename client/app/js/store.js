@@ -14,9 +14,10 @@
 //   message store on purpose: clearing a chat never unfriends anyone.
 
 const DB_PREFIX = 'cocono-app';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const MESSAGES = 'messages';
 const FRIENDS = 'friends';
+const PINS = 'pins';
 
 let scope = 'anon';
 let dbPromise = null;
@@ -64,6 +65,9 @@ function openDb() {
         }
         if (!db.objectStoreNames.contains(FRIENDS)) {
           db.createObjectStore(FRIENDS, { keyPath: 'peer' });
+        }
+        if (!db.objectStoreNames.contains(PINS)) {
+          db.createObjectStore(PINS, { keyPath: 'peer' });
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -205,4 +209,60 @@ export async function setFriends(entries) {
 export const FRIENDS_EVENT = 'cocono:friends';
 function notifyFriends() {
   window.dispatchEvent(new Event(FRIENDS_EVENT));
+}
+
+// --- identity pins (TOFU + change detection; independent of friendship) ---
+// record: { peer, p, firstSeenAt, lastSeenAt, prevP?, changedAt?, verified,
+//           verifiedAt? }
+// The FIRST key we ever see for a peer is pinned. Any later difference is a
+// FACT (not the server's opinion): trust is revoked and stays revoked until
+// the human re-verifies the new safety number. verified is bound to the
+// exact key that was confirmed — a key change resets it.
+
+export function getPin(peer) {
+  return withStore('readonly', (s) => s.get(String(peer).toLowerCase()), PINS);
+}
+
+export function loadPins() {
+  return withStore('readonly', (s) => s.getAll(), PINS);
+}
+
+/**
+ * Record that we are now looking at `p` for `peer`.
+ * @returns {'new'|'ok'|'changed'} — 'changed' ALSO resets verified state
+ * and keeps prevP for the audit trail.
+ */
+export async function recordPinSeen(peer, p) {
+  if (!p) return 'ok'; // nothing to pin (pre-identity accounts)
+  const ul = String(peer).toLowerCase();
+  const cur = await getPin(ul);
+  const now = Date.now();
+  if (!cur) {
+    await withStore('readwrite', (s) => s.put(
+      { peer: ul, p, firstSeenAt: now, lastSeenAt: now, verified: false },
+    ), PINS);
+    return 'new';
+  }
+  if (cur.p !== p) {
+    await withStore('readwrite', (s) => s.put({
+      ...cur, peer: ul, prevP: cur.p, changedAt: now, p, // the NEW key is pinned
+      firstSeenAt: cur.firstSeenAt ?? now,
+      lastSeenAt: now, verified: false, verifiedAt: null,
+    }), PINS);
+    return 'changed';
+  }
+  if (now - (cur.lastSeenAt ?? 0) > 60_000) { // avoid write churn
+    await withStore('readwrite', (s) => s.put({ ...cur, lastSeenAt: now }), PINS);
+  }
+  return 'ok';
+}
+
+export async function setPinVerified(peer, verified) {
+  const ul = String(peer).toLowerCase();
+  const cur = await getPin(ul);
+  if (!cur) return null;
+  const next = { ...cur, verified, verifiedAt: verified ? Date.now() : null };
+  await withStore('readwrite', (s) => s.put(next), PINS);
+  notifyFriends();
+  return next;
 }

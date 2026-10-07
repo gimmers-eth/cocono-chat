@@ -5,7 +5,7 @@
 import { $, setStatus, fmtTime, confirmModal } from '../ui.js';
 import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
-import { allMessages, isUnread, loadFriends } from '../store.js';
+import { allMessages, isUnread, loadFriends, loadPins } from '../store.js';
 import { refreshSettingsUI } from '../install.js';
 import { loadRegistry, applyTheme, savedTheme, wireThemeSelect } from '../theme.js';
 
@@ -46,7 +46,7 @@ export function createHome({ client, chat, onLogout }) {
 
   async function renderConversationList() {
     const list = $('conversation-list');
-    const [all, friends] = await Promise.all([allMessages(), loadFriends()]);
+    const [all, friends, pins] = await Promise.all([allMessages(), loadFriends(), loadPins()]);
     const latestByPeer = new Map();
     for (const m of all) {
       const cur = latestByPeer.get(m.peer);
@@ -77,14 +77,19 @@ export function createHome({ client, chat, onLogout }) {
       // red person-with-an-x = everyone else (stranger/unbound/stale)
       const selfUl = String(client.username ?? '').toLowerCase();
       const ent = friends.find((f) => f.peer === peer);
+      const pin = pins.find((p) => p.peer === peer);
       const gone = !!ent?.gone;
+      const conflict = !!pin && !!ent?.pub && pin.p !== ent.pub;
+      const trusted = !!ent?.trusted && !gone && !conflict;
       const mark = peer === selfUl
         ? iconEl('userSolid')
         : gone
           ? iconEl('userGone', 'icon-danger')
-          : ent?.trusted
-            ? iconEl('friend', 'icon-friend')
-            : iconEl('notFriend', 'icon-danger');
+          : trusted && pin?.verified
+            ? iconEl('friendVerified', 'icon-friend')
+            : trusted
+              ? iconEl('friend', 'icon-friend')
+              : iconEl('notFriend', 'icon-danger');
       name.replaceChildren(mark);
       name.append(peer);
       if (name.classList) name.classList.toggle('gone', gone);
