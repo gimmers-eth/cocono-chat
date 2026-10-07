@@ -1,6 +1,7 @@
 import { rateLimit } from '../../lib/rateLimit.js';
 import { isValidUsername } from '../../lib/username.js';
 import { fail, limited, requireAuth } from '../shared.js';
+import { cocoScore } from '../../lib/cocoScore.js';
 
 // GET /api/users/:username/stats — COUNTS ONLY (never who), about a
 // profile's reputation. The three buckets are EXCLUSIVE stages of each
@@ -8,9 +9,9 @@ import { fail, limited, requireAuth } from '../shared.js';
 //   addedBy     added, but the safety number was never confirmed
 //   verifiedBy  safety number verified, but not trusted yet
 //   trustedBy   taken to the trust (vouch) stage
-// The CoCo score (see docs/COCO_SCORE.md) is computed HERE so every client
-// shows one number: verified vouches are worth 1, trusted vouches 3.
-// Requires a JWT (same posture as the keys lookup) and is rate limited.
+// CoCo score + Social verdict come from lib/cocoScore.js (single source of
+// truth: weights, trust threshold, account-age rule). Requires a JWT (same
+// posture as the keys lookup) and is rate limited.
 export default async function userStatsRoutes(app, { users, redis, config }) {
   app.get('/api/users/:username/stats', async (request, reply) => {
     const denied = requireAuth(request, reply);
@@ -21,7 +22,7 @@ export default async function userStatsRoutes(app, { users, redis, config }) {
     const username = request.params.username;
     if (!isValidUsername(username)) return fail(reply, 'invalid_username', 'Malformed username', 400);
     const ul = username.toLowerCase();
-    const target = await users.findOne({ ul }, { projection: { _id: 1 } });
+    const target = await users.findOne({ ul }, { projection: { _id: 1, createdAt: 1 } });
     if (!target) return fail(reply, 'unknown_account', 'No such user', 404);
 
     const [addedBy, verifiedBy, trustedBy] = await Promise.all([
@@ -29,12 +30,8 @@ export default async function userStatsRoutes(app, { users, redis, config }) {
       users.countDocuments({ friends: { $elemMatch: { u: ul, v: true, t: { $ne: true } } } }),
       users.countDocuments({ friends: { $elemMatch: { u: ul, t: true } } }),
     ]);
-    return {
-      u: ul,
-      addedBy,
-      verifiedBy,
-      trustedBy,
-      coco: verifiedBy * 1 + trustedBy * 3, // v1 weights; see docs/COCO_SCORE.md
-    };
+    // score + Social verdict from the shared calculation module
+    const { score, trusted } = cocoScore({ verifiedBy, trustedBy }, target.createdAt);
+    return { u: ul, addedBy, verifiedBy, trustedBy, coco: score, socialTrusted: trusted };
   });
 }

@@ -653,7 +653,7 @@ export function createChat({ client, onHomeRefresh }) {
     let stats = null;
     try { stats = await client.userStats(currentPeer); } catch { /* offline */ }
     if (stats) {
-      const trusted = stats.trustedBy > 0;
+      const trusted = stats.socialTrusted === true;
       setRow(socialState, socialNote, trusted ? 'ok' : 'bad',
         trusted ? 'Social: Trusted' : 'Social: Untrusted',
         trusted
@@ -661,7 +661,7 @@ export function createChat({ client, onHomeRefresh }) {
           : 'Nobody vouches for this account yet. Be extra careful: trust must be earned here, not assumed.');
       rep.textContent = `Vouched by ${stats.addedBy} added · ${stats.verifiedBy} verified · ${stats.trustedBy} trusted`;
       rep.hidden = false;
-      coco.textContent = `CoCo ${stats.coco} — from verified (×1) and trusted (×3) vouches; more signals later`;
+      coco.textContent = `CoCo: ${stats.coco} — Social Score`;
       coco.hidden = false;
     } else {
       setRow(socialState, socialNote, '', 'Social: Unknown', 'Reputation counts need a connection.');

@@ -5,15 +5,21 @@ summarises **how much of the network has vouched for them**. It is one input
 to a trust decision — never the whole decision. Design goal: honest,
 explainable, and hard to inflate silently.
 
-## v1 formula
+## v1 rule
 
 ```
-CoCo = (verifiedBy × 1) + (trustedBy × 3)
+score  = (verifiedBy × 1) + (trustedBy × 3)
+Social: Trusted  ⇔  score > COCO_TRUST_THRESHOLD (10)
+                    AND account age > COCO_TRUST_MIN_AGE_DAYS (30)
+otherwise → Social: Untrusted
 ```
 
-computed **server-side** in `GET /api/users/:username/stats` so every client
-shows the same number, from the exclusive vouch-stage buckets
-(see [FRIENDS.md](./FRIENDS.md)):
+Everything lives in **`be/src/lib/cocoScore.js`** (weights, threshold, age
+gate) — the profile, the `/api/users/:u/stats` response (`coco`,
+`socialTrusted`) and every client read it from that one source, computed
+server-side so nobody renders a different verdict. Threshold and age are env
+config (`.env.example`). Exclusive vouch-stage buckets per
+[FRIENDS.md](./FRIENDS.md):
 
 | Voucher's stage on this profile | Weight | Why |
 |---|---|---|
@@ -52,14 +58,15 @@ Roadmap signals, once their data exists and is abuse-tested:
 ## Display rules
 
 - Profile → Safety → Social: counts line (`Vouched by N added · N verified · N trusted`)
-  then `CoCo N — from verified (×1) and trusted (×3) vouches; more signals later`
-  shown in `--info` blue.
+  then `CoCo: N — Social Score` shown in `--info` blue. No formula in the UI;
+  this doc is the public explanation.
 - Computed by the server; clients render it verbatim. No score is shown for
   deleted/not-found accounts, and counts never expose WHO vouched.
 
 ## Governance
 
-- Weights live in **one place**: `userStats.js`. Changing them = a version
+- Weights and gates live in **one place**: `be/src/lib/cocoScore.js`
+  (+ `COCO_TRUST_*` env config). Changing them = a version
   bump here (v2, v3…), with a short note on why — users may have written the
   number down.
 - Anti-abuse of the *scoring* itself (mass self-trust attempts etc.) is part

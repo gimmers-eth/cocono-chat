@@ -129,6 +129,10 @@ export const config = {
   // - users upload an ID photo (image only, size-capped) via the app;
   //   only the admin can flip the verified flag, and can purge the image.
   coldSendRequiresVerification: env.COLD_SEND_REQUIRES_VERIFICATION !== 'false',
+  // CoCo social score (be/src/lib/cocoScore.js): trusted needs score >
+  // threshold AND account older than the minimum age
+  cocoTrustThreshold: numOf(env.COCO_TRUST_THRESHOLD, 10),
+  cocoTrustMinAgeDays: numOf(env.COCO_TRUST_MIN_AGE_DAYS, 30),
   idDocMaxBytes: numOf(env.ID_DOC_MAX_BYTES, 5 * 1024 * 1024),
   // ID upload unlocks once at least one VERIFIED user has TRUSTED this
   // account (trusting = vouching on the platform; see friends trust stage)
