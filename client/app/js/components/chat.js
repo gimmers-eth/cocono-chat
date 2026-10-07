@@ -781,9 +781,13 @@ export function createChat({ client, onHomeRefresh }) {
     try { prof = await client.viewProfile(meUl); } catch { /* offline */ }
     try { stats = await client.userStats(meUl); } catch { /* offline */ }
     $('profile-name').textContent = meUl;
+    // No me.verified gate here: the profile endpoint already IS the policy
+    // (owner always sees their own photo; others only on mutual+verified),
+    // and stacking a second fetch's result over it made the photo vanish
+    // whenever identity() was slow or failed.
     const avatarImg = $('profile-avatar-img');
     const initial = $('profile-avatar');
-    if (prof?.avatar && me?.verified) {
+    if (prof?.avatar) {
       avatarImg.src = `data:image/jpeg;base64,${prof.avatar}`;
       avatarImg.hidden = false;
       initial.hidden = true;
@@ -794,8 +798,9 @@ export function createChat({ client, onHomeRefresh }) {
     }
     const bioSec = $('profile-bio-section');
     const bioEl = $('profile-peer-bio');
-    bioSec.hidden = !(prof?.bio && me?.verified);
-    if (prof?.bio && me?.verified) bioEl.textContent = prof.bio;
+    const bioOk = prof?.bio && (me ? me.verified : true); // identity unknown → don't hide it
+    bioSec.hidden = !bioOk;
+    if (bioOk) bioEl.textContent = prof.bio;
     $('profile-status-icon').replaceChildren(peerStateIcon(PS.TRUSTED));
     renderAccountStage(me?.createdAt ? new Date(me.createdAt).getTime() : null);
 
