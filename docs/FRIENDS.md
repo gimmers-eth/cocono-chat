@@ -65,9 +65,14 @@ anyone (subject to block/report, a launch P0). Trust is anchored to the
 | **Safety number** | a server lying consistently from the first contact | ✅ — if the users compare out of band |
 | **Verified flag** | the human record that the number WAS compared; bound to the exact key, reset automatically on any change | ✅ device-local |
 
-`identity.js` renders the number: `SHA-256(identity key)` → first 16 bytes →
-8 hex groups of 4 (deterministic, unit-tested with a fixed vector — changing
-the format is a UX break for people who wrote numbers down).
+`identity.js` renders the number **symmetrically from the PAIR**: the two
+account identity keys (mine + theirs) are ordered canonically and hashed —
+`SHA-256(sorted(keyA || keyB))` → first 16 bytes → 8 hex groups of 4. Both
+users therefore see the **same** number for the same conversation and can
+compare it out of band; a match proves neither side is being fed a
+different key. (Deterministic, unit-tested for symmetry against an
+independent spec implementation, with format-stability vectors pinned —
+changing the format is a UX break for people who wrote numbers down.)
 
 The pin logic (`store.js`): first-seen key is pinned silently; a later
 different key ⇒ `changed` + `verified` reset + `prevP` kept for audit. On

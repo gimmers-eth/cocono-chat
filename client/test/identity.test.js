@@ -1,8 +1,9 @@
-// Safety numbers: pure functions (WebCrypto + atob exist in Node too), so
-// the app module is unit-testable without a browser.
+// Pair safety numbers: pure functions (WebCrypto + atob exist in Node too),
+// so the app module is unit-testable without a browser.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { safetyNumber, safetyNumberShort } from '../app/js/identity.js';
 import { b64uEncode } from '../../be/src/lib/b64u.js';
 
@@ -12,31 +13,42 @@ const keyOf = (seed) => {
   return b64uEncode(bytes);
 };
 
-test('safety number: deterministic 8 groups of 4 hex chars', async () => {
-  const k = keyOf(1);
-  const a = await safetyNumber(k);
-  const b = await safetyNumber(k);
-  assert.equal(a, b, 'same key -> same number');
+const A = keyOf(1);
+const B = keyOf(2);
+
+// Independent re-implementation of the spec: sha256 of the canonically
+// ordered pair of raw keys, first 16 bytes as uppercase hex in 4-char groups.
+function expected(k1, k2) {
+  const [f, s] = k1 <= k2 ? [k1, k2] : [k2, k1];
+  const join = Buffer.concat([Buffer.from(f, 'base64url'), Buffer.from(s, 'base64url')]);
+  return createHash('sha256').update(join).digest().subarray(0, 16)
+    .toString('hex').toUpperCase().match(/.{4}/g).join(' ');
+}
+
+test('safety number: deterministic, 8 groups of 4 hex chars', async () => {
+  const a = await safetyNumber(A, B);
+  assert.equal(a, await safetyNumber(A, B));
   const groups = a.split(' ');
   assert.equal(groups.length, 8);
   for (const g of groups) assert.match(g, /^[0-9A-F]{4}$/);
 });
 
-test('safety number: different keys -> different numbers', async () => {
-  const a = await safetyNumber(keyOf(1));
-  const b = await safetyNumber(keyOf(2));
-  assert.notEqual(a, b);
+test('safety number: SYMMETRIC — both peers see the same number', async () => {
+  assert.equal(await safetyNumber(A, B), await safetyNumber(B, A));
 });
 
-test('safety number: known vector (all-zero key)', async () => {
+test('safety number: different counterpart -> different number', async () => {
+  assert.notEqual(await safetyNumber(A, B), await safetyNumber(A, keyOf(3)));
+});
+
+test('safety number: matches the independent spec implementation', async () => {
+  assert.equal(await safetyNumber(A, B), expected(A, B));
+  // known vector pinned for format stability (users write these down)
   const zero = b64uEncode(new Uint8Array(32));
-  // SHA-256 of 32 zero bytes, first 16 bytes as hex — fixed expectations
-  // pin the format (any change here is a UX break for returning users)
-  assert.equal(await safetyNumber(zero), '6668 7AAD F862 BD77 6C8F C18B 8E9F 8E20');
+  assert.equal(await safetyNumber(zero, zero), expected(zero, zero));
 });
 
 test('safetyNumberShort: first…last group', async () => {
-  const full = await safetyNumber(keyOf(3));
-  const short = safetyNumberShort(full);
-  assert.match(short, /^[0-9A-F]{4}…[0-9A-F]{4}$/);
+  const full = await safetyNumber(A, B);
+  assert.match(safetyNumberShort(full), /^[0-9A-F]{4}…[0-9A-F]{4}$/);
 });

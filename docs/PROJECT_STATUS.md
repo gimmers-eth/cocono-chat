@@ -130,9 +130,12 @@ is the only FE (audits mentioning `fe/` are historical).
   bound to the exact key. Opening a chat re-checks the live key: any change
   revokes trust automatically (friend removed + sys broadcast) and raises a
   red SECURITY ALERT; a pin disagreeing with the SERVER's binding is flagged
-  as a possible hostile/inconsistent server. **Safety numbers**
-  (`client/app/js/identity.js`: SHA-256 → 8 hex groups, fixed test vector)
-  are viewable/copyable in the chat side menu with a **Mark verified**
+  as a possible hostile/inconsistent server. **Safety numbers** are
+  PAIR-DERIVED (`client/app/js/identity.js`: SHA-256 over the
+  canonically-ordered key pair → 8 hex groups — BOTH users see the same
+  number; symmetry + format unit-tested against an independent spec
+  implementation) are viewable/copyable in the chat side menu with a
+  **Mark verified**
   flow (compare out of band first — the panel says so). Verified peers show
   a green shield in sidebar/header/menu. `toggleFriend` REFUSES to bind when
   the server-stamped key contradicts the local pin. Full model + honest

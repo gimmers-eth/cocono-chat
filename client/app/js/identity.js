@@ -1,13 +1,15 @@
-// Safety numbers: a human-comparable rendering of a peer's account identity
-// key. Two users compare these over ANY other channel (call them, read the
-// digits aloud, screenshot via another app) — if they match, the key the
-// server handed us is genuinely theirs, defeating a server that lies
-// consistently from the first contact.
+// Safety numbers: a PAIR-DERIVED, symmetric verification code — exactly one
+// number per conversation, so BOTH users see the SAME digits and can
+// compare them over any channel (call, in person, another app). Derived
+// from BOTH account identity keys (founder keys frozen per account),
+// ordered canonically so (mine, theirs) and (theirs, mine) hash identically:
+//   SHA-256( sorted(keyA || keyB) ) -> first 16 bytes -> 8 hex groups of 4.
 //
-// Format: SHA-256 over the raw 32-byte Ed25519 key, first 16 bytes rendered
-// as 8 uppercase hex groups of 4 (32 chars, easy to read aloud in chunks:
-// "A3F1 92C0 ..."). Deterministic and unit-testable (works in Node: global
-// crypto + atob exist since v18).
+// A match proves you both hold the same pair of identities (no middleman
+// per side). A mismatch means one side is being shown a different key —
+// stop and investigate. Deterministic + unit-tested with fixed vectors
+// (works in Node: global crypto + atob since v18). The format is user-
+// visible: changing it is a UX break for anyone who wrote a number down.
 
 const HEX = [...'0123456789ABCDEF'];
 
@@ -24,11 +26,20 @@ const toHex = (bytes) =>
   Array.from(bytes, (b) => HEX[b >> 4] + HEX[b & 15]).join('');
 
 /**
- * @param {string} identityKeyB64u raw Ed25519 public key, base64url
- * @returns {Promise<string>} e.g. "3AF1B2C4 D5E6... (8 groups, space separated)"
+ * Symmetric pair safety number.
+ * @param {string} keyA base64url Ed25519 identity key (either side)
+ * @param {string} keyB base64url Ed25519 identity key (the other side)
+ * @returns {Promise<string>} "XXXX XXXX ... (8 groups)" — identical when
+ *   computed by both peers with their swapped inputs.
  */
-export async function safetyNumber(identityKeyB64u) {
-  const digest = await crypto.subtle.digest('SHA-256', b64uToBytes(identityKeyB64u));
+export async function safetyNumber(keyA, keyB) {
+  const [first, second] = String(keyA) <= String(keyB) ? [keyA, keyB] : [keyB, keyA];
+  const a = b64uToBytes(first);
+  const b = b64uToBytes(second);
+  const joined = new Uint8Array(a.length + b.length);
+  joined.set(a);
+  joined.set(b, a.length);
+  const digest = await crypto.subtle.digest('SHA-256', joined);
   const head = toHex(new Uint8Array(digest).slice(0, 16));
   return (head.match(/.{4}/g) ?? []).join(' ');
 }

@@ -250,9 +250,11 @@
     </div>
     <div id="chatopts-identity-view" hidden>
       <h2 class="side-menu-title"><span class="peer-status" id="identity-status-icon"></span><span id="identity-peer"></span></h2>
-      <p class="muted small">Compare this number with your contact over any other channel. If it matches, the encryption key really belongs to them.</p>
+      <p class="muted small">You and your contact must see the SAME number — it is derived from both accounts' identity keys. Compare it over any other channel; a match proves no one is intercepting this conversation.</p>
       <p id="identity-number" class="identity-number" tabindex="0"></p>
       <p id="identity-since" class="muted small"></p>
+      <!-- verified flag binds to MY pin of the peer key; the pair number above
+           is what both sides compare -->
       <ul class="menu-list">
         <li class="menu-row">
           <button id="btn-identity-copy" class="menu-action" data-icon="copy">Copy</button>

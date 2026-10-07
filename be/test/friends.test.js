@@ -194,3 +194,38 @@ test('account deletion purges the dead username from every friends list', async 
     await teardown();
   }
 });
+
+test('deleted username can be RE-REGISTERED and re-bound (fresh identity)', async () => {
+  const { app, teardown } = await setupApp(LIMITS);
+  try {
+    const alice = makeClient();
+    const a = await signupUser(app, alice, 'alice');
+    const tokenA = await getToken(app, alice, 'alice', a.d);
+    const authA = { authorization: `Bearer ${tokenA}` };
+
+    // first bobby: bind, then delete his account (last device detach)
+    const b1 = makeClient();
+    const b1d = await signupUser(app, b1, 'bobby');
+    await app.inject({ method: 'PUT', url: '/api/me/friends/bobby', headers: authA });
+    const tokenB1 = await getToken(app, b1, 'bobby', b1d.d);
+    const del = await app.inject({
+      method: 'DELETE', url: `/api/devices/${b1d.d}`,
+      headers: { authorization: `Bearer ${tokenB1}` },
+    });
+    assert.equal(del.json().accountDeleted, true);
+    assert.deepEqual((await app.inject({ method: 'GET', url: '/api/me/friends', headers: authA })).json().friends, []);
+
+    // same username re-registers cleanly with a NEW identity
+    const b2 = makeClient();
+    const re = await signupUser(app, b2, 'bobby');
+    assert.ok(re.d, 'second bobby exists');
+
+    // and alice can bind him again — fresh key, trusted
+    const add2 = await app.inject({ method: 'PUT', url: '/api/me/friends/bobby', headers: authA });
+    const e = add2.json().friends[0];
+    assert.equal(e.trusted, true);
+    assert.equal(e.p, b2.p, 'bound to the NEW identity, not the old ghost');
+  } finally {
+    await teardown();
+  }
+});

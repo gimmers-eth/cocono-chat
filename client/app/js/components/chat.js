@@ -453,18 +453,26 @@ export function createChat({ client, onHomeRefresh }) {
     $('chatopts-identity-view').hidden = false;
     $('identity-peer').textContent = currentPeer;
     const pin = await getPin(currentPeer);
-    const key = pin?.p ?? peerIdentity;
+    const peerKey = pin?.p ?? peerIdentity;
+    // OUR side of the pair: the account identity key (same value on every
+    // one of our devices — the server stores it; own lookup is allowed).
+    let myKey = null;
+    try {
+      myKey = (await client.peerKeys(client.username))?.id ?? null;
+    } catch { /* offline / lookup failed: handled as 'not available' */ }
     const statusIcon = $('identity-status-icon');
     const numEl = $('identity-number');
-    if (!key) {
+    if (!peerKey || !myKey) {
       statusIcon.replaceChildren(iconEl('notFriend', 'icon-danger'));
-      numEl.textContent = 'No identity key recorded on this device yet.';
-      $('identity-since').textContent = 'Open a chat with this user first.';
+      numEl.textContent = 'Safety number not available yet.';
+      $('identity-since').textContent = peerKey
+        ? 'Open a chat with yourself once while online (fetches your account identity).'
+        : 'Open a chat with this user first.';
       $('btn-identity-verify').disabled = true;
       return;
     }
-    numEl.textContent = await safetyNumber(key);
-    const verified = !!pin?.verified && pin.p === key;
+    numEl.textContent = await safetyNumber(myKey, peerKey);
+    const verified = !!pin?.verified && pin.p === peerKey;
     statusIcon.replaceChildren(
       iconEl(verified ? 'friendVerified' : 'friend', verified ? 'icon-friend' : 'icon-danger'),
     );
