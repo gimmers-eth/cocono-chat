@@ -241,6 +241,15 @@ img.logo { object-fit: cover; background: none; }
   margin: .35rem 0 0 .5rem; font-size: .7rem; color: var(--muted);
 }
 .msg.out .meta { color: #a7d9cd; }
+
+/* Security/system timeline notices: centred, amber, non-interactive */
+.msg-sys {
+  align-self: center; max-width: 88%;
+  text-align: center; font-size: .75rem; line-height: 1.4;
+  color: var(--warning); background: rgba(255, 163, 85, 0.10);
+  border: 1px solid rgba(255, 163, 85, 0.25);
+  border-radius: 12px; padding: .4rem .8rem; margin: .3rem 0;
+}
 .msg { cursor: pointer; } /* tap -> message modal (copy / forward / delete) */
 
 /* Chat header options button (⋮ -> modal, marked right of the peer name). */
@@ -587,11 +596,12 @@ body[data-view="blocked"] .page-footer { display: none; }
   border-top: 1px solid var(--border); opacity: .75; user-select: none;
 }
 
-/* Transient toast pill above the composer (errors / confirmations) */
+/* Transient toast pill, anchored above the composer INSIDE the chat view */
+.chat-view { position: relative; }
 .toast {
-  position: fixed; left: 50%; bottom: calc(4.6rem + var(--sa-b));
-  transform: translateX(-50%); z-index: 60;
-  max-width: min(92vw, 520px);
+  position: absolute; left: 50%; bottom: calc(4.4rem + var(--sa-b));
+  transform: translateX(-50%); z-index: 30;
+  max-width: min(92%, 520px);
   background: var(--panel-raised); color: var(--text);
   border: 1px solid var(--border); border-left: 3px solid var(--accent);
   border-radius: 10px; padding: .55rem .9rem;
