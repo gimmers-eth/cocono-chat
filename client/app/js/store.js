@@ -95,14 +95,27 @@ export function messagesWith(peer) {
 }
 
 // Local-only delete (this device): peers and the user's other devices keep
-// their copies by design. store.delete() accepts a key OR a range, so the
-// per-peer clear is one request in one transaction.
+// their copies by design.
 export function deleteMessage(id) {
   return withStore('readwrite', (s) => s.delete(id));
 }
 
-export function clearMessages(peer) {
-  return withStore('readwrite', (s) => s.delete(IDBKeyRange.only(String(peer).toLowerCase())));
+// Clear a whole conversation locally. IMPORTANT: 'peer' is a SECONDARY
+// index — the primary key is the message id — so store.delete(range on
+// peer) silently matches nothing (the bug this comment documents). Delete
+// exactly the ids messagesWith returned instead: clearing can never differ
+// from what the user sees on screen, and it returns the deleted count.
+export async function clearMessages(peer) {
+  const msgs = await messagesWith(peer);
+  if (!msgs.length) return 0;
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(MESSAGES, 'readwrite');
+    const store = tx.objectStore(MESSAGES);
+    for (const m of msgs) store.delete(m.id);
+    tx.oncomplete = () => resolve(msgs.length);
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 // Usernames known ON THIS DEVICE (peers we hold messages with). No server

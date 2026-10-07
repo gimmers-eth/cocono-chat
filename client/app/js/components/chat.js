@@ -423,9 +423,10 @@ export function createChat({ client, onHomeRefresh }) {
         okLabel: 'Clear', danger: true,
       });
       if (!ok || !currentPeer) return;
-      await clearMessages(currentPeer);
+      const n = await clearMessages(currentPeer);
       await render();
       onHomeRefresh?.();
+      setStatus($('chat-status'), n ? `Cleared ${n} message${n === 1 ? '' : 's'} on this device` : '');
     });
 
     // Forward dialog. NB: reference forwardCurrentMsg/sendForward at CALL
