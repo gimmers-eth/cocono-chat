@@ -9,10 +9,14 @@
 // record: { id, peer, dir: 'in'|'out', text, ts, state?, fromDeviceId? }
 //   id:    outgoing = 'out:'+localId (one per logical send)
 //          incoming = 'in:'+server mid (one per device copy)
+// friends: { peer } — one-way trust list, mirrored from the server (source
+//   of truth) and kept live via E2EE system messages; independent of the
+//   message store on purpose: clearing a chat never unfriends anyone.
 
 const DB_PREFIX = 'cocono-app';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const MESSAGES = 'messages';
+const FRIENDS = 'friends';
 
 let scope = 'anon';
 let dbPromise = null;
@@ -58,6 +62,9 @@ function openDb() {
           const store = db.createObjectStore(MESSAGES, { keyPath: 'id' });
           store.createIndex('byPeer', 'peer');
         }
+        if (!db.objectStoreNames.contains(FRIENDS)) {
+          db.createObjectStore(FRIENDS, { keyPath: 'peer' });
+        }
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -66,11 +73,11 @@ function openDb() {
   return dbPromise;
 }
 
-async function withStore(mode, fn) {
+async function withStore(mode, fn, store = MESSAGES) {
   const db = await openDb();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(MESSAGES, mode);
-    const req = fn(tx.objectStore(MESSAGES));
+    const tx = db.transaction(store, mode);
+    const req = fn(tx.objectStore(store));
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
@@ -148,3 +155,38 @@ export function markRead(peer, ts = Date.now()) {
 }
 
 export const isUnread = (peer, ts) => (ts ?? 0) > (reads()[String(peer).toLowerCase()] ?? 0);
+
+// --- friends (local mirror of the server list; see header comment) ---
+
+export function loadFriends() {
+  return withStore('readonly', (s) => s.getAll(), FRIENDS);
+}
+
+export async function friendAdd(peer) {
+  await withStore('readwrite', (s) => s.put({ peer: String(peer).toLowerCase() }), FRIENDS);
+  notifyFriends();
+}
+
+export async function friendDel(peer) {
+  await withStore('readwrite', (s) => s.delete(String(peer).toLowerCase()), FRIENDS);
+  notifyFriends();
+}
+
+/** Replace the whole local mirror with the authoritative server list. */
+export async function setFriends(list) {
+  const db = await openDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(FRIENDS, 'readwrite');
+    const store = tx.objectStore(FRIENDS);
+    store.clear();
+    for (const peer of list ?? []) store.put({ peer: String(peer).toLowerCase() });
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+  notifyFriends();
+}
+
+export const FRIENDS_EVENT = 'cocono:friends';
+function notifyFriends() {
+  window.dispatchEvent(new Event(FRIENDS_EVENT));
+}

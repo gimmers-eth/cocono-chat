@@ -1,0 +1,58 @@
+// Central icon config + helpers (Font Awesome 7 Free, vendored under
+// /vendor/fontawesome — MIT/SIL OFL, LICENSE.txt alongside).
+//
+// EVERY icon in the app comes from this file: static markup carries
+// data-icon="<key>" and applyIcons() fills it at boot; dynamic views call
+// iconEl(key). No glyph characters live in components anymore, and no
+// innerHTML is used anywhere (CSP + the repo's no-innerHTML rule).
+//
+// FA classes: solid style by default; add 'fa-regular'/'fa-brands' in the
+// value when needed (the first token wins the style).
+
+export const ICONS = {
+  // chrome / actions
+  settings: 'fa-gear',
+  logout: 'fa-power-off',
+  back: 'fa-arrow-left',
+  close: 'fa-xmark',
+  send: 'fa-paper-plane',
+  menu: 'fa-ellipsis-vertical',
+  chat: 'fa-comment',
+
+  // message actions
+  copy: 'fa-copy',
+  forward: 'fa-share',
+  delete: 'fa-trash-can',
+
+  // friendship (one-way trust)
+  friend: 'fa-user-check',          // trusted state (green)
+  notFriend: 'fa-user-xmark',       // stranger marker (red, .icon-danger)
+  friendAdd: 'fa-user-shield',      // action: add as friend
+  friendRemove: 'fa-user-minus',    // action: remove friend (red)
+
+  // message status marks
+  stateSending: 'fa-clock',
+  stateSent: 'fa-check',
+  stateDelivered: 'fa-check-double',
+  stateFailed: 'fa-circle-exclamation', // + .icon-danger
+};
+
+/** <i> element for an ICONS key (returns plain <i> — callers style/label). */
+export function iconEl(key, extraClass = '') {
+  const name = ICONS[key] ?? key;
+  const el = document.createElement('i');
+  const style = name.startsWith('fa-regular') || name.startsWith('fa-brands')
+    ? name.split(' ')[0] : 'fa-solid';
+  const glyph = name.startsWith('fa-') && style !== 'fa-solid' ? name.slice(style.length + 1) : name;
+  el.className = `${style} ${glyph}${extraClass ? ` ${extraClass}` : ''}`;
+  el.setAttribute('aria-hidden', 'true');
+  return el;
+}
+
+/** Fill every [data-icon] in the document once (boot-time static markup). */
+export function applyIcons(root = document) {
+  for (const el of root.querySelectorAll('[data-icon]')) {
+    if (el.firstElementChild) continue; // idempotent
+    el.prepend(iconEl(el.dataset.icon, el.dataset.iconClass ?? ''));
+  }
+}

@@ -262,6 +262,41 @@ img.logo { object-fit: cover; background: none; }
 /* Off-screen selection helper for the clipboard fallback (never visible). */
 .copy-helper { position: fixed; top: -100vw; left: -100vw; opacity: 0; }
 
+/* Trust warning strip (non-friend chat): stays under the header, above the
+   transcript. Amber = caution, not danger — encryption still holds. */
+.chat-warn {
+  flex: none; padding: .4rem .9rem; font-size: .82rem; text-align: center;
+  background: rgba(255, 163, 85, 0.12); color: var(--warning);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Font Awesome icons: every glyph comes from js/icons.js (vendored FA Free,
+   /vendor/fontawesome). Sizing + tint helpers only — no per-view magic. */
+.icon-btn i { font-size: 1.05rem; }
+#btn-send i { font-size: 1rem; }
+.linkish i { margin-right: .45em; }
+.icon-danger { color: var(--danger) !important; }
+.icon-friend { color: var(--success) !important; }
+.msg .meta i { font-size: .68rem; margin-left: .3em; color: var(--muted); }
+.msg.out .meta i { color: #a7d9cd; }
+.msg.out .meta i.icon-danger, .msg .meta i.icon-danger { color: var(--danger); }
+.convo-last i { font-size: .72rem; margin: 0 .15em; color: var(--muted); }
+.chat-warn i { margin-right: .45em; }
+
+/* Chat options menu: icon column + full-width action rows (report/block
+   will join as further rows later). */
+.menu-list { display: grid; gap: .1rem; margin: .35rem 0 .1rem; }
+.menu-row { display: flex; align-items: center; gap: .55rem; }
+.menu-status { width: 1.5rem; flex: none; text-align: center; color: var(--muted); }
+.menu-status i { font-size: .95rem; }
+.menu-action {
+  flex: 1; text-align: left; background: none; border: 0; border-radius: 8px;
+  color: var(--text); padding: .5rem .55rem;
+}
+.menu-action:hover { background: var(--panel-raised); }
+.menu-action i { margin-right: .6em; width: 1.1em; text-align: center; }
+.menu-action.danger, .menu-action.danger i { color: var(--danger); }
+
 /* Local-user suggestion lists (new chat + forward dialog): tap to pick,
    filtered while typing. Hidden entirely when there is nothing to suggest. */
 .peer-list {

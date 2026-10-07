@@ -43,6 +43,9 @@ test('app shell and assets are served', async (t) => {
   assert.match(html, /src="\/js\/main\.js"/);
   assert.match(html, /id="drawer-overlay" class="overlay"/);
   assert.match(html, /id="settings-drawer" class="drawer"[^>]*aria-modal="true"/);
+  // icons: FA stylesheet linked + placeholder mechanism present
+  assert.match(html, /vendor\/fontawesome\/css\/all\.min\.css/);
+  assert.match(html, /data-icon="send"/);
 
   // The app must reach the SDK through the /sdk/ mount, not anywhere else.
   const mainSrc = await (await fetch(`${srv.base}/js/main.js`)).text();
@@ -50,6 +53,8 @@ test('app shell and assets are served', async (t) => {
 
   for (const [asset, ctype] of [
     ['/css/base.css', 'text/css'],
+    ['/vendor/fontawesome/css/all.min.css', 'text/css'],
+    ['/vendor/fontawesome/webfonts/fa-solid-900.woff2', 'font/woff2'],
     ['/themes/dark/theme.css', 'text/css'],
     ['/themes/themes.json', 'application/json'],
     ['/manifest.webmanifest', 'application/'],

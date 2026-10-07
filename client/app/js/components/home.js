@@ -4,11 +4,12 @@
 
 import { $, setStatus, fmtTime, confirmModal } from '../ui.js';
 import { createPeerSuggestions } from './peers.js';
-import { allMessages, isUnread } from '../store.js';
+import { iconEl } from '../icons.js';
+import { allMessages, isUnread, loadFriends } from '../store.js';
 import { refreshSettingsUI } from '../install.js';
 import { loadRegistry, applyTheme, savedTheme, wireThemeSelect } from '../theme.js';
 
-const MSG_STATE_MARK = { sending: '⏳', sent: '✓', delivered: '✓✓', failed: '!' };
+const MSG_STATE_ICON = { sending: 'stateSending', sent: 'stateSent', delivered: 'stateDelivered', failed: 'stateFailed' };
 
 export function createHome({ client, chat, onLogout }) {
   let settingsOpen = false;
@@ -45,13 +46,21 @@ export function createHome({ client, chat, onLogout }) {
 
   async function renderConversationList() {
     const list = $('conversation-list');
-    const all = await allMessages();
+    const [all, friends] = await Promise.all([allMessages(), loadFriends()]);
     const latestByPeer = new Map();
     for (const m of all) {
       const cur = latestByPeer.get(m.peer);
       if (!cur || m.ts > cur.ts) latestByPeer.set(m.peer, m);
     }
-    const entries = [...latestByPeer.entries()].sort((a, b) => b[1].ts - a[1].ts);
+    // Friends are REAL entries even with zero messages: clearing a chat (or
+    // never having written one) must never drop them from the menu.
+    for (const f of friends) if (!latestByPeer.has(f.peer)) latestByPeer.set(f.peer, null);
+    const entries = [...latestByPeer.entries()].sort((a, b) => {
+      if (!a[1] && !b[1]) return a[0].localeCompare(b[0]);
+      if (!a[1]) return 1; // message-less friends sit below the active list
+      if (!b[1]) return -1;
+      return b[1].ts - a[1].ts;
+    });
     const frag = document.createDocumentFragment();
     for (const [peer, last] of entries) {
       const li = document.createElement('li');
@@ -66,16 +75,25 @@ export function createHome({ client, chat, onLogout }) {
       name.textContent = peer;
       const preview = document.createElement('span');
       preview.className = 'convo-last';
-      preview.textContent =
-        (last.dir === 'out' ? `You: ${MSG_STATE_MARK[last.state] ?? ''} ` : '') + (last.text ?? '');
+      preview.textContent = '';
+      if (last === null) {
+        preview.textContent = 'Friend — no messages yet';
+      } else {
+        if (last.dir === 'out') {
+          preview.append('You: ');
+          preview.append(iconEl(MSG_STATE_ICON[last.state] ?? 'stateSending', last.state === 'failed' ? 'icon-danger' : ''));
+          preview.append(' ');
+        }
+        preview.append(last.text ?? '');
+      }
       meta.append(name, preview);
       const side = document.createElement('span');
       side.className = 'convo-side';
       const time = document.createElement('span');
       time.className = 'convo-time';
-      time.textContent = fmtTime(last.ts);
+      time.textContent = last === null ? '—' : fmtTime(last.ts);
       side.appendChild(time);
-      if (isUnread(peer, last.ts)) {
+      if (last !== null && isUnread(peer, last.ts)) {
         const dot = document.createElement('span');
         dot.className = 'unread';
         side.appendChild(dot);

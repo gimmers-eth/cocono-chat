@@ -9,9 +9,10 @@ import { startSingleTabGuard } from './components/blocked.js';
 import { createAuth } from './components/auth.js';
 import { createHome } from './components/home.js';
 import { createChat } from './components/chat.js';
-import { setScope } from './store.js';
+import { setScope, setFriends } from './store.js';
 import { initKeyboardFit } from './keyboard.js';
 import { mountDiagnostics } from './diag.js';
+import { applyIcons } from './icons.js';
 import { initInstallAndNotify } from './install.js';
 import { putAppTitle, takePendingChat } from './swkv.js';
 
@@ -91,6 +92,15 @@ async function enterApp({ gesture = false, offline = false } = {}) {
   if (!offline) client.connect(); // offline mode: browse the local store only
   await home.renderConversationList();
 
+  // Friends mirror: the SERVER list is the source of truth — reconcile it on
+  // every entry (catches events missed while offline; new devices get the
+  // full list here). Live changes arrive via E2EE system messages.
+  if (!offline) {
+    client.listFriends().then((list) => setFriends(list)).then(() => {
+      home.renderConversationList().catch(() => {});
+    }).catch(() => { /* stays on the local mirror */ });
+  }
+
   // A notification click that cold-booted the app parked the peer in the
   // SW's IDB kv (delete-on-read): open exactly that conversation.
   takePendingChat().then((peer) => {
@@ -132,6 +142,7 @@ async function showAuth() {
 
 // Boot — wire every component exactly once, then route.
 startSingleTabGuard();
+applyIcons(); // data-icon placeholders -> Font Awesome (js/icons.js config)
 initKeyboardFit(); // pin the app shell to the visible viewport (soft keyboard)
 await initTheme(); // dark fallback already linked in index.html
 mountDiagnostics({ client });

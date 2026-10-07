@@ -19,7 +19,7 @@
 //    sw-lib.js; cache fallback when offline. API traffic and the dynamic
 //    manifest are never cached.
 
-const SHELL_CACHE = 'cocono-shell-v3';
+const SHELL_CACHE = 'cocono-shell-v4';
 const FALLBACK_TITLE = 'co.co.no';
 const SETTLE_MS = 800;
 
@@ -243,7 +243,7 @@ self.addEventListener('pushsubscriptionchange', (event) => {
 
 // ---------- offline app shell ----------
 
-const SHELL_PATHS = ['/css/', '/js/', '/sdk/', '/themes/', '/icons/'];
+const SHELL_PATHS = ['/css/', '/js/', '/sdk/', '/themes/', '/icons/', '/vendor/'];
 const isShell = (url) =>
   url.origin === self.location.origin
   && (url.pathname === '/' || url.pathname === '/sw-lib.js'

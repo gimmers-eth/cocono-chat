@@ -94,6 +94,25 @@ is the only FE (audits mentioning `fe/` are historical).
   empty queue (the page owns that copy; generic-on-empty would only
   downgrade the visible notification) — generic remains only for genuine
   failures (login/peek errors, budget timeout).
+- **Friends (one-way trust)**: users can mark accounts as trusted. Server is
+  the SOURCE OF TRUTH (`/api/me/friends` GET/PUT/DELETE, be/.../friends.js:
+  validation, self/unknown rejected, `FRIENDS_MAX` cap 500, rate-limited).
+  Devices mirror into per-account IndexedDB (`friends` store, DB v2) and
+  sync LIVE via E2EE system messages — the acting device broadcasts
+  `{"sys":"friend+/-","ul"}` to its OWN account over the normal relay path
+  (server can't read/forge it); app-level filter keeps sys payloads out of
+  the transcript. New/offline devices reconcile with `listFriends()` at app
+  entry (main.js). UI: non-friend chat shows a red `user-xmark` warning
+  strip + menu status; menu actions `user-shield` add / `user-minus` remove;
+  **friends persist in the sidebar with zero messages** (list merges
+  messages ∪ friends — clearing a chat never unfriends anyone).
+- **Icons: Font Awesome 7 Free** — vendored (not CDN: CSP `default-src
+  'self'` + offline shell). `client/app/vendor/fontawesome/{css,webfonts}`
+  (+ LICENSE.txt). Single config `client/app/js/icons.js` (ICONS map +
+  iconEl + applyIcons); static markup uses `data-icon="<key>"` placeholders
+  filled at boot; NO glyph/emoji characters remain in components, no
+  innerHTML. SW caches `/vendor/` (shell v4). serve-test asserts css+woff2
+  are delivered with right content types.
 - **Offline shell**: network-first SW caching of statics; app boots offline
   into read-only mode from IndexedDB (login failure w/ network error enters
   the app); online event promotes to live session.

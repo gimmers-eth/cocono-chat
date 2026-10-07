@@ -11,9 +11,11 @@
 
 import { $, setStatus, setChatOpen, fmtTime, confirmModal } from '../ui.js';
 import { createPeerSuggestions } from './peers.js';
+import { iconEl } from '../icons.js';
 import {
   saveMessage, updateMessage, messagesWith, markRead, allMessages,
   getMessage, deleteMessage, clearMessages,
+  loadFriends, friendAdd, friendDel, FRIENDS_EVENT,
 } from '../store.js';
 
 // In-app banner (visible-but-other-chat) + OS notification (app hidden or
@@ -31,7 +33,7 @@ function showBanner(text, peer) {
   bannerTimer = setTimeout(() => { el.hidden = true; }, 4000);
 }
 
-const STATE_MARK = { sending: '⏳', sent: '✓', delivered: '✓✓', failed: '!' };
+const STATE_MARK = { sending: 'stateSending', sent: 'stateSent', delivered: 'stateDelivered', failed: 'stateFailed' };
 
 // 'Read' means the user actually LOOKED at the conversation: the tab is
 // visible AND the window has focus (WhatsApp Web semantics). Background
@@ -77,6 +79,22 @@ export function createChat({ client, onHomeRefresh }) {
     });
 
     client.on('message', async (m) => {
+      // System messages (friend events) ride the normal E2EE path from OUR
+      // OWN account: apply to the local friend mirror, NEVER the transcript.
+      // Only this account can produce them (relay HMAC is keyed with the
+      // sender's transport key), so the payload is trusted once decrypted —
+      // but still parsed defensively.
+      const selfUl = String(client.username ?? '').toLowerCase();
+      if (m.peer.toLowerCase() === selfUl && /^\{"sys":"friend[-+]"/.test(m.text)) {
+        try {
+          const p = JSON.parse(m.text);
+          if (p.sys === 'friend+') await friendAdd(p.ul);
+          else if (p.sys === 'friend-') await friendDel(p.ul);
+          await updateTrustUI();
+          onHomeRefresh?.();
+        } catch { /* unparsable system payload: ignore */ }
+        return;
+      }
       await saveMessage({
         id: `in:${m.mid}`,
         peer: m.peer,
@@ -180,7 +198,10 @@ export function createChat({ client, onHomeRefresh }) {
       body.textContent = m.text;
       const meta = document.createElement('span');
       meta.className = 'meta';
-      meta.textContent = fmtTime(m.ts) + (m.dir === 'out' ? ` ${STATE_MARK[m.state] ?? ''}` : '');
+      meta.textContent = fmtTime(m.ts);
+      if (m.dir === 'out') {
+        meta.appendChild(iconEl(STATE_MARK[m.state] ?? 'stateSending', m.state === 'failed' ? 'icon-danger' : ''));
+      }
       li.append(body, meta);
       frag.appendChild(li);
     }
@@ -260,9 +281,72 @@ export function createChat({ client, onHomeRefresh }) {
   //     here later. Modal (not dropdown) so it survives any re-render and
   //     needs no outside-click machinery. ---
 
-  function openChatOpts() {
+  // --- trust UI: friends = one-way trust; strangers show a chat warning ---
+
+  async function isCurrentPeerFriend() {
+    if (!currentPeer) return false;
+    const friends = await loadFriends();
+    return friends.some((f) => f.peer === currentPeer);
+  }
+
+  async function updateTrustUI() {
+    const warn = $('chat-warn');
+    if (!warn) return;
+    if (!currentPeer) { warn.hidden = true; return; }
+    const friend = await isCurrentPeerFriend();
+    warn.hidden = friend;
+    if (!friend) {
+      warn.replaceChildren(
+        iconEl('notFriend', 'icon-danger'),
+        document.createTextNode(` @${currentPeer} is not on your friends list — messages are `
+          + 'end-to-end encrypted, but you have not marked this account as trusted.'),
+      );
+    }
+  }
+
+  function friendMenuLabel(isFriend, peer) {
+    const btn = $('btn-chat-friend');
+    const status = $('friend-status');
+    // status column: the red person-with-an-x (stranger) vs green check-user
+    status.replaceChildren(iconEl(isFriend ? 'friend' : 'notFriend', isFriend ? 'icon-friend' : 'icon-danger'));
+    btn.replaceChildren(
+      iconEl(isFriend ? 'friendRemove' : 'friendAdd'),
+      document.createTextNode(isFriend ? ` Remove @${peer} as friend` : ` Add @${peer} as friend`),
+    );
+    btn.classList.toggle('danger', isFriend);
+  }
+
+  async function toggleFriend() {
+    if (!currentPeer) return;
+    const wasFriend = await isCurrentPeerFriend();
+    try {
+      if (wasFriend) {
+        await client.removeFriend(currentPeer);
+        await friendDel(currentPeer);
+      } else {
+        await client.addFriend(currentPeer);
+        await friendAdd(currentPeer);
+      }
+      setStatus($('chat-status'), wasFriend
+        ? `@${currentPeer} removed from friends`
+        : `@${currentPeer} added as friend`);
+      await updateTrustUI();
+      onHomeRefresh?.();
+    } catch (err) {
+      setStatus($('chat-status'), err.message ?? String(err), true);
+    }
+  }
+
+  // --- chat options modal (header ⋮): friend toggle + clear chat today;
+  //     report/block land here later. Modal (not dropdown) on purpose: an
+  //     early in-bubble actions design was killed by the click-triggered
+  //     catchUp re-render wiping the focus state mid-gesture — overlay DOM
+  //     survives render(). ---
+
+  async function openChatOpts() {
     if (!currentPeer) return;
     $('chatopts-title').textContent = `Chat options — @${currentPeer}`;
+    friendMenuLabel(await isCurrentPeerFriend(), currentPeer);
     $('chatopts-overlay').hidden = false;
     $('chatopts-modal').hidden = false;
     $('btn-chatopts-close').focus?.();
@@ -344,6 +428,7 @@ export function createChat({ client, onHomeRefresh }) {
       $('chat-view').hidden = false;
       setChatOpen(true);
       const last = await render();
+      await updateTrustUI();
       // Read up to the newest DISPLAYED message (server-assigned ts): marking
       // with the local clock could miss messages the server stamped a few ms
       // 'ahead', which would leave the unread dot stubbornly on.
@@ -414,6 +499,11 @@ export function createChat({ client, onHomeRefresh }) {
     $('btn-chat-menu').addEventListener('click', openChatOpts);
     $('btn-chatopts-close').addEventListener('click', closeChatOpts);
     $('chatopts-overlay').addEventListener('click', closeChatOpts);
+    $('btn-chat-friend').addEventListener('click', () => {
+      closeChatOpts();
+      toggleFriend();
+    });
+    window.addEventListener(FRIENDS_EVENT, () => { updateTrustUI(); });
     $('btn-chat-clear').addEventListener('click', async () => {
       closeChatOpts();
       if (!currentPeer) return;
