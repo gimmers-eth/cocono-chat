@@ -365,6 +365,21 @@ img.logo { object-fit: cover; background: none; }
 .idverify-actions { margin: 1rem 0 1.1rem; }
 .idverify-actions .btn { padding-inline: 1.3rem; }
 
+/* Chat-head peer button: opens the profile view */
+.peer-btn {
+  display: grid; background: none; border: 0; padding: 0; margin: 0;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+  border-radius: 8px; min-width: 0;
+}
+.peer-btn:hover, .peer-btn:focus-visible { background: var(--panel-raised); outline: none; }
+
+/* Profile view status lines */
+.profile-id-state { margin: .1rem 0 0; font-weight: 700; font-size: .9rem; }
+.profile-id-state.ok { color: var(--success); }
+.profile-id-state.bad { color: var(--danger); }
+#profile-id-note { margin: 0 0 .4rem; line-height: 1.45; }
+#profile-trust { margin: 0 0 .2rem; }
+
 /* Chat options: right-hand side menu over the translucent scrim. */
 .side-menu {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 50;

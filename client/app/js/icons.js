@@ -43,6 +43,7 @@ export const ICONS = {
   tabVerify: 'fa-id-card',
   tabGeneral: 'fa-sliders',
   tabDiagnostics: 'fa-heart-pulse',
+  profile: 'fa-address-card',       // peer profile panel
 
   // message status marks
   stateSending: 'fa-clock',

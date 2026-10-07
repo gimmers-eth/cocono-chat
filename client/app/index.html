@@ -129,10 +129,10 @@
       <section id="chat-view" class="chat-view" hidden>
         <header class="chat-head">
           <button id="btn-chat-back" class="icon-btn back" title="Close conversation" data-icon="back"></button>
-          <div class="chat-peer">
+          <button type="button" id="btn-peer-profile" class="chat-peer peer-btn" title="View profile">
             <span class="chat-peer-name"><span id="chat-peer-status" class="peer-status"></span><span id="chat-peer"></span><span id="chat-peer-badge" class="badge-slot"></span></span>
             <span id="chat-sub" class="muted small"></span>
-          </div>
+          </button>
           <button id="btn-chat-menu" class="icon-btn chat-menu-btn" title="Chat options" aria-haspopup="true" data-icon="menu"></button>
         </header>
         <p id="chat-warn" class="chat-warn" hidden></p>
@@ -269,12 +269,29 @@
           <button id="btn-chat-friend" class="menu-action"></button>
         </li>
         <li class="menu-row">
+          <button id="btn-chat-profile" class="menu-action" data-icon="profile">View profile</button>
+        </li>
+        <li class="menu-row">
           <button id="btn-chat-remove" class="menu-action danger" data-icon="friendRemove">Remove user</button>
         </li>
         <li class="menu-row">
           <button id="btn-chat-clear" class="menu-action danger" data-icon="delete">Clear messages in this chat</button>
         </li>
         <!-- report / block land here later as further rows -->
+      </ul>
+    </div>
+    <div id="chatopts-profile-view" hidden>
+      <h2 class="side-menu-title"><span id="profile-status-icon" class="peer-status"></span><span id="profile-name"></span></h2>
+      <p id="profile-id-state" class="profile-id-state"></p>
+      <p id="profile-id-note" class="muted small"></p>
+      <p id="profile-trust" class="muted small"></p>
+      <ul class="menu-list">
+        <li class="menu-row">
+          <button id="btn-profile-safety" class="menu-action" data-icon="identity">Safety number</button>
+        </li>
+        <li class="menu-row">
+          <button id="btn-profile-back" class="menu-action" data-icon="back">Back</button>
+        </li>
       </ul>
     </div>
     <div id="chatopts-identity-view" hidden>
