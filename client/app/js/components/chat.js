@@ -211,7 +211,13 @@ export function createChat({ client, onHomeRefresh }) {
         // unknown_recipient on a chat that opened fine means our cached view
         // is stale — almost always: their account was deleted while we sat
         // here. Re-resolve and let the icons/ghost state catch up.
-        if (error === 'unknown_recipient') recheckPeerAfterSend();
+        if (error === 'unknown_recipient') {
+          // AWAITED: the optimistic head/composer flip must settle before
+          // the re-check's verdict can walk it back (unawaited, its
+          // continuation could land AFTER the walk-back and re-apply gone)
+          await applyGoneState(); // instant icon/composer reaction…
+          recheckPeerAfterSend(); // …then confirm & word the notice
+        }
       }
       if (rec) {
         await render();
@@ -842,36 +848,62 @@ export function createChat({ client, onHomeRefresh }) {
     onHomeRefresh?.();
   }
 
-  // Re-resolve the peer after an unknown_recipient send rejection.
-  // Success = they exist (re-apply facts: a mid-chat admin verification or
-  // re-registration updates the icons immediately); 404 = flip the whole UI
-  // into the deleted-account state without waiting for a chat reopen.
+  // ---- vanished-peer state machine (unknown_recipient acks) ----
+  // The ack itself is AUTHORITATIVE for "this recipient could not be
+  // resolved" — flip the UI into the deleted/gone state IMMEDIATELY
+  // (optimistic), then re-resolve in the background to (a) confirm and emit
+  // the timeline notice + toast wording, or (b) walk it back when the
+  // account actually exists and only the addressed device was stale.
   let rechecking = false;
+  let goneApplied = false;   // state flip done for this chat session
+  let goneAnnounced = false; // notice+toast emitted for this chat session
+
+  async function applyGoneState() {
+    if (goneApplied) return;
+    goneApplied = true;
+    peerGone = true;
+    await applyPeerFacts(null);
+    await markPeerGone(currentPeer, true);
+    await friendMarkFlags(currentPeer, { gone: true });
+    setComposerEnabled(false);
+    await updateTrustUI();
+    onHomeRefresh?.();
+  }
+
+  async function finishGoneVerdict() {
+    if (goneAnnounced) return;
+    goneAnnounced = true;
+    await applyGoneState();
+    // chat-head is ground truth again after the verdict (sub-line + ladder
+    // icon), regardless of what rendered while the re-check was in flight
+    await applyPeerFacts(null);
+    await updateTrustUI();
+    await announceNotice(currentPeer, peerHadHistory ? 'account-deleted' : 'user-gone');
+    toast(peerHadHistory
+      ? `${currentPeer}'s account was deleted — history is read-only now.`
+      : `${currentPeer} doesn’t exist — nothing was delivered.`, 'error');
+  }
+
   async function recheckPeerAfterSend() {
-    if (!currentPeer || rechecking || peerGone) return;
+    if (!currentPeer || rechecking) return;
     rechecking = true;
     try {
       const fresh = await client.peerKeys(currentPeer, { refresh: true });
+      // account EXISTS — the unknown_recipient was about a stale DEVICE,
+      // not a deleted account: walk the optimistic state back
+      peerGone = false;
+      goneApplied = false;
       await applyPeerFacts(fresh);
       await markPeerGone(currentPeer, false);
+      setComposerEnabled(true);
       await updateTrustUI();
       onHomeRefresh?.();
     } catch (err) {
       if (err?.code === 'unknown_account' || err?.status === 404) {
-        peerGone = true;
-        await applyPeerFacts(null);
-        await markPeerGone(currentPeer, true);
-        await friendMarkFlags(currentPeer, { gone: true });
-        setComposerEnabled(false);
-        await updateTrustUI();
-        onHomeRefresh?.();
-        await announceNotice(currentPeer, peerHadHistory ? 'account-deleted' : 'user-gone');
-        toast(peerHadHistory
-          ? `${currentPeer}'s account was deleted — history is read-only now.`
-          : `${currentPeer} doesn’t exist — nothing was delivered.`, 'error');
+        await finishGoneVerdict();
       }
-      // any other error (offline, transient): leave state untouched — the
-      // send itself already surfaced it
+      // any other error (offline, transient): keep the optimistic gone
+      // state — the ack was real (it arrived over the live socket)
     } finally {
       rechecking = false;
     }
@@ -882,6 +914,8 @@ export function createChat({ client, onHomeRefresh }) {
     try {
       let peer = null;
       peerGone = false;
+      goneApplied = false;
+      goneAnnounced = false;
       try {
         peer = await client.peerKeys(username); // validates existence, caches
       } catch (err) {
@@ -901,7 +935,12 @@ export function createChat({ client, onHomeRefresh }) {
       $('chat-view').hidden = false;
       setChatOpen(true);
       const last = await render();
-      peerHadHistory = (await messagesWith(currentPeer)).length > 0;
+      // history = a real conversation existed at open: something received,
+      // or something sent that the server accepted (sent/delivered). A
+      // failed 'sending'/'failed' out-copy does NOT count — it would fake
+      // the "account deleted" obituary for a peer we never actually talked to.
+      peerHadHistory = (await messagesWith(currentPeer)).some((m) =>
+        m.dir === 'in' || (m.dir === 'out' && (m.state === 'sent' || m.state === 'delivered')));
       // Identity verification: compare the stored friend binding against the
       // LIVE account key from this very lookup. Mismatch (or server-flagged
       // 'changed') = the username was re-registered: drop trust on EVERY
@@ -910,7 +949,7 @@ export function createChat({ client, onHomeRefresh }) {
       // Persist "this account is gone / is back" for the sidebar: it only
       // learns from the local mirror, and the server purges dead names from
       // friends lists. Skipped in pure-offline mode (no facts learned).
-      if (peerGone) await markPeerGone(currentPeer, true);
+      if (peerGone) { goneApplied = true; goneAnnounced = true; await markPeerGone(currentPeer, true); }
       else if (peer) await markPeerGone(currentPeer, false);
       pinState = peerIdentity ? await recordPinSeen(currentPeer, peerIdentity) : 'ok';
       if (pinState === 'changed') {
