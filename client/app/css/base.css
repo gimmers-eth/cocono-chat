@@ -149,7 +149,7 @@ img.logo { object-fit: cover; background: none; }
 }
 .me { display: flex; align-items: center; gap: .5rem; min-width: 0; cursor: pointer; border-radius: 10px; padding: .15rem .3rem; }
 .me:hover, .me:focus-visible { background: var(--panel-raised); outline: none; }
-.own-avatar { width: 56px; height: 56px; object-fit: cover; font-size: 1.6rem; }
+.own-avatar { width: 56px; height: 56px; object-fit: cover; font-size: 1.6rem; flex: none; }
 img.own-avatar { border-radius: 50%; }
 #tabpanel-profile h3, .profile-h3 { margin: 1.1rem 0 .5rem; }
 #tabpanel-profile .profile-id.own-profile { margin: .6rem 0 1rem; }
@@ -163,8 +163,7 @@ img.own-avatar { border-radius: 50%; }
 .save-chip.bad { color: var(--danger); background: rgba(239, 105, 117, 0.12); }
 .bio { font-family: inherit; border-radius: 10px !important; padding: .55rem .8rem !important; width: 100%; resize: vertical; background: var(--panel-raised); border: 1px solid var(--border); color: var(--text); }
 .you-chip { color: var(--success); font-weight: 700; }
-#profile-own-avatar[hidden] + #profile-own-initial { display: inline-flex; }
-#profile-own-initial[hidden] { display: none; }
+
 /* two-row identity block: name (+red badge) with "Get verified" beneath */
 .me-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
 .me-line { display: flex; align-items: baseline; gap: .35rem; min-width: 0; }

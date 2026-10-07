@@ -164,6 +164,9 @@ export function createHome({ client, chat, onLogout }) {
   function paintOwnAvatar(b64) {
     const img = $('profile-own-avatar');
     const initial = $('profile-own-initial');
+    // keep the fallback letter ready + centred (.avatar grid handles it;
+    // no display overrides here)
+    initial.textContent = String(client.username ?? '?').slice(0, 1).toUpperCase();
     if (b64) {
       img.src = `data:image/jpeg;base64,${b64}`;
       img.hidden = false;
@@ -173,7 +176,7 @@ export function createHome({ client, chat, onLogout }) {
       img.hidden = true;
       initial.hidden = false;
     }
-    $('btn-profile-avatar-clear').hidden = !b64 && pendingAvatar !== 'clear';
+    $('btn-profile-avatar-clear').hidden = !b64;
   }
 
   async function renderProfileTab() {
@@ -236,7 +239,10 @@ export function createHome({ client, chat, onLogout }) {
       .then(async () => {
         await client.setProfile(patch);
         if (patch.bio !== undefined) pendingBioSaved = patch.bio;
-        if (patch.avatar !== undefined || patch.clearAvatar) pendingAvatar = null;
+        if (patch.avatar !== undefined || patch.clearAvatar) {
+          pendingAvatar = null;
+          await renderProfileTab(); // authoritative re-sync of the preview
+        }
         if (flash) setSaveChip('saved');
       })
       .catch((err) => {
