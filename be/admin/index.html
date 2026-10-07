@@ -53,6 +53,30 @@
       <p id="diags-empty" class="dim" hidden>No diagnostics reports.</p>
     </div>
 
+    <h2>Backup &amp; Ops</h2>
+    <div class="panel">
+      <div class="row">
+        <button id="btn-ops-hourly">Backup now</button>
+        <button id="btn-ops-daily">Box bundle now</button>
+        <button id="btn-ops-drill">Test a backup (drill)</button>
+        <span id="ops-running" class="dim" hidden>⏳ ops run in progress…</span>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Job</th><th>Result</th><th>Started</th><th>Duration</th><th>Detail</th></tr>
+        </thead>
+        <tbody id="ops-status-body"></tbody>
+      </table>
+      <p id="ops-empty" class="dim" hidden>No ops runs recorded yet.</p>
+      <div class="row">
+        <select id="restore-archive" size="1"></select>
+        <input id="restore-confirm" type="text" placeholder="type RESTORE" size="12" autocomplete="off" />
+        <button id="btn-ops-restore" class="danger tiny">Restore prod</button>
+        <span class="dim">overwrites live data with the chosen backup</span>
+      </div>
+      <pre id="ops-log" class="log" hidden></pre>
+    </div>
+
     <h2>Users &amp; devices</h2>
     <div class="panel">
       <table>

@@ -84,6 +84,14 @@ changes only — update.sh does the clean known-good bounce itself.
   launch: set `RCLONE_DEST` + move the identity off-box.
 - Status/log: `~/backups/last-run.json`, `~/backups/backup.log`,
   `journalctl --user -u cocono-backup -a`.
+- **Admin panel Ops section** (127.0.0.1:3001): per-job result table
+  (update/hourly/daily/drill/restore from `~/backups/status/*.json`), log
+  tail, archive list, buttons for Backup now / Box bundle / Drill /
+  PROD Restore (typed 'RESTORE' required).
+- De-bounce: ALL ops scripts share one flock
+  (`~/backups/.ops.lock`; live run marker `~/backups/.ops.pid`) — timers,
+  admin buttons and manual runs never overlap; a blocked run skips
+  silently (exit 0) so the next scheduled tick carries on.
 - Restore (panic button): `ops/restore.sh <archive>` — typed 'RESTORE'
   confirmation; overwrites prod data with the backup state.
 

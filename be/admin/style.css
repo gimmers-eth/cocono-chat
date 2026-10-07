@@ -40,6 +40,14 @@ button:disabled { opacity: 0.5; cursor: default; }
 .badge.main { background: var(--accent); color: #fff; }
 .dim { color: var(--dim); }
 .mono { font-family: ui-monospace, monospace; font-size: 0.82rem; }
+td.ok { color: #6fbf73; }
+td.error { color: var(--danger); }
+select { background: #1c1f26; color: inherit; border: 1px solid #33383f; border-radius: 6px; padding: 0.3rem 0.5rem; max-width: 26rem; }
+pre.log {
+  margin-top: 0.6rem; padding: 0.5rem 0.6rem; max-height: 14rem; overflow-y: auto;
+  font-family: ui-monospace, monospace; font-size: 0.75rem; line-height: 1.35;
+  background: #10131a; border-radius: 6px; white-space: pre-wrap; word-break: break-all;
+}
 #status { min-height: 1.2rem; margin: 0.5rem 0; }
 #status.error { color: var(--danger); }
 #status.ok { color: #6fbf73; }

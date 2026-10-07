@@ -36,6 +36,21 @@ flock -n 9 || die "another update.sh is already running"
 DRY_RUN=${1:-}
 [ -z "$DRY_RUN" ] || [ "$DRY_RUN" = "--dry-run" ] || die "usage: $0 [--dry-run]"
 
+# Machine-readable run status for the admin panel's Ops view (same dir the
+# backup scripts write). Skipped/no-op runs do not overwrite a real result.
+STATUS_DIR=$HOME/backups/status
+mkdir -p "$STATUS_DIR"
+U_START=$(date -u +%FT%TZ); U_EPOCH=$(date +%s); U_DETAIL="started"
+on_exit() {
+  local rc=$?
+  if [ "$U_DETAIL" = started ]; then
+    if [ "$rc" -eq 0 ]; then U_DETAIL="nothing to do"; else U_DETAIL="failed early (exit $rc)"; fi
+  fi
+  printf '{"mode":"update","startedAt":"%s","finishedAt":"%s","code":%d,"durationSec":%d,"detail":"%s"}\n' \
+    "$U_START" "$(date -u +%FT%TZ)" "$rc" "$(( $(date +%s) - U_EPOCH ))" "$U_DETAIL" > "$STATUS_DIR/update.json"
+}
+trap on_exit EXIT
+
 log "fetching $REMOTE/$BRANCH"
 git fetch "$REMOTE" "$BRANCH" || die "git fetch failed"
 
@@ -47,6 +62,7 @@ OLD=$(git rev-parse HEAD)
 NEW=$(git rev-parse "$REMOTE/$BRANCH")
 if [ "$OLD" = "$NEW" ]; then
   log "already at ${OLD:0:7} — nothing to do"
+  U_DETAIL="already at ${OLD:0:7}"
   exit 0
 fi
 CHANGED=$(git diff --name-only "$OLD" "$NEW")
@@ -71,8 +87,10 @@ fi
 if ! pnpm test:all; then
   log "!! tests failed — rolling back ${NEW:0:7} -> ${OLD:0:7}"
   git reset --hard "$OLD"
+  U_DETAIL="tests FAILED; reverted to ${OLD:0:7}"
   die "deployment REVERTED to ${OLD:0:7}; fix forward and re-run"
 fi
+U_DETAIL="tests green"
 
 # ---- known-good bounce ----
 log "restarting cocono-be (clean restart, drops WS sessions briefly)"
@@ -98,3 +116,4 @@ done
   || die "app-info serves '${SERVED:-nothing}', expected '$EXPECT' — check curl $APP_INFO_URL and journalctl --user -u cocono-be"
 
 log "✅ deployed $EXPECT — tests green, services active, app-info agrees"
+U_DETAIL="deployed $EXPECT"

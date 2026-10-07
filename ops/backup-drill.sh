@@ -19,7 +19,9 @@ export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
 
 REPO=$HOME/cocono-chat
 BACKUP_DIR=$HOME/backups
+STATUS_DIR=$BACKUP_DIR/status
 WORK=$HOME/backup-drill
+LOCK=$BACKUP_DIR/.ops.lock
 DRILL_MONGO_PORT=${DRILL_MONGO_PORT:-27019}
 DRILL_REDIS_PORT=${DRILL_REDIS_PORT:-6380}
 DRILL_APP_PORT=${DRILL_APP_PORT:-3100}
@@ -27,8 +29,17 @@ MONGOD=$(awk -F'[ =]' '/^ExecStart=/{print $2; exit}' "$HOME/.config/systemd/use
 FULL=0; ARCHIVE=${1:-}
 [ "${1:-}" = "--full" ] && { FULL=1; ARCHIVE=${2:-}; }
 LOG=$BACKUP_DIR/backup.log
+STATUS_DETAIL=""
 log() { echo "[drill] $*"; echo "[$(date -u +%FT%TZ) drill] $*" >>"$LOG"; }
 IDENTITY=$HOME/.config/cocono-backup/identity.age
+
+# ---- de-bounce lock (shared with backup.sh / restore.sh) ----
+exec 9>"$LOCK"
+if ! flock -n 9; then echo "[drill] another ops run is active — skipping"; exit 0; fi
+printf '%s|%s|%s\n' "$$" drill "$(date -u +%Y%m%dT%H%M%SZ)" > "$BACKUP_DIR/.ops.pid"
+mkdir -p "$STATUS_DIR"
+STARTED=$(date -u +%FT%TZ)
+START_EPOCH=$(date +%s)
 
 cleanup() {
   [ -n "${APP_PID:-}" ] && kill "$APP_PID" 2>/dev/null
@@ -36,7 +47,15 @@ cleanup() {
   mongod --dbpath "$WORK/mongo" --shutdown >/dev/null 2>&1
   rm -rf "$WORK"
 }
-trap cleanup EXIT
+on_exit() {
+  local rc=$?
+  printf '{"mode":"drill","startedAt":"%s","finishedAt":"%s","code":%d,"durationSec":%d,"detail":"%s"}\n' \
+    "$STARTED" "$(date -u +%FT%TZ)" "$rc" "$(( $(date +%s) - START_EPOCH ))" \
+    "${STATUS_DETAIL:-$([ $rc -eq 0 ] && echo 'DRILL PASSED' || echo failed)}" > "$STATUS_DIR/drill.json"
+  rm -f "$BACKUP_DIR/.ops.pid"
+  cleanup
+}
+trap on_exit EXIT
 
 fail() { log "DRILL FAILED: $*"; exit 1; }
 
@@ -110,4 +129,8 @@ if [ "$MODE" = hourly ] && [ "$FULL" = 1 ]; then
   kill "$APP_PID" 2>/dev/null; APP_PID=
 fi
 
-log "DRILL PASSED ✅ ($MODE archive $(basename "$ARCHIVE")$([ "$FULL" = 1 ] && echo ' + full app boot'))"
+log "DRILL PASSED ✅ ($MODE archive $(basename "$ARCHIVE")$([ "$FULL" = 1 ] && echo ' + full app boot' || true))"
+STATUS_DETAIL="passed: $MODE $(basename "$ARCHIVE")$([ "$FULL" = 1 ] && echo ' + app boot' || true)"
+# explicit clean exit: the trailing STATUS_DETAIL assignment's status would
+# otherwise come from the $([ ... ] && echo ...) guards (1 when not --full)
+exit 0

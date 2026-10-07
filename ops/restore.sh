@@ -10,8 +10,24 @@ set -uo pipefail
 export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:/usr/local/bin:/usr/bin:/bin"
 REPO=$HOME/cocono-chat
 IDENTITY=$HOME/.config/cocono-backup/identity.age
+BACKUP_DIR=$HOME/backups
+LOCK=$BACKUP_DIR/.ops.lock
 ARCHIVE=${1:?usage: restore.sh <archive.tar.age> [--yes]}
 CONFIRM=${2:-}
+
+# ---- de-bounce lock (shared with backup.sh / drill) ----
+exec 9>"$LOCK"
+if ! flock -n 9; then echo "[restore] another ops run is active — refusing to overlap" >&2; exit 20; fi
+printf '%s|%s|%s\n' "$$" restore "$(date -u +%Y%m%dT%H%M%SZ)" > "$BACKUP_DIR/.ops.pid"
+mkdir -p "$BACKUP_DIR/status"
+STARTED=$(date -u +%FT%TZ); START_EPOCH=$(date +%s); RESTORE_DETAIL="aborted"
+on_exit() {
+  local rc=$?
+  printf '{"mode":"restore","startedAt":"%s","finishedAt":"%s","code":%d,"durationSec":%d,"detail":"%s"}\n' \
+    "$STARTED" "$(date -u +%FT%TZ)" "$rc" "$(( $(date +%s) - START_EPOCH ))" "$RESTORE_DETAIL" > "$BACKUP_DIR/status/restore.json"
+  rm -f "$BACKUP_DIR/.ops.pid"
+}
+trap on_exit EXIT
 
 [ -f "$ARCHIVE" ] || { echo "no such archive: $ARCHIVE" >&2; exit 1; }
 [ -f "$IDENTITY" ] || { echo "need the age identity at $IDENTITY to decrypt" >&2; exit 1; }
@@ -44,3 +60,4 @@ systemctl --user start cocono-be
 sleep 2
 systemctl --user is-active --quiet cocono-be || { echo "app did not come up — journalctl --user -u cocono-be" >&2; exit 1; }
 curl -sf https://dev.co.co.no/api/app-info >/dev/null && echo "[restore] ✅ app answers; verify login + history, then: systemctl --user stop cocono-backup.timer temporarily if the drill could race this." || echo "[restore] WARNING: app 'active' but app-info not reachable"
+RESTORE_DETAIL="restored $(basename "$ARCHIVE")"

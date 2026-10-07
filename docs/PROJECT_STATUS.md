@@ -40,6 +40,16 @@ is the only FE (audits mentioning `fe/` are historical).
 - **Device removal**: removing an account from a browser detaches the device
   server-side too; detaching the LAST device **deletes the account** (no
   orphan rows, username released). Settings drawer has per-device remove.
+- **Ops panel (admin)**: `~/backups/status/*.json` (written by backup.sh,
+  backup-drill.sh, restore.sh AND update.sh via EXIT traps) + log tail +
+  archive list are surfaced at `/api/admin/ops` (be/src/routes/admin-routes
+  /ops.js) with buttons for Backup now / Box bundle / Test-a-backup (drill)
+  / typed-confirmation PROD RESTORE. All four ops scripts share ONE flock
+  (`~/backups/.ops.lock`, pid hint in `.ops.pid`) — timers, panel buttons and
+  manual runs are mutually EXCLUSIVE (de-bounced: a busy lock makes the
+  script skip silently instead of racing). Restore is double-gated (typed
+  'RESTORE' in UI + API + script confirmation + existence & name-pattern
+  check of the archive).
 - **Diagnostics**: in-app ring buffer (`cocono-sw` IDB) + server-stored
   reports (`diagnostics` collection, 30-day TTL) + admin panel section with
   copy/delete/'un-limit IP'. Admin 'clear limits for IP' sweeps all

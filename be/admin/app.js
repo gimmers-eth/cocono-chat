@@ -129,13 +129,45 @@ function renderBranding(b) {
   if (input && document.activeElement !== input) input.value = b.appName ?? '';
 }
 
+function renderOps(o) {
+  $('ops-running').hidden = !o.running;
+  const rows = [];
+  const LABELS = { update: 'Deploy/tests (update.sh)', hourly: 'Hourly data backup', daily: 'Daily box bundle', drill: 'Restore drill', restore: 'PROD RESTORE' };
+  for (const [name, st] of Object.entries(o.statuses)) {
+    if (!st) continue;
+    const ok = st.code === 0;
+    rows.push(`<tr>
+      <td>${esc(LABELS[name] ?? name)}</td>
+      <td class="${ok ? 'ok' : 'error'}">${ok ? '✅ ok' : `❌ exit ${st.code}`}</td>
+      <td>${fmtDate(st.startedAt)} <span class="dim">(${fmtAgo(st.startedAt)})</span></td>
+      <td>${st.durationSec ?? '—'}s</td>
+      <td class="mono">${esc(String(st.detail ?? ''))}</td>
+    </tr>`);
+  }
+  $('ops-status-body').innerHTML = rows.join('');
+  $('ops-empty').hidden = rows.length > 0;
+
+  const sel = $('restore-archive');
+  const keep = sel.value;
+  sel.innerHTML = (o.hourlyArchives ?? [])
+    .map((a) => `<option value="${esc(a.name)}">${esc(a.name)} (${(a.bytes / 1024).toFixed(0)} KiB)</option>`)
+    .join('');
+  if (keep) sel.value = keep;
+
+  const log = $('ops-log');
+  log.hidden = !(o.logs ?? []).length;
+  log.textContent = (o.logs ?? []).join('\n');
+  log.scrollTop = log.scrollHeight;
+}
+
 async function refresh() {
   try {
-    const [users, limits, diags, branding] = await Promise.all([
+    const [users, limits, diags, branding, ops] = await Promise.all([
       api('/api/admin/users'),
       api('/api/admin/rate-limits'),
       api('/api/admin/diagnostics'),
       api('/api/admin/branding'),
+      api('/api/admin/ops'),
     ]);
     // Don't clobber the row being edited: skip the users table re-render
     // while a max-devices input has focus.
@@ -145,6 +177,7 @@ async function refresh() {
     renderLimits(limits);
     renderDiags(diags);
     renderBranding(branding);
+    renderOps(ops);
     $('updated').textContent = `updated ${new Date().toLocaleTimeString()}`;
     setStatus('');
   } catch (err) {
@@ -175,6 +208,24 @@ $('btn-clear-ip').addEventListener('click', () => {
 $('btn-purge-diags').addEventListener('click', () => {
   if (!confirm('Delete ALL diagnostics reports?')) return;
   run('Purged diagnostics reports', () => api('/api/admin/diagnostics', { method: 'DELETE' }));
+});
+
+// ---- Backup & Ops ----
+const opsRun = (job, label) => run(`${label} started`, () =>
+  api('/api/admin/ops/run', { method: 'POST', body: JSON.stringify({ job }) }));
+$('btn-ops-hourly').addEventListener('click', () => opsRun('hourly', 'Hourly backup'));
+$('btn-ops-daily').addEventListener('click', () => opsRun('daily', 'Box bundle'));
+$('btn-ops-drill').addEventListener('click', () => opsRun('drill', 'Restore drill'));
+$('btn-ops-restore').addEventListener('click', () => {
+  const archive = $('restore-archive').value;
+  if (!archive) return setStatus('No hourly backup available', 'error');
+  if ($('restore-confirm').value.trim() !== 'RESTORE') {
+    return setStatus('Type RESTORE to confirm a production restore', 'error');
+  }
+  if (!confirm(`Restore PRODUCTION from ${archive}? Everything newer is destroyed.`)) return;
+  run(`Restoring from ${archive}`, () =>
+    api('/api/admin/ops/restore', { method: 'POST', body: JSON.stringify({ archive, confirm: 'RESTORE' }) }));
+  $('restore-confirm').value = '';
 });
 
 $('btn-set-branding').addEventListener('click', () => {

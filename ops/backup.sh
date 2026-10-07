@@ -22,18 +22,33 @@ case "$MODE" in hourly|daily) ;; *) echo "usage: $0 [hourly|daily]" >&2; exit 2;
 REPO=$HOME/cocono-chat
 CONF=$HOME/.config/cocono-backup.conf
 BACKUP_DIR=$HOME/backups
+STATUS_DIR=$BACKUP_DIR/status
+LOCK=$BACKUP_DIR/.ops.lock
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 LOG=$BACKUP_DIR/backup.log
-STATUS=$BACKUP_DIR/last-run.json
 STATUS_DETAIL=""
-mkdir -p "$BACKUP_DIR"
+mkdir -p "$BACKUP_DIR" "$STATUS_DIR"
 
 log() { echo "[backup $MODE] $*"; echo "[$(date -u +%FT%TZ) $MODE] $*" >>"$LOG"; }
+
+# ---- de-bounce: ONE ops run at a time. backup/daily/drill/restore share
+# this lock, so timers, admin buttons and manual runs can never overlap;
+# a busy lock means a silent skip (not a failed run). ----
+exec 9>"$LOCK"
+if ! flock -n 9; then
+  echo "[backup $MODE] another ops run is active — skipping (de-bounced)"
+  exit 0
+fi
+printf '%s|%s|%s\n' "$$" "$MODE" "$STAMP" > "$BACKUP_DIR/.ops.pid"
+
+STARTED=$(date -u +%FT%TZ)
+START_EPOCH=$(date +%s)
 on_exit() {
   local rc=$?
-  # one status file for humans/monitoring: mode, time, result, details
-  printf '{ "mode":"%s", "utc":"%s", "code":%d, "detail":"%s" }\n' \
-    "$MODE" "$(date -u +%FT%TZ)" "$rc" "${STATUS_DETAIL:-$([ $rc -eq 0 ] && echo ok || echo failed)}" >"$STATUS"
+  printf '{"mode":"%s","startedAt":"%s","finishedAt":"%s","code":%d,"durationSec":%d,"detail":"%s"}\n' \
+    "$MODE" "$STARTED" "$(date -u +%FT%TZ)" "$rc" "$(( $(date +%s) - START_EPOCH ))" \
+    "${STATUS_DETAIL:-$([ $rc -eq 0 ] && echo ok || echo failed)}" > "$STATUS_DIR/$MODE.json"
+  rm -f "$BACKUP_DIR/.ops.pid"
   [ $rc -eq 0 ] || log "FAILED (exit $rc) — check: journalctl --user -u cocono-backup -n 50"
 }
 trap on_exit EXIT
