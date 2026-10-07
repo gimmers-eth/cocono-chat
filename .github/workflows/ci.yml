@@ -34,14 +34,14 @@ jobs:
           --health-timeout 3s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # pnpm pinned to the devbox version (update.sh/deploys rely on it)
       - uses: pnpm/action-setup@v4
         with:
           version: 12.4.2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
           cache: pnpm
@@ -49,7 +49,7 @@ jobs:
       # mongodb-memory-server fetches a real mongod binary on first use;
       # caching keeps suite runs fast (dir matches the devbox layout).
       - name: Cache mongodb-memory-server binaries
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/mongodb-binaries
           key: mms-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
@@ -69,7 +69,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
         with:
           version: 12.4.2
