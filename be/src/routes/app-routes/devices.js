@@ -30,7 +30,7 @@ function validateDevicePayload(body) {
   return null;
 }
 
-export default async function deviceRoutes(app, { users, redis, config, messages }) {
+export default async function deviceRoutes(app, { users, redis, config, messages, profiles }) {
   // POST /api/devices/enroll — a new device asks to join an existing account.
   // Body is shaped like signup: { u, p, a, d, t, s }, signed by the NEW
   // device's key. An already-registered device must then approve the 6-digit
@@ -222,6 +222,7 @@ export default async function deviceRoutes(app, { users, redis, config, messages
       await users.deleteOne({ ul });
       await cleanupAccountState(redis, ul);
       await purgeFriendReferences(users, ul);
+      if (profiles) await profiles.deleteOne({ ul }); // bio + avatar die too
       await messages.deleteMany({ $or: [{ 'to.ul': ul }, { 'from.ul': ul }] });
       return { removed: deviceId, devices: 0, accountDeleted: true };
     }

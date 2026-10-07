@@ -388,6 +388,25 @@ export class CoconoClient extends Emitter {
     return res.friends ?? [];
   }
 
+  /** Own profile {bio, avatar(base64)|null, updatedAt}. */
+  async profile() {
+    return this.api.myProfile(this.#requireToken());
+  }
+
+  /** Update own bio and/or avatar (base64 JPEG, resized client-side first). */
+  async setProfile({ bio, avatar, clearAvatar } = {}) {
+    const patch = {};
+    if (bio !== undefined) patch.bio = bio;
+    if (avatar !== undefined) patch.avatar = avatar;
+    if (clearAvatar) patch.clearAvatar = true;
+    return this.api.setProfile(this.#requireToken(), patch);
+  }
+
+  /** Peer profile: bio always, avatar ONLY on mutual add (server rule). */
+  async viewProfile(username) {
+    return this.api.userProfile(this.#requireToken(), String(username).toLowerCase());
+  }
+
   /** Profile reputation COUNTS for a peer (never identities): addedBy,
    *  trustedBy, verifiedBy (vouching weight: trusters who are themselves
    *  ID-verified). null when unknown/offline. */

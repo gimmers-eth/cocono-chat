@@ -8,7 +8,7 @@ const MAX_DEVICES_CAP = 1000;
 
 // GET /api/admin/users, PATCH max-devices, DELETE user, DELETE device,
 // PUT verified (identity-verification toggle), GET/DELETE id-doc (review).
-export default async function usersRoutes(app, { users, redis, messages, idDocs }) {
+export default async function usersRoutes(app, { users, redis, messages, idDocs, profiles }) {
   app.get('/api/admin/users', async () => {
     const docs = await users.find({}, { projection: { _id: 0 } }).sort({ ul: 1 }).toArray();
     const metas = await idDocs.find({}, { projection: { ul: 1, contentType: 1, uploadedAt: 1, _id: 0 } }).toArray();
@@ -82,6 +82,7 @@ export default async function usersRoutes(app, { users, redis, messages, idDocs 
       return fail(reply, 'unknown_account', 'No such user', 404);
     }
     await idDocs.deleteOne({ ul }); // never orphan an ID photo
+    await profiles.deleteOne({ ul });
     await cleanupAccountState(redis, ul);
     await purgeFriendReferences(users, ul);
     if (messages) {
@@ -111,6 +112,7 @@ export default async function usersRoutes(app, { users, redis, messages, idDocs 
     if (after.devices.length === 0) {
       await users.deleteOne({ ul });
       await idDocs.deleteOne({ ul }); // never orphan an ID photo
+      await profiles.deleteOne({ ul });
       await cleanupAccountState(redis, ul);
       await purgeFriendReferences(users, ul);
       if (messages) await messages.deleteMany({ $or: [{ 'to.ul': ul }, { 'from.ul': ul }] });

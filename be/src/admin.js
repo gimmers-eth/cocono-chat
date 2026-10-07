@@ -67,6 +67,7 @@ await app.register(async function adminScope(instance) {
     settings: mongo.db.collection('settings'),
     messages: mongo.db.collection('messages'),
     idDocs: mongo.db.collection('id_docs'),
+    profiles: mongo.db.collection('profiles'),
   });
 });
 

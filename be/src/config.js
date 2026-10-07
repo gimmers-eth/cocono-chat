@@ -135,6 +135,14 @@ export const config = {
   cocoTrustMinAgeDays: numOf(env.COCO_TRUST_MIN_AGE_DAYS, 30),
   // distinct trusted vouches required for Social: Trusted (1 is not a network)
   cocoTrustMinVouchers: numOf(env.COCO_TRUST_MIN_VOUCHERS, 2),
+
+  // Profiles: short bio + tiny avatar image (clients resize before upload;
+  // the server enforces anyway). Avatars are delivered ONLY when viewer
+  // and target have mutually added each other (or viewer === target).
+  profileBioMaxLen: numOf(env.PROFILE_BIO_MAX_LEN, 250),
+  profileAvatarMaxBytes: numOf(env.PROFILE_AVATAR_MAX_BYTES, 64 * 1024),
+  profileEditAccountLimit: numOf(env.PROFILE_EDIT_ACCOUNT_LIMIT, 30),
+  profileEditWindowSec: numOf(env.PROFILE_EDIT_WINDOW_SEC, 3600),
   idDocMaxBytes: numOf(env.ID_DOC_MAX_BYTES, 5 * 1024 * 1024),
   // ID upload unlocks once at least one VERIFIED user has TRUSTED this
   // account (trusting = vouching on the platform; see friends trust stage)

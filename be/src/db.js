@@ -25,6 +25,8 @@ export async function connectMongo(url) {
   // Friends are queried by WHO a list contains (trust gate + reputation
   // stats): multikey index over the entry usernames.
   await db.collection('users').createIndex({ 'friends.u': 1 });
+  // Profile bios + tiny avatars (see routes/app-routes/profile.js).
+  await db.collection('profiles').createIndex({ ul: 1 }, { unique: true });
   // Store-and-forward message queue (milestone 3): one doc per recipient
   // device, deleted once that device pulls it.
   const messages = db.collection('messages');

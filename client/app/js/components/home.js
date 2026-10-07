@@ -3,6 +3,7 @@
 // theme picker).
 
 import { $, setStatus, fmtTime, confirmModal } from '../ui.js';
+import { humanError } from '../errors.js';
 import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
 import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, loadPeerVerifications } from '../store.js';
@@ -16,7 +17,7 @@ export function createHome({ client, chat, onLogout }) {
   let settingsOpen = false;
 
   // ---- settings drawer tabs ----
-  const SETTINGS_TABS = ['verify', 'devices', 'general', 'diagnostics'];
+  const SETTINGS_TABS = ['profile', 'verify', 'devices', 'general', 'diagnostics'];
   let settingsTab = 'devices';
   try { settingsTab = localStorage.getItem('cocono.settings.tab') || 'devices'; } catch { /* private mode */ }
   if (!SETTINGS_TABS.includes(settingsTab)) settingsTab = 'devices';
@@ -34,6 +35,7 @@ export function createHome({ client, chat, onLogout }) {
       btn.classList.toggle('active', on);
       btn.setAttribute('aria-selected', String(on));
     }
+    if (settingsTab === 'profile' && myVerified === true) renderProfileTab();
   }
 
   function selectSettingsTab(tab) {
@@ -56,9 +58,9 @@ export function createHome({ client, chat, onLogout }) {
   }
 
   function openSettings(tab) {
-    // explicit tab wins; otherwise unverified users are ALWAYS taken to
-    // Verify — the whole point of the nag affordances
-    const want = tab || (myVerified === false ? 'verify' : null);
+    // explicit tab wins; otherwise routing by verification state:
+    // unverified → Verify (nag) · verified → Profile (the unlocked tab)
+    const want = tab || (myVerified === false ? 'verify' : myVerified === true ? 'profile' : null);
     if (settingsOpen && want) selectSettingsTab(want);
     if (!settingsOpen) {
       settingsOpen = true;
@@ -116,6 +118,9 @@ export function createHome({ client, chat, onLogout }) {
       link.hidden = true; btn.hidden = true; return;
     }
     $('me-verify-badge').replaceChildren(...(me.verified ? [] : [unverifiedBadgeEl()]));
+    const profileTabBtn = $('tabbtn-profile');
+    if (profileTabBtn) profileTabBtn.hidden = !me.verified;
+    if (me.verified && settingsOpen && settingsTab === 'profile') renderProfileTab();
     // our own name carries the same red mark contacts see — until verified
     link.hidden = !!me.verified; // the top-left entry only while unverified
     if (me.verified) {
@@ -149,6 +154,79 @@ export function createHome({ client, chat, onLogout }) {
     const tail = new Uint8Array(await file.slice(-2).arrayBuffer());
     if (head[0] === 0xff && head[1] === 0xd8 && tail[0] === 0xff && tail[1] === 0xd9) return 'image/jpeg';
     return null;
+  }
+
+  // ---- my-profile tab (bio + tiny avatar; avatar resized ON-DEVICE) ----
+  let pendingAvatar = null; // base64 jpeg awaiting save, or undefined=unchanged
+
+  function paintOwnAvatar(b64) {
+    const img = $('profile-own-avatar');
+    const initial = $('profile-own-initial');
+    if (b64) {
+      img.src = `data:image/jpeg;base64,${b64}`;
+      img.hidden = false;
+      initial.hidden = true;
+    } else {
+      img.removeAttribute('src');
+      img.hidden = true;
+      initial.hidden = false;
+    }
+    $('btn-profile-avatar-clear').hidden = !b64 && pendingAvatar !== 'clear';
+  }
+
+  async function renderProfileTab() {
+    try {
+      const me = await client.profile();
+      $('profile-own-name').textContent = client.username ?? '';
+      $('profile-own-initial').textContent = String(client.username ?? '?').slice(0, 1);
+      const bio = me.bio ?? '';
+      $('profile-bio').value = bio;
+      $('profile-bio-count').textContent = String(bio.length);
+      pendingAvatar = null;
+      paintOwnAvatar(me.avatar);
+    } catch (err) {
+      setStatus($('drawer-status'), humanError(err), true);
+    }
+  }
+
+  // 128px centre-crop JPEG on canvas: a phone photo (MBs) becomes ~5–10 KB
+  // before it ever touches the network. Server re-validates size + magic.
+  async function resizeAvatar(file) {
+    if (!file) return null;
+    if (!['image/png', 'image/jpeg'].includes(file.type)) throw new Error('Pick a PNG or JPEG photo.');
+    const bmp = await createImageBitmap(file);
+    const size = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = size; canvas.height = size;
+    const side = Math.min(bmp.width, bmp.height);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, size, size);
+    let quality = 0.72;
+    let dataUrl = canvas.toDataURL('image/jpeg', quality);
+    while (dataUrl.length * 0.75 > 64 * 1024 && quality > 0.4) {
+      quality -= 0.12;
+      dataUrl = canvas.toDataURL('image/jpeg', quality);
+    }
+    bmp.close?.();
+    return dataUrl.split(',')[1];
+  }
+
+  async function saveProfile() {
+    const btn = $('btn-profile-save');
+    btn.disabled = true;
+    try {
+      const patch = { bio: $('profile-bio').value };
+      if (pendingAvatar === 'clear') patch.clearAvatar = true;
+      else if (pendingAvatar) patch.avatar = pendingAvatar;
+      await client.setProfile(patch);
+      pendingAvatar = null;
+      setStatus($('drawer-status'), 'Profile saved.');
+      await renderProfileTab();
+    } catch (err) {
+      setStatus($('drawer-status'), humanError(err), true);
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   async function uploadIdDoc(file) {
@@ -393,7 +471,35 @@ export function createHome({ client, chat, onLogout }) {
     });
     document.querySelector('.drawer-tabs')?.addEventListener('scroll', updateTabFades, { passive: true });
     window.addEventListener('resize', updateTabFades);
-    $('btn-self-verify').addEventListener('click', () => openSettings('verify'));
+    $('btn-self-verify').addEventListener('click', (e) => { e.stopPropagation(); openSettings('verify'); });
+    // the whole identity block opens settings (verified → Profile tab,
+    // unverified → Verify tab; handled inside openSettings)
+    $('btn-my-settings').addEventListener('click', () => openSettings());
+    $('btn-my-settings').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openSettings(); }
+    });
+
+    $('btn-profile-avatar').addEventListener('click', () => $('profile-avatar-input').click());
+    $('profile-avatar-input').addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      e.target.value = '';
+      if (!file) return;
+      try {
+        pendingAvatar = await resizeAvatar(file);
+        paintOwnAvatar(pendingAvatar);
+        setStatus($('drawer-status'), 'Photo resized — press Save to publish it.');
+      } catch (err) {
+        setStatus($('drawer-status'), err.message ?? String(err), true);
+      }
+    });
+    $('btn-profile-avatar-clear').addEventListener('click', () => {
+      pendingAvatar = 'clear';
+      paintOwnAvatar(null);
+    });
+    $('btn-profile-save').addEventListener('click', saveProfile);
+    $('profile-bio').addEventListener('input', (e) => {
+      $('profile-bio-count').textContent = String(e.target.value.length);
+    });
     $('btn-id-doc').addEventListener('click', () => $('id-doc-input').click());
     $('id-doc-input').addEventListener('change', (e) => {
       const file = e.target.files?.[0];

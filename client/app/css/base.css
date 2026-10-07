@@ -147,7 +147,14 @@ img.logo { object-fit: cover; background: none; }
   height: var(--head-h); flex: none; display: flex; align-items: center;
   justify-content: space-between; padding: 0 1rem; gap: .6rem;
 }
-.me { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+.me { display: flex; align-items: center; gap: .5rem; min-width: 0; cursor: pointer; border-radius: 10px; padding: .15rem .3rem; }
+.me:hover, .me:focus-visible { background: var(--panel-raised); outline: none; }
+.own-avatar { width: 56px; height: 56px; object-fit: cover; font-size: 1.6rem; }
+img.own-avatar { border-radius: 50%; }
+.bio { font-family: inherit; border-radius: 10px !important; padding: .55rem .8rem !important; width: 100%; resize: vertical; background: var(--panel-raised); border: 1px solid var(--border); color: var(--text); }
+.you-chip { color: var(--success); font-weight: 700; }
+#profile-own-avatar[hidden] + #profile-own-initial { display: inline-flex; }
+#profile-own-initial[hidden] { display: none; }
 /* two-row identity block: name (+red badge) with "Get verified" beneath */
 .me-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
 .me-line { display: flex; align-items: baseline; gap: .35rem; min-width: 0; }
@@ -427,6 +434,8 @@ img.logo { object-fit: cover; background: none; }
   border-radius: 8px; min-width: 0;
 }
 .peer-btn:hover, .peer-btn:focus-visible { background: var(--panel-raised); outline: none; }
+#profile-avatar-img { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; flex: none; }
+.bio-line { margin-top: .15rem; white-space: pre-wrap; line-height: 1.4; }
 
 /* Profile view status lines */
 .profile-id-state { margin: .1rem 0 0; font-weight: 700; font-size: .9rem; }

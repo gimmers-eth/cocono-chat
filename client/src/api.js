@@ -42,6 +42,18 @@ export class Api {
     return this.#request('/api/me', { token });
   }
 
+  myProfile(token) {
+    return this.#request('/api/me/profile', { token });
+  }
+
+  setProfile(token, patch) {
+    return this.#request('/api/me/profile', { method: 'PUT', body: patch, token });
+  }
+
+  userProfile(token, ul) {
+    return this.#request(`/api/users/${encodeURIComponent(ul)}/profile`, { token });
+  }
+
   userStats(token, ul) {
     return this.#request(`/api/users/${encodeURIComponent(ul)}/stats`, { token });
   }

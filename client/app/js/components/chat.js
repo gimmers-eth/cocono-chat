@@ -617,6 +617,24 @@ export function createChat({ client, onHomeRefresh }) {
     $('profile-joined').textContent = peerJoinedAt ? `Joined ${new Date(peerJoinedAt).toLocaleDateString()}` : '';
     $('profile-joined').hidden = !peerJoinedAt;
 
+    // peer profile (bio public; avatar ONLY on mutual add — server rule):
+    // show photo when present, else the initial circle
+    const avatarEl = $('profile-avatar-img');
+    const initialEl = $('profile-avatar');
+    const bioEl = $('profile-bio');
+    avatarEl.hidden = true;
+    initialEl.hidden = false;
+    bioEl.hidden = true;
+    try {
+      const prof = await client.viewProfile(currentPeer);
+      if (prof.bio) { bioEl.textContent = prof.bio; bioEl.hidden = false; }
+      if (prof.avatar) {
+        avatarEl.src = `data:${prof.avatarType || 'image/jpeg'};base64,${prof.avatar}`;
+        avatarEl.hidden = false;
+        initialEl.hidden = true;
+      }
+    } catch { /* offline / deleted: initials + no bio */ }
+
     const appState = $('profile-app-state');
     const appNote = $('profile-app-note');
     const socialState = $('profile-social-state');

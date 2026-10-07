@@ -167,6 +167,18 @@ is the only FE (audits mentioning `fe/` are historical).
   literal-"null" text-node bug in the badge slots). Tests:
   `be/test/verification.test.js` + the cold-send policy suite in
   `messaging.test.js`.
+- **Profiles**: bio (≤250) + avatar stored in `profiles` (server re-validates
+  JPEG magic + ≤64 KB; the APP resizes on-device to a 128 px centre-crop
+  canvas JPEG ~5-10 KB before upload — phone photos never hit the wire).
+  Privacy is a READ-TIME rule: an avatar is served ONLY when viewer↔target
+  have mutually added each other (or it's the owner) — unfriending in either
+  direction makes the photo vanish instantly, no cleanup. Deleting an
+  account purges its profile (all 3 deletion paths). Verified users get an
+  unlocked **Profile** settings tab (which becomes the landing tab; un-
+  verified users still land on Verify); clicking the top-left identity block
+  opens settings either way. Bio is always public on the peer profile sheet;
+  avatar replaces the initial circle when mutual. Tests:
+  `be/test/profile.test.js` (limits, validation, mutual rule, unfriend).
 - **Offline shell**: network-first SW caching of statics; app boots offline
   into read-only mode from IndexedDB (login failure w/ network error enters
   the app); online event promotes to live session.
