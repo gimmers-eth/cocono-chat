@@ -295,8 +295,19 @@ export function createChat({ client, onHomeRefresh }) {
 
   async function updateTrustUI() {
     const warn = $('chat-warn');
-    if (!warn) return;
-    if (!currentPeer) { warn.hidden = true; return; }
+    const headStatus = $('chat-peer-status');
+    if (!currentPeer) {
+      if (warn) warn.hidden = true;
+      headStatus?.replaceChildren();
+      return;
+    }
+    // header identity mark mirrors the sidebar: green outlined user (friend)
+    // vs red person-with-an-x (stranger) — always recomputed, including for
+    // ghost chats (the friend mirror is still the local truth)
+    const friend = await isCurrentPeerFriend();
+    headStatus.replaceChildren(
+      iconEl(friend ? 'friend' : 'notFriend', friend ? 'icon-friend' : 'icon-danger'),
+    );
     if (peerGone) {
       // deleted account outranks the trust strip: this chat is history
       warn.classList.add('gone');
@@ -309,7 +320,6 @@ export function createChat({ client, onHomeRefresh }) {
       return;
     }
     warn.classList.remove('gone');
-    const friend = await isCurrentPeerFriend();
     warn.hidden = friend;
     if (!friend) {
       warn.replaceChildren(
