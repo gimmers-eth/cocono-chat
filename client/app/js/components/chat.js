@@ -38,6 +38,15 @@ function showBanner(text, peer) {
 
 const STATE_MARK = { sending: 'stateSending', sent: 'stateSent', delivered: 'stateDelivered', failed: 'stateFailed' };
 
+// Timeline notices: when a security heads-up happens it must not be a
+// fleeting toast — it lands in the conversation timeline (dir:'sys') AND
+// syncs to every device of this account (live via self-broadcast, offline
+// via the normal store-and-forward queue). Keep codes/texts here.
+const NOTICE_TEXT = {
+  'trust-revoked': (peer) => `Heads up: trust in ${peer} was revoked — the account behind this username changed its identity key (possibly re-registered by someone else). Verify the safety number again before trusting new messages.`,
+  'account-deleted': (peer) => `Heads up: the ${peer} account was deleted. This conversation is read-only now; your saved messages remain here.`,
+};
+
 // 'Read' means the user actually LOOKED at the conversation: the tab is
 // visible AND the window has focus (WhatsApp Web semantics). Background
 // messages keep their unread dot until the user comes back.
@@ -125,21 +134,29 @@ export function createChat({ client, onHomeRefresh }) {
     });
 
     client.on('message', async (m) => {
-      // System messages (friend events) ride the normal E2EE path from OUR
-      // OWN account: apply to the local friend mirror, NEVER the transcript.
-      // Only this account can produce them (relay HMAC is keyed with the
-      // sender's transport key), so the payload is trusted once decrypted —
-      // but still parsed defensively.
+      // System messages (friend events + timeline notices) ride the normal
+      // E2EE path from OUR OWN account — only this account can produce them
+      // (relay HMAC), so the payload is trusted once decrypted, but still
+      // parsed defensively. Notices DO enter timelines (as dir:'sys' rows);
+      // friend events only update the mirror.
       const selfUl = String(client.username ?? '').toLowerCase();
-      if (m.peer.toLowerCase() === selfUl && /^\{"sys":"friend[-+]/.test(m.text)) {
+      if (m.peer.toLowerCase() === selfUl && /^\{"sys":/.test(m.text)) {
         try {
           const p = JSON.parse(m.text);
           if (p.sys === 'friend+') await friendAdd(p.ul, p.p || '');
           else if (p.sys === 'friend-') await friendDel(p.ul);
           else if (p.sys === 'friend-v') await friendMarkFlags(p.ul, { verified: !!p.v });
           else if (p.sys === 'friend-t') await friendMarkFlags(p.ul, { trust: !!p.t });
-          else throw new Error('unknown sys');
+          else if (p.sys === 'notice' && p.id && NOTICE_TEXT[p.code] && String(p.peer)) {
+            // cross-device copy of a security heads-up: land it in the
+            // referenced chat's timeline (dedup on the stable notice id)
+            const nid = `sys:${p.id}`;
+            if (!(await getMessage(nid))) {
+              await saveMessage({ id: nid, peer: String(p.peer).toLowerCase(), dir: 'sys', text: NOTICE_TEXT[p.code](p.peer), ts: p.ts || Date.now() });
+            }
+          } else throw new Error('unknown sys');
           await updateTrustUI();
+          if (currentPeer) await render();
           onHomeRefresh?.();
         } catch { /* unparsable system payload: ignore */ }
         return;
@@ -250,6 +267,15 @@ export function createChat({ client, onHomeRefresh }) {
     const frag = document.createDocumentFragment();
     for (const m of msgs) {
       const li = document.createElement('li');
+      // security/system notices: centred pill, no actions, no sender tint
+      if (m.dir === 'sys') {
+        li.className = 'msg-sys';
+        const note = document.createElement('span');
+        note.textContent = m.text;
+        li.append(note);
+        frag.appendChild(li);
+        continue;
+      }
       li.className = `msg ${m.dir}`;
       li.dataset.id = m.id; // tap -> openMsgModal (delegated listener)
       const body = document.createElement('span');
@@ -792,6 +818,17 @@ export function createChat({ client, onHomeRefresh }) {
     if (peer) await rememberPeerVerified(currentPeer, peerIdentityVerified);
   }
 
+  // Record a security heads-up in the timeline + sync it to all our devices.
+  async function announceNotice(peer, code) {
+    const text = NOTICE_TEXT[code]?.(peer);
+    if (!text || !peer) return;
+    const id = crypto.randomUUID();
+    await saveMessage({ id: `sys:${id}`, peer, dir: 'sys', text, ts: Date.now() });
+    client.sendNotice?.(id, peer, code); // best-effort; queue covers offline
+    await render();
+    onHomeRefresh?.();
+  }
+
   // Re-resolve the peer after an unknown_recipient send rejection.
   // Success = they exist (re-apply facts: a mid-chat admin verification or
   // re-registration updates the icons immediately); 404 = flip the whole UI
@@ -815,6 +852,7 @@ export function createChat({ client, onHomeRefresh }) {
         setComposerEnabled(false);
         await updateTrustUI();
         onHomeRefresh?.();
+        await announceNotice(currentPeer, 'account-deleted');
         toast(`${currentPeer}'s account was deleted — history is read-only now.`, 'error');
       }
       // any other error (offline, transient): leave state untouched — the
@@ -864,12 +902,14 @@ export function createChat({ client, onHomeRefresh }) {
         // convergence treatment as a stale binding.
         client.removeFriend(currentPeer).catch(() => {});
         await friendDel(currentPeer);
+        await announceNotice(currentPeer, 'trust-revoked');
       }
       const ent = await friendEntryFor(currentPeer);
       if (peer && ent && (ent.changed || (peer.id && ent.pub && ent.pub !== peer.id))) {
         client.removeFriend(currentPeer).catch(() => {});
         await friendDel(currentPeer);
         toast(`Trust removed — ${currentPeer}'s account identity changed (username re-registered). Re-add to re-bind.`, 'error');
+        await announceNotice(currentPeer, 'trust-revoked');
       }
       await updateTrustUI();
       // Read up to the newest DISPLAYED message (server-assigned ts): marking

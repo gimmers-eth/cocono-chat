@@ -453,6 +453,28 @@ export class CoconoClient extends Emitter {
   }
 
   /**
+   * Publish a TIMELINE NOTICE (security event the user saw as a heads-up)
+   * as an E2EE system message to our own account: open devices receive it
+   * instantly; offline ones pick it up from the normal store-and-forward
+   * queue, so the notice ends up in every device's conversation timeline.
+   * @param {string} id stable id (uuid) for cross-device dedup
+   * @returns {Promise<boolean>} false when no live session (caller already
+   *   stored the notice locally; it simply won't sync this time)
+   */
+  async sendNotice(id, peer, code, ts = Date.now()) {
+    const identity = this.#identity;
+    if (!identity || !this.#transport || this.#transport.state !== 'open') return false;
+    const payload = { sys: 'notice', id, peer: String(peer).toLowerCase(), code, ts };
+    try {
+      await this.sendMessage(identity.username, JSON.stringify(payload));
+      return true;
+    } catch (err) {
+      this.logger.debug(`notice broadcast failed: ${err?.message ?? err}`);
+      return false;
+    }
+  }
+
+  /**
    * Pairing, NEW-device side step 1: request to join an existing account.
    * Returns the 6-digit code to show the user; an already-paired device must
    * approve it via approvePairing(code).
