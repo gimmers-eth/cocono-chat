@@ -246,7 +246,9 @@ img.own-avatar { border-radius: 50%; }
   padding: 0 1rem; background: var(--panel); border-bottom: 1px solid var(--border);
 }
 .chat-peer { display: grid; }
-.chat-peer-name { font-weight: 600; display: flex; align-items: center; gap: .45rem; min-width: 0; }
+.chat-peer-name { font-weight: 600; display: flex; align-items: center; gap: .55rem; min-width: 0; }
+/* the flex gap owns the rhythm — no inherited icon margins in the head */
+.chat-peer-name .peer-status, .chat-peer-name .badge-slot { margin: 0; }
 .chat-peer-name > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-peer-name .peer-status { flex: none; }
 .chat-peer-name .badge-slot { flex: none; }

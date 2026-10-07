@@ -84,7 +84,7 @@ export default async function profileRoutes(app, { users, redis, config, profile
       return fail(reply, 'invalid_username', 'Malformed username', 400);
     }
     const ul = username.toLowerCase();
-    const targetDoc = await users.findOne({ ul }, { projection: { _id: 1 } });
+    const targetDoc = await users.findOne({ ul }, { projection: { _id: 1, verified: 1 } });
     if (!targetDoc) return fail(reply, 'unknown_account', 'No such user', 404);
 
     const [prof, viewerDoc, targetUserDoc] = await Promise.all([
@@ -93,15 +93,16 @@ export default async function profileRoutes(app, { users, redis, config, profile
       ul === viewer ? null : users.findOne({ ul }, { projection: { friends: 1 } }),
     ]);
     const mutual = ul === viewer || (hasAdded(viewerDoc, ul) && hasAdded(targetUserDoc, viewer));
+    // photos require BOTH mutual-add and the target's ID verification
+    const maySeePhoto = ul === viewer || (mutual && targetDoc.verified === true);
 
     return {
       u: ul,
       bio: prof?.bio ?? '',
-      // non-mutual viewers get no photo AT ALL (not even a "hidden" flag
-      // value — presence of a private photo shouldn't be observable beyond
-      // the fact you are not connected yet)
-      avatar: mutual && prof?.avatar ? prof.avatar.toString('base64') : null,
-      avatarType: mutual && prof?.avatar ? (prof.avatarType ?? 'image/jpeg') : null,
+      // non-eligible viewers get no photo AT ALL (not even a "hidden" flag —
+      // photo presence stays unobservable until trust conditions are met)
+      avatar: maySeePhoto && prof?.avatar ? prof.avatar.toString('base64') : null,
+      avatarType: maySeePhoto && prof?.avatar ? (prof.avatarType ?? 'image/jpeg') : null,
     };
   });
 }

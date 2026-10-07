@@ -16,21 +16,17 @@ async function signup(app, c, u) {
   assert.equal(res.statusCode, 201);
   const { n } = (await app.inject({ method: 'POST', url: '/api/auth/challenge', payload: { u, d } })).json();
   const ve = await app.inject({ method: 'POST', url: '/api/auth/verify', payload: { u, d, n, s: c.signBytes(Buffer.from(n, 'utf8')) } });
-  return { token: ve.json().token, h: { authorization: `Bearer ${ve.json().token}` } };
+  return { h: { authorization: `Bearer ${ve.json().token}` } };
 }
 
-// tiny valid JPEG (SOI + junk + EOI) for upload tests
 const JPEG = Buffer.from([0xff, 0xd8, ...Buffer.from('x'.repeat(64)), 0xff, 0xd9]).toString('base64');
 
 test('profile: bio limits, avatar validation, owner round-trip', async () => {
   const { app, teardown } = await setupApp(LIMITS);
   try {
     const { h } = await signup(app, makeClient(), 'palpha1');
-    const bad = await app.inject({ method: 'PUT', url: '/api/me/profile', headers: h, payload: { bio: 'x'.repeat(251) } });
-    assert.equal(bad.statusCode, 400);
-    const junk = await app.inject({ method: 'PUT', url: '/api/me/profile', headers: h, payload: { avatar: Buffer.from('notajpeg').toString('base64') } });
-    assert.equal(junk.statusCode, 400);
-
+    assert.equal((await app.inject({ method: 'PUT', url: '/api/me/profile', headers: h, payload: { bio: 'x'.repeat(251) } })).statusCode, 400);
+    assert.equal((await app.inject({ method: 'PUT', url: '/api/me/profile', headers: h, payload: { avatar: Buffer.from('notajpeg').toString('base64') } })).statusCode, 400);
     const save = await app.inject({ method: 'PUT', url: '/api/me/profile', headers: h, payload: { bio: 'hi there', avatar: JPEG } });
     assert.equal(save.statusCode, 200);
     const mine = await app.inject({ method: 'GET', url: '/api/me/profile', headers: h });
@@ -39,27 +35,34 @@ test('profile: bio limits, avatar validation, owner round-trip', async () => {
   } finally { await teardown(); }
 });
 
-test('profile: avatar visible ONLY on mutual add; vanishes on unfriend', async () => {
-  const { app, teardown } = await setupApp(LIMITS);
+test('profile: avatar needs mutual add AND verification; vanishes on unfriend/unverify', async () => {
+  const { app, mongo, teardown } = await setupApp(LIMITS);
   try {
-    const a = await signup(app, makeClient(), 'paula');
+    const a = await signup(app, makeClient(), 'paula1');
     const b = await signup(app, makeClient(), 'bennet');
     await app.inject({ method: 'PUT', url: '/api/me/profile', headers: b.h, payload: { bio: 'bobby bio', avatar: JPEG } });
+    const viewAsA = () => app.inject({ method: 'GET', url: '/api/users/bennet/profile', headers: a.h });
+    const setVerified = (v) => mongo.db.collection('users').updateOne({ ul: 'bennet' }, { $set: { verified: v } });
 
-    // one-way: A adds B -> no avatar, but bio is public
+    // mutual, but bennet NOT verified -> initials only
     await app.inject({ method: 'PUT', url: '/api/me/friends/bennet', headers: a.h });
-    let view = await app.inject({ method: 'GET', url: '/api/users/bennet/profile', headers: a.h });
-    assert.equal(view.json().bio, 'bobby bio');
-    assert.equal(view.json().avatar, null);
+    await app.inject({ method: 'PUT', url: '/api/me/friends/paula1', headers: b.h });
+    let v = await viewAsA();
+    assert.equal(v.json().bio, 'bobby bio');
+    assert.equal(v.json().avatar, null, 'unverified peers show initials only');
 
-    // mutual: B adds A -> avatar appears
-    await app.inject({ method: 'PUT', url: '/api/me/friends/paula', headers: b.h });
-    view = await app.inject({ method: 'GET', url: '/api/users/bennet/profile', headers: a.h });
-    assert.ok(view.json().avatar, 'mutual add unlocks the photo');
+    // verified -> photo unlocks
+    await setVerified(true);
+    assert.ok((await viewAsA()).json().avatar, 'mutual + verified unlocks the photo');
 
-    // B unfriends A -> photo gone again (no cleanup: read-time rule)
-    await app.inject({ method: 'DELETE', url: '/api/me/friends/paula', headers: b.h });
-    view = await app.inject({ method: 'GET', url: '/api/users/bennet/profile', headers: a.h });
-    assert.equal(view.json().avatar, null);
+    // bennet unfriends paula -> photo gone (read-time rule, no cleanup jobs)
+    await app.inject({ method: 'DELETE', url: '/api/me/friends/paula1', headers: b.h });
+    assert.equal((await viewAsA()).json().avatar, null, 'unfriending removes the photo instantly');
+
+    // re-mutual then revoked verification -> hidden again
+    await app.inject({ method: 'PUT', url: '/api/me/friends/paula1', headers: b.h });
+    assert.ok((await viewAsA()).json().avatar);
+    await setVerified(false);
+    assert.equal((await viewAsA()).json().avatar, null, 'revoked verification hides the photo');
   } finally { await teardown(); }
 });

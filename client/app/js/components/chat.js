@@ -120,6 +120,13 @@ export function createChat({ client, onHomeRefresh }) {
     badgeEl.replaceChildren(...(peerIdentityKnown && !peerIdentityVerified ? [unverifiedBadgeEl()] : []));
   }
 
+  function primePeerProfile(peer) {
+    if (!peer) return;
+    client.viewProfile(peer)
+      .then((prof) => rememberPeerAvatar(peer, prof.avatar))
+      .catch(() => {});
+  }
+
   // chat-head avatar from the mutual-add cache (sidebar renders the same map)
   async function renderChatAvatar() {
     if (!currentPeer) return;
@@ -185,8 +192,8 @@ export function createChat({ client, onHomeRefresh }) {
       if (m.peer.toLowerCase() === selfUl && /^\{"sys":/.test(m.text)) {
         try {
           const p = JSON.parse(m.text);
-          if (p.sys === 'friend+') await friendAdd(p.ul, p.p || '');
-          else if (p.sys === 'friend-') await friendDel(p.ul);
+          if (p.sys === 'friend+') { await friendAdd(p.ul, p.p || ''); primePeerProfile(p.ul); }
+          else if (p.sys === 'friend-') { await friendDel(p.ul); rememberPeerAvatar(p.ul, null); }
           else if (p.sys === 'friend-v') await friendMarkFlags(p.ul, { verified: !!p.v });
           else if (p.sys === 'friend-t') await friendMarkFlags(p.ul, { trust: !!p.t });
           else if (p.sys === 'notice' && p.id && NOTICE_TEXT[p.code] && String(p.peer)) {
@@ -550,6 +557,7 @@ export function createChat({ client, onHomeRefresh }) {
       }
       await friendAdd(currentPeer, entry?.p ?? '');
       if (entry?.p) await recordPinSeen(currentPeer, entry.p);
+      primePeerProfile(currentPeer); // photo eligibility just changed — refresh now
       toast(`${currentPeer} added — now verify the safety number to be sure it’s really them.`);
       await updateTrustUI();
       onHomeRefresh?.();
@@ -568,6 +576,7 @@ export function createChat({ client, onHomeRefresh }) {
     try {
       await client.removeFriend(currentPeer);
       await friendDel(currentPeer);
+      rememberPeerAvatar(currentPeer, null).catch(() => {}); // photo vanishes immediately
       toast(`${currentPeer} removed.`);
       await updateTrustUI();
       onHomeRefresh?.();
@@ -765,7 +774,7 @@ export function createChat({ client, onHomeRefresh }) {
     $('profile-name').textContent = meUl;
     const avatarImg = $('profile-avatar-img');
     const initial = $('profile-avatar');
-    if (prof?.avatar) {
+    if (prof?.avatar && me?.verified) {
       avatarImg.src = `data:image/jpeg;base64,${prof.avatar}`;
       avatarImg.hidden = false;
       initial.hidden = true;
@@ -1110,9 +1119,7 @@ export function createChat({ client, onHomeRefresh }) {
       // failed 'sending'/'failed' out-copy does NOT count — it would fake
       // the "account deleted" obituary for a peer we never actually talked to.
       renderChatAvatar().catch(() => {});
-      client.viewProfile(currentPeer)
-        .then((prof) => rememberPeerAvatar(currentPeer, prof.avatar))
-        .catch(() => {});
+      primePeerProfile(currentPeer);
       peerHadHistory = (await messagesWith(currentPeer)).some((m) =>
         m.dir === 'in' || (m.dir === 'out' && (m.state === 'sent' || m.state === 'delivered')));
       // Identity verification: compare the stored friend binding against the
