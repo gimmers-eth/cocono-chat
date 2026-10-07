@@ -203,7 +203,6 @@
         <input id="profile-avatar-input" type="file" accept="image/png,image/jpeg" hidden />
         <div class="row-actions profile-actions">
           <button id="btn-profile-avatar" class="btn btn-small">Change photo</button>
-          <button id="btn-profile-preview" class="btn btn-small" data-icon="profile" data-icon-class="">Preview my profile</button>
           <button id="btn-profile-avatar-clear" class="linkish danger" hidden>Remove photo</button>
           <span id="profile-save-state" class="save-chip" hidden></span>
         </div>
@@ -213,6 +212,9 @@
         <p class="muted small bio-meta"><span id="profile-bio-count">0</span>/250</p>
         <p class="muted small bio-meta">Photos and text save automatically — changes are yours to tweak, the chip confirms each one.</p>
         <p class="muted small bio-meta">Your photo is only shown to users you have added <em>and</em> who have added you back — unfriending hides it both ways immediately.</p>
+        <div class="row-actions profile-actions profile-preview-row">
+          <button id="btn-profile-preview" class="btn btn-small" data-icon="profile">Preview my profile</button>
+        </div>
       </div>
 
       <div id="tabpanel-verify" hidden>
@@ -342,7 +344,7 @@
       <button id="btn-profile-close" class="icon-btn" title="Close" data-icon="close"></button>
     </header>
     <div class="sheet-body">
-      <div class="profile-id">
+      <div class="profile-id profile-hero">
         <img id="profile-avatar-img" alt="" hidden />
         <span id="profile-avatar" class="avatar" aria-hidden="true"></span>
         <span class="profile-idtext">
