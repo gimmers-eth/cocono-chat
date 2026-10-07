@@ -73,6 +73,7 @@ example and adjust when needed.
 ## Documentation
 
 - [docs/PROJECT_STATUS.md](./docs/PROJECT_STATUS.md) — current state, security notes, ops, next steps (read first)
+- [docs/GO_LIVE_PROCESS.md](./docs/GO_LIVE_PROCESS.md) — the ordered runbook from dev box to public launch (read before anything goes public)
 - [docs/DESIGN.md](./docs/DESIGN.md) — architecture, encryption model, delivery, milestones
 - [docs/CLIENT_SDK.md](./docs/CLIENT_SDK.md) — client SDK: usage, events, pairing, storage, logging
 - [docs/THEMES.md](./docs/THEMES.md) — bootstrapping FE themes

@@ -7,7 +7,7 @@ section links here.
 
 **Docs layout (since 2026-10-06):** every document lives in `docs/`
 (`DESIGN/QUESTIONS/ANSWERS/PROJECT_STATUS/CLIENT_SDK/MESSAGES/SIGNUP/
-BE_TECH/THEMES`, audits in `docs/audits/`). Only
+BE_TECH/THEMES/GO_LIVE_PROCESS`, audits in `docs/audits/`). Only
 `README.md` files stay beside code (root + `be/`, `client/`) and
 they point into `docs/`. The legacy `fe/` PWA and its
 `FE_LEGACY_TECH.md` doc were **deleted 2026-10-06** — `client/app`
@@ -117,6 +117,13 @@ is the only FE (audits mentioning `fe/` are historical).
 - **Storage scoping**: per-account IndexedDB (identity records keyed
   `identity:<ul>` + `current` pointer; `cocono-app:<ul>` message DB), no
   cross-account bleed; 'remove account' wipes local data.
+
+## Public launch
+
+The sequenced path from this state to a public service — phases, gates,
+cold-box drill, launch-day and post-launch schedule — lives in
+**[GO_LIVE_PROCESS.md](./GO_LIVE_PROCESS.md)**. The P0 table below is the
+input to it; keep both in sync when items close.
 
 ## Security posture — target: PUBLIC app
 
