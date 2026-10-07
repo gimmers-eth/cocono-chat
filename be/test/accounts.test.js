@@ -69,10 +69,15 @@ test('signup rejects invalid usernames and reserved names', async () => {
     const d = 'device-one-123';
 
     const tooLong = 'a'.repeat(65); // L3 fix: usernames capped at 64
-    for (const u of ['abcd', 'has space', 'punct!', 'server', 'admin', tooLong]) {
+    for (const u of ['abc', 'has space', 'punct!', 'server', 'admin', tooLong]) {
       const res = await signupUser(app, client, u, randomAesKey(), d);
       assert.equal(res.statusCode, 400, `username ${u.slice(0, 20)} should be rejected`);
     }
+
+    // 4-char minimum (relaxed 2026-10-07): exactly-4 signs up fine
+    const four = makeClient();
+    const okRes = await signupUser(app, four, 'abcd', randomAesKey(), 'device-two-456');
+    assert.equal(okRes.statusCode, 201, 'four-character username must be accepted');
   } finally {
     await teardown();
   }

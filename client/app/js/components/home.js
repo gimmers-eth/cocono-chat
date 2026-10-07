@@ -251,7 +251,7 @@ export function createHome({ client, chat, onLogout }) {
     const openNew = async () => {
       const input = $('chat-peer-name');
       const username = input.value.trim();
-      if (username.length < 5) return setStatus($('home-status'), 'Username must be at least 5 characters.', true);
+      if (username.length < 4) return setStatus($('home-status'), 'Username must be at least 4 characters.', true);
       await chat.openChat(username);
       input.value = '';
       newChat.dismiss(); // Enter/button both collapse the dropdown

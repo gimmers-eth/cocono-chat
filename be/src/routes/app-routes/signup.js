@@ -20,7 +20,7 @@ export default async function signupRoutes(app, { users, redis, config }) {
     const { u, p, x, a, d, t, s } = request.body ?? {};
 
     if (!isValidUsername(u)) {
-      return fail(reply, 'invalid_username', 'Username must be 5-64 chars of [a-zA-Z0-9_-]', 400);
+      return fail(reply, 'invalid_username', 'Username must be 4-64 chars of [a-zA-Z0-9_-]', 400);
     }
     if (isReserved(u, config.reservedUsernames)) {
       return fail(reply, 'reserved_username', 'That username is reserved', 400);

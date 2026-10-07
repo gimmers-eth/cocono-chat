@@ -60,7 +60,8 @@ test('jwt rejects wrong secret, tampering and expiry', () => {
 test('username validation', () => {
   assert.ok(isValidUsername('alice'));
   assert.ok(isValidUsername('bob_1-x'));
-  assert.ok(!isValidUsername('abcd')); // too short
+  assert.ok(isValidUsername('abcd'));         // 4-char minimum
+  assert.ok(!isValidUsername('abc')); // too short
   assert.ok(!isValidUsername('has space'));
   assert.ok(!isValidUsername('punct!'));
   assert.ok(!isValidUsername(''));

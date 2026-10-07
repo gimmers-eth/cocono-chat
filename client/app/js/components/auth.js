@@ -102,7 +102,7 @@ export function createAuth({ client, onLoggedIn }) {
     $('btn-signup').addEventListener('click', () =>
       guard(async () => {
         const username = $('signup-username').value.trim();
-        if (username.length < 5) throw new Error('Username must be at least 5 characters.');
+        if (username.length < 4) throw new Error('Username must be at least 4 characters.');
         setStatus(els.status, 'Creating account and keys on this device…');
         const res = await client.register(username);
         await onLoggedIn(res);
@@ -125,7 +125,7 @@ export function createAuth({ client, onLoggedIn }) {
     $('btn-pair-start').addEventListener('click', () =>
       guard(async () => {
         const username = $('pair-username').value.trim();
-        if (username.length < 5) throw new Error('Username must be at least 5 characters.');
+        if (username.length < 4) throw new Error('Username must be at least 4 characters.');
         const { code } = await client.beginPairing(username);
         $('pair-code').textContent = code;
         $('pair-hint').textContent = 'Waiting for approval…';

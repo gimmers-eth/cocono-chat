@@ -97,7 +97,7 @@ Rules:
 ### Accounts
 Each user has an account that they can connect to using multiple devices.
 
-- Username: at least five characters, alphanumeric, underscores (`_`) or dashes (`-`)
+- Username: at least four characters, alphanumeric, underscores (`_`) or dashes (`-`)
   only. **Case-insensitive uniqueness** (`aBc` is the same as `abc`). Reserved names are
   configurable.
 - Usernames cannot be changed once set.
