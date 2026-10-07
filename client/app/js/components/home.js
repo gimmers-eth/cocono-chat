@@ -5,7 +5,7 @@
 import { $, setStatus, fmtTime, confirmModal } from '../ui.js';
 import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
-import { allMessages, isUnread, loadFriends, loadPins } from '../store.js';
+import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData } from '../store.js';
 import { refreshSettingsUI } from '../install.js';
 import { loadRegistry, applyTheme, savedTheme, wireThemeSelect } from '../theme.js';
 
@@ -234,6 +234,9 @@ export function createHome({ client, chat, onLogout }) {
 
     $('btn-logout').addEventListener('click', () => {
       client.logout();
+      // logout wipes device-local trust: friends mirror (refetched at next
+      // login) + identity pins + verified flags (see store.clearLocalTrustData)
+      clearLocalTrustData().catch(() => {});
       onLogout();
     });
 

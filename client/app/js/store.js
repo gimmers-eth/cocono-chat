@@ -266,3 +266,23 @@ export async function setPinVerified(peer, verified) {
   notifyFriends();
   return next;
 }
+
+/**
+ * Logout hygiene: wipe the device-local trust state (friends mirror + pins).
+ * The friends mirror is a cache — it re-fetchedes from the server on the
+ * next entry. PINS are deliberately destroyed too per product decision:
+ * the next login gets a FRESH TOFU anchor (honest trade-off: change
+ * detection does not survive a logout; full-erase of everything else stays
+ * tied to 'remove this device').
+ */
+export async function clearLocalTrustData() {
+  const db = await openDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction([FRIENDS, PINS], 'readwrite');
+    tx.objectStore(FRIENDS).clear();
+    tx.objectStore(PINS).clear();
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+  notifyFriends();
+}

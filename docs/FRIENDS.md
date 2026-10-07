@@ -103,6 +103,26 @@ cannot read content, forge envelopes/pushes, or see pins/safety numbers.
   the **signed append-only event log** (P2, deliberately deferred; it is a
   mini transparency-log project, and groups/M5 will force the issue anyway).
 
+## Deletion & cleanup
+
+**Server-side (every account-deletion path: last-device detach, admin delete,
+admin device cascade):**
+- The account doc, all messages to/from it, and its Redis state are swept
+  (existing cascade) — and `purgeFriendReferences()` now ALSO strips the
+  dead username from **every other account's friends list**. Trust in a
+  nonexistent account is meaningless, and a purged entry can never
+  silently point at whoever re-registers the name later. The `gone`/
+  `changed` flags remain as defense-in-depth (purge failure, restore from
+  an old backup), but the normal lifecycle is: account dies → lists clean.
+
+**Device-local (logout via the power button):**
+- The friends mirror is wiped (it is a cache — refetched at next entry).
+- **Pins and verified flags are wiped too** (product decision): logging out
+  destroys this device's TOFU history. Honest trade-off — change detection
+  does NOT survive a logout; the next login re-pins fresh. Permanent,
+  full-local erasure stays tied to "remove this device" (which deletes the
+  whole per-account IndexedDB, messages included).
+
 ## Operational notes
 
 - `FRIENDS_MAX`, rate limits: see `be/src/config.js` + `.env.example`.

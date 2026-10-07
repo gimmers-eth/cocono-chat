@@ -31,3 +31,21 @@ export async function cleanupAccountState(redis, ul) {
     }
   }
 }
+
+// Purge a deleted username from every OTHER account's friends list.
+// Trust in a dead account is meaningless — and if the username is later
+// re-registered, a stale entry would silently point at whoever grabbed it.
+// (Clients ALSO mark/clean via gone/changed flags: this sweep is the
+// defense-in-depth, so even a reconcile-time GET can't resurrect the ghost.)
+export async function purgeFriendReferences(users, deletedUl) {
+  // bound {u, p} entries
+  await users.updateMany(
+    { ul: { $ne: deletedUl }, friends: { $elemMatch: { u: deletedUl } } },
+    { $pull: { friends: { u: deletedUl } } },
+  );
+  // legacy plain-string entries
+  await users.updateMany(
+    { ul: { $ne: deletedUl }, friends: deletedUl },
+    { $pull: { friends: deletedUl } },
+  );
+}

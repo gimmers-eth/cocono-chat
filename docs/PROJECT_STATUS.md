@@ -101,7 +101,10 @@ is the only FE (audits mentioning `fe/` are historical).
   (`/api/me/friends`): add is SERVER-STAMPED (clients cannot claim keys);
   reads resolve the live directory flagging `gone` / `changed` (stale
   binding after re-registration) / `trusted`; re-add re-binds; cap +
-  validation + rate limits. Live device sync via E2EE sys messages
+  validation + rate limits. **Account deletion purges the username from
+  every OTHER account's friends list** (`purgeFriendReferences` in all
+  three deletion paths) — dead trust can never inherit to a name squatter.
+  Live device sync via E2EE sys messages
   `{"sys":"friend+/-",ul,p}` broadcast by the acting device to its own
   account (server cannot forge/read); new+offline devices reconcile with
   `listFriends()` on app entry. Auto-untrust: chat open verifies
@@ -111,6 +114,9 @@ is the only FE (audits mentioning `fe/` are historical).
   user = trusted, red user-xmark = stranger/unbound/stale, user-slash +
   italic = deleted account; sidebar merges messages ∪ friends (clearing a
   chat never unfriends); ghost chats are read-only with composer locked.
+  **Logout wipes device-local trust** (friends mirror + pins + verified
+  flags — TOFU history intentionally does not survive a logout; full wipe
+  stays with 'remove this device').
 - **Icons: Font Awesome 7 Free** — vendored (not CDN: CSP `default-src
   'self'` + offline shell). `client/app/vendor/fontawesome/{css,webfonts}`
   (+ LICENSE.txt). Single config `client/app/js/icons.js` (ICONS map +

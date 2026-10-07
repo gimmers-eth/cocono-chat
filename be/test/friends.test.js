@@ -159,3 +159,38 @@ test('friends: cap enforced (friendsMax override)', async () => {
     await teardown();
   }
 });
+
+test('account deletion purges the dead username from every friends list', async () => {
+  const { app, teardown } = await setupApp(LIMITS);
+  try {
+    const alice = makeClient();
+    const bobby = makeClient();
+    const a = await signupUser(app, alice, 'alice');
+    const b = await signupUser(app, bobby, 'bobby');
+    const tokenA = await getToken(app, alice, 'alice', a.d);
+    const tokenB = await getToken(app, bobby, 'bobby', b.d);
+
+    const add = await app.inject({
+      method: 'PUT', url: '/api/me/friends/bobby',
+      headers: { authorization: `Bearer ${tokenA}` },
+    });
+    assert.equal(add.json().friends[0].trusted, true);
+
+    // bobby detaches his LAST device => account deleted outright
+    const del = await app.inject({
+      method: 'DELETE', url: `/api/devices/${b.d}`,
+      headers: { authorization: `Bearer ${tokenB}` },
+    });
+    assert.equal(del.json().accountDeleted, true);
+
+    // alice's list is PURGED (not just flagged gone): a future owner of the
+    // username can never inherit this trust, not even via a stale cache
+    const list = await app.inject({
+      method: 'GET', url: '/api/me/friends',
+      headers: { authorization: `Bearer ${tokenA}` },
+    });
+    assert.deepEqual(list.json().friends, []);
+  } finally {
+    await teardown();
+  }
+});

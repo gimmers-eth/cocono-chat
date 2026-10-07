@@ -1,5 +1,5 @@
 import { fail } from '../shared.js';
-import { cleanupAccountState } from '../../lib/accountState.js';
+import { cleanupAccountState, purgeFriendReferences } from '../../lib/accountState.js';
 
 // Per-account device cap: 1..MAX_DEVICES_CAP. Raising it lets a user enroll
 // more devices; lowering it below the current device count is allowed (the
@@ -42,6 +42,7 @@ export default async function usersRoutes(app, { users, redis, messages }) {
       return fail(reply, 'unknown_account', 'No such user', 404);
     }
     await cleanupAccountState(redis, ul);
+    await purgeFriendReferences(users, ul);
     if (messages) {
       await messages.deleteMany({ $or: [{ 'to.ul': ul }, { 'from.ul': ul }] });
     }
@@ -69,6 +70,7 @@ export default async function usersRoutes(app, { users, redis, messages }) {
     if (after.devices.length === 0) {
       await users.deleteOne({ ul });
       await cleanupAccountState(redis, ul);
+      await purgeFriendReferences(users, ul);
       if (messages) await messages.deleteMany({ $or: [{ 'to.ul': ul }, { 'from.ul': ul }] });
       return { removed: deviceId, devices: 0, accountDeleted: true };
     }
