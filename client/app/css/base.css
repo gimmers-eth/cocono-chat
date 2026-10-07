@@ -237,7 +237,10 @@ img.own-avatar { border-radius: 50%; }
   padding: 0 1rem; background: var(--panel); border-bottom: 1px solid var(--border);
 }
 .chat-peer { display: grid; }
-.chat-peer-name { font-weight: 600; }
+.chat-peer-name { font-weight: 600; display: flex; align-items: center; gap: .45rem; min-width: 0; }
+.chat-peer-name > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-peer-name .peer-status { flex: none; }
+.chat-peer-name .badge-slot { flex: none; }
 /* ghost chat (deleted account): italic username */
 .chat-peer-name.gone { font-style: italic; }
 
@@ -452,10 +455,7 @@ img.own-avatar { border-radius: 50%; }
 #profile-avatar-img { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; flex: none; }
 /* cached avatars rendered as circles anywhere an initial would sit */
 .avatar-img { object-fit: cover; }
-.chat-avatar {
-  width: 30px; height: 30px; border-radius: 50%; object-fit: cover;
-  flex: none; margin-right: .1rem; align-self: center;
-}
+.chat-avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; flex: none; }
 .bio-line { margin-top: .15rem; white-space: pre-wrap; line-height: 1.4; }
 
 /* Profile view status lines */
