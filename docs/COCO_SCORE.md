@@ -59,7 +59,7 @@ Roadmap signals, once their data exists and is abuse-tested:
 ## Display rules
 
 - Profile → Safety → Social: counts line (`Vouched by N added · N verified · N trusted`)
-  then `CoCo: N — Social Score` shown in `--info` blue. No formula in the UI;
+  then `CoCo No Social Score: N` shown in the accent (light purple). No formula in the UI;
   this doc is the public explanation.
 - Computed by the server; clients render it verbatim. No score is shown for
   deleted/not-found accounts, and counts never expose WHO vouched.

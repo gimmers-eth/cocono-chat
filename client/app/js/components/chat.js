@@ -733,7 +733,7 @@ export function createChat({ client, onHomeRefresh }) {
           : 'Nobody vouches for this account yet. Be extra careful: trust must be earned here, not assumed.');
       rep.textContent = `Vouched by ${stats.addedBy} added · ${stats.verifiedBy} verified · ${stats.trustedBy} trusted`;
       rep.hidden = false;
-      coco.textContent = `CoCo: ${stats.coco} — Social Score`;
+      coco.textContent = `CoCo No Social Score: ${stats.coco}`;
       coco.hidden = false;
     } else {
       setRow(socialState, socialNote, '', 'Social: Unknown', 'Reputation counts need a connection.');
@@ -801,7 +801,7 @@ export function createChat({ client, onHomeRefresh }) {
       $('profile-reputation').textContent =
         `Vouched by ${stats.addedBy} added · ${stats.verifiedBy} verified · ${stats.trustedBy} trusted`;
       $('profile-reputation').hidden = false;
-      $('profile-coco').textContent = `CoCo: ${stats.coco} — Social Score`;
+      $('profile-coco').textContent = `CoCo No Social Score: ${stats.coco}`;
       $('profile-coco').hidden = false;
     } else {
       setRow($('profile-social-state'), $('profile-social-note'), '', 'Social: unknown',
