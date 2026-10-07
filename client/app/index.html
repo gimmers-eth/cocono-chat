@@ -251,14 +251,14 @@
     <div id="chatopts-identity-view" hidden>
       <h2 class="side-menu-title"><span class="peer-status" id="identity-status-icon"></span><span id="identity-peer"></span></h2>
       <p class="muted small">You and your contact must see the SAME number — it is derived from both accounts' identity keys. Compare it over any other channel; a match proves no one is intercepting this conversation.</p>
-      <p id="identity-number" class="identity-number" tabindex="0"></p>
+      <div id="identity-number" class="identity-number" role="button" tabindex="0" title="Tap to copy">
+        <span id="identity-number-text"></span>
+        <span class="identity-copy-tag"><span data-icon="copy"></span><span id="identity-copy-label">Copy</span></span>
+      </div>
       <p id="identity-since" class="muted small"></p>
-      <!-- verified flag binds to MY pin of the peer key; the pair number above
-           is what both sides compare -->
+      <!-- the whole box copies (bottom-right tag is the affordance); the
+           verify + back rows below -->
       <ul class="menu-list">
-        <li class="menu-row">
-          <button id="btn-identity-copy" class="menu-action" data-icon="copy">Copy</button>
-        </li>
         <li class="menu-row">
           <button id="btn-identity-verify" class="menu-action"></button>
         </li>

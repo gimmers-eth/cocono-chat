@@ -514,7 +514,10 @@ export function createChat({ client, onHomeRefresh }) {
       myKey = (await client.peerKeys(client.username))?.id ?? null;
     } catch { /* offline / lookup failed: handled as 'not available' */ }
     const statusIcon = $('identity-status-icon');
-    const numEl = $('identity-number');
+    const numEl = $('identity-number-text');
+    const box = $('identity-number');
+    box.classList.remove('copied');
+    $('identity-copy-label').textContent = 'Copy';
     if (!peerKey || !myKey) {
       statusIcon.replaceChildren(iconEl('notFriend', 'icon-danger'));
       numEl.textContent = 'Safety number not available yet.';
@@ -541,15 +544,31 @@ export function createChat({ client, onHomeRefresh }) {
     vb.classList.toggle('danger', verified);
   }
 
+  // Tap the number box anywhere: copy, highlight (.copied until next
+  // render), label confirms and reverts — tapping again re-copies.
+  let copyFlashTimer = null;
   async function copySafetyNumber() {
-    const text = $('identity-number').textContent ?? '';
+    const text = $('identity-number-text').textContent ?? '';
     if (!text || text.startsWith('Safety number not available')) return;
+    let ok = false;
     try {
-      await navigator.clipboard.writeText(text);
-      setStatus($('identity-since'), 'Safety number copied ✓');
+      await navigator.clipboard.writeText(text); // secure-context path
+      ok = true;
     } catch {
-      setStatus($('identity-since'), 'Copy failed — select the number manually.');
+      const ta = document.createElement('textarea'); // fallback (denied/old)
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.className = 'copy-helper';
+      document.body.appendChild(ta);
+      ta.select();
+      try { ok = document.execCommand('copy'); } catch { ok = false; }
+      ta.remove();
     }
+    const box = $('identity-number');
+    box.classList.toggle('copied', ok);
+    $('identity-copy-label').textContent = ok ? 'Copied ✓' : 'Copy failed';
+    clearTimeout(copyFlashTimer);
+    if (ok) copyFlashTimer = setTimeout(() => { $('identity-copy-label').textContent = 'Copy'; }, 1800);
   }
 
   async function toggleVerified() {
@@ -788,7 +807,10 @@ export function createChat({ client, onHomeRefresh }) {
         menuActionLabel(trustState(ent, pin), currentPeer);
       }
     });
-    $('btn-identity-copy').addEventListener('click', copySafetyNumber);
+    $('identity-number').addEventListener('click', copySafetyNumber);
+    $('identity-number').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); copySafetyNumber(); }
+    });
     $('btn-identity-verify').addEventListener('click', toggleVerified);
     window.addEventListener(FRIENDS_EVENT, () => { updateTrustUI(); });
     $('btn-chat-clear').addEventListener('click', async () => {

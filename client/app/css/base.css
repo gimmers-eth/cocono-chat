@@ -253,13 +253,27 @@ img.logo { object-fit: cover; background: none; }
 /* Off-screen selection helper for the clipboard fallback (never visible). */
 .copy-helper { position: fixed; top: -100vw; left: -100vw; opacity: 0; }
 
-/* Safety number panel: big readable groups, easy to compare aloud. */
+/* Safety number panel: smaller text; the WHOLE box is the copy target with
+   a tag bottom-right; .copied highlights until the next tap re-copies. */
 .identity-number {
-  margin: .6rem 0 .3rem; padding: .8rem .6rem;
-  font-family: ui-monospace, monospace; font-size: 1.05rem; letter-spacing: .06em;
-  line-height: 1.9; text-align: center; word-break: break-all;
-  background: rgba(127, 127, 127, .08); border-radius: 10px; user-select: all;
+  position: relative; margin: .6rem 0 .3rem; padding: .7rem .7rem 1.5rem;
+  min-height: 3.6rem;
+  font-family: ui-monospace, monospace; font-size: .85rem; letter-spacing: .05em;
+  line-height: 1.7; text-align: center; word-break: break-all;
+  background: rgba(127, 127, 127, .08); border: 1px solid transparent;
+  border-radius: 10px; user-select: none; cursor: pointer;
 }
+.identity-number:hover { border-color: var(--border); }
+.identity-number.copied {
+  border-color: var(--accent);
+  background: rgba(0, 168, 132, 0.08);
+}
+.identity-copy-tag {
+  position: absolute; right: .55rem; bottom: .35rem;
+  display: inline-flex; align-items: center; gap: .3em;
+  font-size: .68rem; color: var(--muted);
+}
+.identity-number.copied .identity-copy-tag { color: var(--accent); }
 
 /* Trust warning strip (non-friend chat): stays under the header, above the
    transcript. Amber = caution, not danger — encryption still holds. */
