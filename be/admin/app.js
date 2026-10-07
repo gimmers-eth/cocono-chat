@@ -336,6 +336,28 @@ document.addEventListener('change', (e) => {
     }));
 });
 
+// ---- photo lightbox (click a profile thumbnail to enlarge) ----
+{
+  const box = $('lightbox');
+  const big = $('lightbox-img');
+  document.addEventListener('click', (e) => {
+    const thumb = e.target.closest?.('img.avatar-thumb');
+    if (!thumb?.src) return; // thumbnail not loaded yet — nothing to show
+    big.src = thumb.src;
+    box.hidden = false;
+  });
+  box.addEventListener('click', () => {
+    box.hidden = true;
+    big.removeAttribute('src');
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !box.hidden) {
+      box.hidden = true;
+      big.removeAttribute('src');
+    }
+  });
+}
+
 document.addEventListener('click', async (e) => {
   const viewUl = e.target.closest?.('[data-view-id]')?.dataset.viewId;
   if (viewUl) {
