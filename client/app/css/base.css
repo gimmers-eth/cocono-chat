@@ -86,6 +86,8 @@ ul { list-style: none; padding: 0; }
   font-size: 1.15rem; padding: .3rem .5rem; border-radius: 8px;
 }
 .icon-btn:hover { color: var(--text); background: var(--panel-raised); }
+/* .dot / .dot-on / .dot-busy removed with the sidebar connection dot (
+   the only online indicator we had; the offline banner covers outages). */
 
 .linkish { background: none; border: 0; color: var(--accent); padding: .2rem; }
 .linkish:hover { text-decoration: underline; }
@@ -104,9 +106,6 @@ ul { list-style: none; padding: 0; }
   display: grid; place-items: center; font-weight: 600; text-transform: uppercase;
 }
 
-.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--dot-off); }
-.dot-on { background: var(--dot-on); }
-.dot-busy { background: var(--dot-busy); }
 
 /* ---------- auth ---------- */
 
@@ -658,14 +657,19 @@ body[data-view="blocked"] .page-footer { display: none; }
   color: var(--danger);
 }
 
-/* Install nudge (auth card, default-visible) + settings rows */
+/* Install nudge: auth card + sidebar foot. */
 .install-hint {
-  display: flex; gap: .6rem; align-items: center; justify-content: space-between;
-  border: 1px solid var(--accent); border-radius: 12px;
-  padding: .6rem .8rem; margin-bottom: .9rem; font-size: .9rem;
+  display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; justify-content: space-between;
+  margin: .55rem .75rem; padding: .55rem .7rem; border-radius: .6rem;
+  background: var(--panel-raised); border: 1px solid var(--accent);
+  font-size: .82rem; line-height: 1.35;
 }
+.auth-view .install-hint { margin: 0 0 1rem; }
+.sidebar .install-hint { margin: .5rem .75rem; flex: none; }
+.install-hint .ih-text { flex: 1 1 10rem; min-width: 0; }
 .install-hint em { font-style: normal; font-weight: 600; }
-.ih-actions { display: flex; gap: .5rem; align-items: center; flex-shrink: 0; }
+.install-hint em i { margin-right: .3em; }
+/* Install rows (Settings drawer) */
 .switch-row { display: flex; gap: .6rem; align-items: center; cursor: pointer; }
 
 /* Offline banner (app view) */

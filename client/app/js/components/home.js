@@ -301,12 +301,6 @@ export function createHome({ client, chat, onLogout }) {
     paintOwnHeadAvatar().catch(() => {});
   }
 
-  function paintConnection(state) {
-    const dot = $('ws-dot');
-    dot.className = 'dot ' + (state === 'open' ? 'dot-on' : state === 'connecting' ? 'dot-busy' : 'dot-off');
-    dot.title = state;
-  }
-
   // ---- avatar plumbing: cached (mutual-add) photos everywhere ----
   const avatarPriming = new Map(); // peer -> last attempt ts (failure cooldown)
   let lastPeers = []; // current sidebar peers — remembered for profile-nudge re-priming
@@ -766,5 +760,5 @@ export function createHome({ client, chat, onLogout }) {
     wireApproveCode();
   }
 
-  return { wire, paintMe, paintConnection, renderConversationList, renderDevices, refreshIdentity: renderIdentity, refreshPeerProfiles };
+  return { wire, paintMe, renderConversationList, renderDevices, refreshIdentity: renderIdentity, refreshPeerProfiles };
 }

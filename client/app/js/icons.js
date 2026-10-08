@@ -19,6 +19,10 @@ export const ICONS = {
   menu: 'fa-ellipsis-vertical',
   chat: 'fa-comment',
   share: 'fa-share-nodes',
+  shareIos: 'fa-arrow-up-from-bracket', // the iOS Share button itself
+  ellipsis: 'fa-ellipsis',              // the ⋯ menu in iOS Safari's bottom bar
+  addHome: 'fa-regular fa-square-plus', // 'Add to Home Screen' in the iOS recipe (boxed +, regular style)
+  viewMore: 'fa-chevron-down',          // 'View more' row expander in the iOS share sheet
 
   // message actions
   copy: 'fa-copy',

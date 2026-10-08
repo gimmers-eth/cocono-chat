@@ -139,7 +139,6 @@ async function enterApp({ gesture = false, offline = false } = {}) {
   setScope(client.username);
   showView('app');
   home.paintMe(client.username);
-  home.paintConnection(offline ? 'closed' : client.connectionState);
   if (!offline) client.connect(); // offline mode: browse the local store only
   await home.renderConversationList();
 
@@ -239,7 +238,6 @@ chat.wire();
 chat.connectEvents();
 home.wire();
 auth.wire();
-client.on('state', ({ state }) => home.paintConnection(state));
 // CONTROL NUDGES (be/src/lib/notify.js): the server says a slice of
 // authoritative state THIS account caches moved because of someone else.
 // Frames are content-free on purpose — the response is ALWAYS "re-read my

@@ -27,19 +27,17 @@
         <p class="muted">Passwordless · End-to-end encrypted</p>
       </div>
 
-      <!-- Install nudge: default UI, visible whenever this browser can act
-           on it (native prompt, or the iOS recipe needed for push). -->
-      <div id="install-hint" class="install-hint" hidden>
+      <!-- Install nudge (auth copy): shown until the app IS installed, no
+           dismissal. Same block lives at the sidebar foot inside the app. -->
+      <div class="install-hint" hidden>
         <div class="ih-text">
           <strong>Install <span data-app-name>CoCoNo</span></strong>
-          <span class="install-native"> for one-tap access and OS notifications for new messages.</span>
-          <span class="install-ios"> — tap <em>Share → Add to Home Screen</em> to enable OS notifications (iPhone requires the installed app).</span>
-          <span class="install-soft"> for one-tap access and OS notifications — choose “Install” in your browser menu.</span>
+          <span class="install-native"> — one tap, for home-screen access and message notifications.</span>
+          <span class="install-ios"> — tap <em><span data-icon="shareIos"></span>Share</em> (top right), then <em><span data-icon="viewMore"></span>View more</em>, then <em><span data-icon="addHome"></span>Add to Home Screen</em>. iPhone only delivers message notifications to the installed app.</span>
+          <span class="install-ios-safari"> — tap <em><span data-icon="ellipsis"></span></em> (bottom right), <em><span data-icon="shareIos"></span>Share</em>, <em><span data-icon="viewMore"></span>View more</em>, then <em><span data-icon="addHome"></span>Add to Home Screen</em>. iPhone only delivers message notifications to the installed app.</span>
+          <span class="install-soft"> — choose <em>“Install”</em> in your browser menu for home-screen access and notifications.</span>
         </div>
-        <div class="ih-actions">
-          <button id="btn-install" class="btn btn-small btn-primary" hidden>Install</button>
-          <button id="btn-install-dismiss" class="linkish" title="Not now">Not now</button>
-        </div>
+        <button class="btn btn-small btn-primary btn-install" hidden>Install</button>
       </div>
 
       <section id="auth-login" hidden>
@@ -99,7 +97,6 @@
           </span>
         </div>
         <div class="side-actions">
-          <span id="ws-dot" class="dot dot-off" title="connection"></span>
           <button id="btn-share-chat" class="icon-btn" title="Share a link to chat with me" data-icon="share"></button>
           <button id="btn-devices" class="icon-btn" title="Devices" data-icon="settings"></button>
           <button id="btn-logout" class="icon-btn" title="Log out" data-icon="logout"></button>
@@ -118,6 +115,20 @@
       <nav class="convo-wrap">
         <ul id="conversation-list" class="convo-list"></ul>
       </nav>
+
+      <!-- Install nudge (app copy): sidebar foot, same rules — visible until
+           installed, never dismissible, gone in the installed app itself. -->
+      <div class="install-hint" hidden>
+        <div class="ih-text">
+          <strong>Install <span data-app-name>CoCoNo</span></strong>
+          <span class="install-native"> — one tap, for home-screen access and message notifications.</span>
+          <span class="install-ios"> — tap <em><span data-icon="shareIos"></span>Share</em> (top right), then <em><span data-icon="viewMore"></span>View more</em>, then <em><span data-icon="addHome"></span>Add to Home Screen</em>. iPhone only delivers message notifications to the installed app.</span>
+          <span class="install-ios-safari"> — tap <em><span data-icon="ellipsis"></span></em> (bottom right), <em><span data-icon="shareIos"></span>Share</em>, <em><span data-icon="viewMore"></span>View more</em>, then <em><span data-icon="addHome"></span>Add to Home Screen</em>. iPhone only delivers message notifications to the installed app.</span>
+          <span class="install-soft"> — choose <em>“Install”</em> in your browser menu for home-screen access and notifications.</span>
+        </div>
+        <button class="btn btn-small btn-primary btn-install" hidden>Install</button>
+      </div>
+
           <footer class="side-foot"><span id="client-version" class="muted small" title="client build (git commit)"></span></footer>
     </aside>
 
@@ -241,10 +252,12 @@
       <div id="tabpanel-general" hidden>
         <h3>Appearance</h3>
         <select id="theme-select" class="select" aria-label="Theme"></select>
-        <h3>App</h3>
-        <div class="row-actions">
-          <button id="btn-install-drawer" class="btn btn-small" hidden>Install app</button>
-          <span id="install-state" class="muted small"></span>
+        <div id="app-install-group">
+          <h3>App</h3>
+          <div class="row-actions">
+            <button id="btn-install-drawer" class="btn btn-small" hidden>Install app</button>
+            <span id="install-state" class="muted small"></span>
+          </div>
         </div>
         <h3>Notifications</h3>
         <label class="switch-row">

@@ -1,16 +1,23 @@
-// Install nudge + app/notifications settings — one small module.
+// Install + app/notifications settings — one small module.
 //
-// The install hint is DEFAULT UI (visible on the auth card, not hidden in a
-// menu) whenever the browser can act on it:
-//   • Chrome/Edge/Android: real beforeinstallprompt  -> [Install] button
-//   • iOS Safari: manual recipe (Share → Add to Home Screen), because
-//     installed-to-home-screen is a hard requirement for iOS web push
-//   • already running installed (standalone)         -> hint hidden
-// Dismissal is remembered but never silent-shown again on a fresh browser.
+// Install messaging is DEFAULT UI in two places: the auth card and the
+// sidebar foot inside the app. Rules:
+//   • shown on EVERY device that can act on it — native prompt available,
+//     or the iOS manual recipe (Share → Add to Home Screen, a hard
+//     requirement for iOS web push), or a browser-menu install line
+//   • NO dismissal: the banners stay until the app actually IS installed
+//     (standalone display-mode), at which point they — and the Settings
+//     row — disappear entirely
+//   • Chrome/Edge/Android with a live beforeinstallprompt get an [Install]
+//     button right in the banner
+// Both banner copies share the classes .install-hint / .btn-install and
+// switch variant text via .install-native / .install-ios / .install-ios-safari
+// / .install-soft — Safari on iPhone gets its own wording (Share lives in
+// the BOTTOM bar there), every other iPhone browser defaults to the
+// top-right copy.
 
 import { $ } from './ui.js';
 
-const DISMISS_KEY = 'cocon…t';
 export const PASSKEY_PREF_KEY = 'cocono…ref';
 let deferred = null; // captured native prompt event, if the browser offers one
 let clientRef = null;
@@ -22,40 +29,69 @@ const isStandalone = () =>
 const iosLike = () =>
   /iPhone|iPad|iPod/.test(navigator.userAgent) && (navigator.maxTouchPoints ?? 0) > 0;
 
-// 'native' | 'ios' | 'soft' | null  (null = don't show anything)
+// Safari vs the other iOS browsers — the install steps live in different
+// places (Safari: Share in the BOTTOM bar; Chrome etc.: top right). Rules:
+//   • CriOS/FxiOS/EdgiOS/OPiOS always self-report (WebKit rewrappers must)
+//     -> those get the default Chrome-style copy
+//   • everything else on iPhone/iPad/iPod — or a "Mac" that touches the
+//     screen (iPadOS desktop-mode Safari) — with a Safari/ token is Safari
+//   • unknown browsers fall through to the Chrome-style copy (default, per
+//     the confirmed-correct wording on iPhone Chrome)
+const iosSafari = () =>
+  /CriOS|FxiOS|EdgiOS|OPiOS|Electron/.test(navigator.userAgent)
+    ? false
+    : (/iPhone|iPad|iPod/.test(navigator.userAgent)
+        || (/Macintosh/.test(navigator.userAgent) && (navigator.maxTouchPoints ?? 0) > 1))
+      && /Safari\//.test(navigator.userAgent);
+
+// 'native' | 'ios' | 'ios-safari' | 'soft' | null  (null = don't show anything)
 export function installMode() {
   if (isStandalone()) return null;
   if (deferred) return 'native';
-  if (iosLike()) return 'ios';
+  if (iosLike() && !iosSafari()) return 'ios'; // iPhone Chrome & co: top-right copy
+  if (iosSafari()) return 'ios-safari';       // Safari: bottom-bar copy
   // Firefox/Linux/etc.: install exists via browser UI — gentle line only.
   return 'soft';
 }
 
 function renderHint() {
-  const el = $('install-hint');
-  if (!el) return;
   const mode = installMode();
-  const dismissed = localStorage.getItem(DISMISS_KEY) === 'off';
-  const show = mode && !(dismissed && mode !== 'native'); // a live prompt can re-offer once
-  el.hidden = !show;
-  if (!show) return;
-  el.querySelector('.install-native').hidden = mode !== 'native';
-  el.querySelector('.install-ios').hidden = mode !== 'ios';
-  el.querySelector('.install-soft').hidden = mode !== 'soft';
-  $('btn-install').hidden = mode !== 'native';
+  for (const el of document.querySelectorAll('.install-hint')) {
+    el.hidden = !mode; // visible until installed — nothing can dismiss it
+    if (!mode) continue;
+    for (const v of ['install-native', 'install-ios', 'install-ios-safari', 'install-soft']) {
+      const span = el.querySelector('.' + v);
+      if (span) span.hidden = v !== `install-${mode}`;
+    }
+    const btn = el.querySelector('.btn-install');
+    if (btn) btn.hidden = mode !== 'native';
+  }
+}
+
+function renderAll(opts = {}) {
+  renderHint();
+  renderDrawer(opts);
 }
 
 function renderDrawer({ open = false } = {}) {
+  const group = $('app-install-group');
   const state = $('install-state');
   const btn = $('btn-install-drawer');
+  const mode = installMode();
+  // installed = nothing to show at all (not even 'Installed ✓')
+  if (group) group.hidden = mode === null;
   if (state) {
-    const mode = installMode();
-    state.textContent = mode === null ? 'Installed ✓'
-      : mode === 'native' ? 'Not installed yet'
-      : mode === 'ios' ? 'iPhone: Share → Add to Home Screen'
-      : 'Use your browser menu to install';
+    state.textContent =
+      mode === 'native' ? 'Not installed yet — one tap.'
+      : mode === 'ios'
+        ? 'iPhone: tap Share (top right), then View more, then Add to Home Screen. Installing also turns on message notifications — iPhone only delivers them to the installed app.'
+        : mode === 'ios-safari'
+          ? 'iPhone Safari: tap the … icon (bottom right), Share, View more, then Add to Home Screen. Installing also turns on message notifications — iPhone only delivers them to the installed app.'
+          : mode === 'soft'
+            ? 'Not installed yet — choose “Install” in your browser menu.'
+            : '';
   }
-  if (btn) btn.hidden = installMode() !== 'native' || !open;
+  if (btn) btn.hidden = mode !== 'native' || !deferred || !open;
 }
 
 // --- notifications toggle (Settings drawer) ---
@@ -79,7 +115,7 @@ async function renderNotify(client) {
   if (hint) {
     hint.textContent =
       state === 'unsupported' ? 'This browser cannot show web notifications.'
-      : iosLike() && !isStandalone() ? 'On iPhone, install the app (Share → Add to Home Screen) first — iOS only allows notifications there.'
+      : iosLike() && !isStandalone() ? 'On iPhone, install the app (Share → View more → Add to Home Screen) first — iOS only allows notifications there.'
       : state === 'denied' ? 'Notifications are blocked in browser settings — unblock them to turn this on.'
       : state === 'granted-unsubscribed' ? 'Almost — this device still needs to register its push key.'
       : state === 'on' ? 'You will be notified when messages arrive while the app is closed.'
@@ -107,28 +143,24 @@ export function initInstallAndNotify({ client }) {
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     deferred = e;
-    renderHint();
+    renderAll({ open: document.getElementById('settings-drawer')?.hidden === false });
   });
   window.addEventListener('appinstalled', () => {
     deferred = null;
-    localStorage.removeItem(DISMISS_KEY);
-    renderHint();
-    renderDrawer();
+    renderAll();
     renderNotify(client);
   });
 
-  $('btn-install')?.addEventListener('click', async () => {
-    if (!deferred) return;
-    deferred.prompt();
-    try { await deferred.userChoice; } catch { /* dismissed */ }
-    deferred = null;
-    $('install-hint').hidden = true;
-  });
-  $('btn-install-dismiss')?.addEventListener('click', () => {
-    localStorage.setItem(DISMISS_KEY, 'off');
-    $('install-hint').hidden = true;
-  });
-  $('btn-install-drawer')?.addEventListener('click', () => deferred?.prompt?.());
+  for (const btn of document.querySelectorAll('.btn-install')) {
+    btn.addEventListener('click', async () => {
+      if (!deferred) return;
+      deferred.prompt();
+      try { await deferred.userChoice; } catch { /* dismissed — banners stay */ }
+      deferred = null;
+      renderAll({ open: document.getElementById('settings-drawer')?.hidden === false });
+    });
+  }
+  $('btn-install-drawer')?.addEventListener('click', () => document.querySelector('.btn-install')?.click());
 
   $('notify-toggle')?.addEventListener('change', async (e) => {
     e.target.disabled = true;
@@ -138,13 +170,12 @@ export function initInstallAndNotify({ client }) {
     }
   });
 
-  renderHint();
-  renderDrawer();
+  renderAll();
   renderNotify(client).catch(() => {});
 }
 
 /** Refresh drawer state each time the Settings drawer opens (called by home.js). */
 export function refreshSettingsUI() {
-  renderDrawer({ open: true });
+  renderAll({ open: true });
   if (clientRef) renderNotify(clientRef).catch(() => {});
 }
