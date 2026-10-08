@@ -57,20 +57,34 @@ function renderLimits(limits) {
     .join('');
 }
 
+const avatarUrls = new Map(); // ul -> live object URL (revoked on re-fill)
+
 async function fillAvatarThumbs(users) {
   for (const u of users) {
     if (!u.hasAvatar) continue;
     const img = document.querySelector(`img[data-avatar-for="${CSS.escape(u.ul)}"]`);
-    if (!img) continue;
+    if (!img || img.src) continue; // absent (panel closed) or already showing
     try {
       const res = await fetch(`/api/admin/users/${encodeURIComponent(u.ul)}/avatar`, {
         headers: { 'x-admin-token': tokenInput.value.trim() },
       });
       if (!res.ok) throw new Error(String(res.status));
-      img.src = URL.createObjectURL(await res.blob());
+      const url = URL.createObjectURL(await res.blob());
+      const prev = avatarUrls.get(u.ul);
+      if (prev) URL.revokeObjectURL(prev);
+      avatarUrls.set(u.ul, url);
+      img.src = url;
     } catch { /* offline/none: stays empty */ }
   }
 }
+
+// ---- users list (slim) + detail side panel ----
+// The list shows WHO exists (user, created, verified, max devices); every
+// detail and action lives in the side panel, keyed by selectedUl. All the
+// panel's buttons reuse the existing delegated handlers (data-verify /
+// data-view-id / data-del-id / data-set-max / data-del-device / data-del-user),
+// so actions keep working unchanged — only the layout moved.
+let selectedUl = null;
 
 function renderUsers(users) {
   lastUsers = users;
@@ -81,37 +95,170 @@ function renderUsers(users) {
       (u) => `<tr>
         <td><strong>@${esc(u.u)}</strong><br /><span class="dim mono">${esc(u.ul)}</span></td>
         <td>${fmtDate(u.createdAt)}</td>
-        <td><input type="checkbox" class="verify-toggle" data-verify="${esc(u.ul)}" ${u.verified ? 'checked' : ''} title="${u.verified && u.verifiedAt ? 'verified ' + esc(fmtDate(u.verifiedAt)) : 'not verified'}" /></td>
-        <td>${u.hasAvatar
-          ? `<img class="avatar-thumb" data-avatar-for="${esc(u.ul)}" alt="profile photo" title="Click to enlarge" />`
-          : '<span class="dim">no photo</span>'}</td>
-        <td>${u.idDoc
-          ? `<span class="dim">${esc(u.idDoc.contentType.replace('image/', ''))} · ${fmtDate(u.idDoc.uploadedAt)}</span><br />
-             <button class="tiny" data-view-id="${esc(u.ul)}">view</button>
-             <button class="danger tiny" data-del-id="${esc(u.ul)}">delete photo</button>`
-          : '<span class="dim">none</span>'}</td>
-        <td>
-          <input type="number" min="1" max="1000" value="${u.maxDevices}" class="max-devices" data-max-for="${esc(u.ul)}" />
-          <button class="tiny" data-set-max="${esc(u.ul)}">set</button>
-        </td>
-        <td>${u.devices
-          .map(
-            (d) => `<div class="device">
-              <span class="mono">${esc(d.id.slice(0, 8))}…</span>
-              <span class="dim">seen ${fmtAgo(d.lastSeenAt)}</span>
-              <button class="danger tiny" data-del-device="${esc(u.ul)}" data-device="${esc(d.id)}">remove</button>
-            </div>`,
-          )
-          .join('')}</td>
-        <td><button class="danger tiny" data-del-user="${esc(u.ul)}">delete user</button></td>
+        <td>${u.verified
+          ? '<span class="badge ok-badge">verified</span>'
+          : '<span class="badge no-badge">not verified</span>'}</td>
+        <td class="mono">${u.maxDevices}</td>
+        <td><button class="tiny" data-view-user="${esc(u.ul)}">view more</button></td>
       </tr>`,
     )
     .join('');
+  renderPanel();
   fillAvatarThumbs(users).catch(() => {});
+}
+
+function openPanel(ul) {
+  selectedUl = ul;
+  $('user-panel').hidden = false;
+  $('user-overlay').hidden = false;
+  renderPanel();
+  fillAvatarThumbs(lastUsers).catch(() => {});
+}
+
+function closePanel() {
+  selectedUl = null;
+  $('user-panel').hidden = true;
+  $('user-overlay').hidden = true;
+}
+
+function renderPanel() {
+  const panel = $('user-panel');
+  if (!selectedUl) { if (!panel.hidden) closePanel(); return; }
+  const u = lastUsers.find((x) => x.ul === selectedUl);
+  if (!u) { closePanel(); return; } // account deleted / no longer visible
+  // don't clobber the panel while a number input in it has focus — the
+  // 10s refresh would reset a half-typed value (max-devices or a per-user
+  // limit)
+  if (['max-devices', 'lu-limit'].includes(document.activeElement?.className)) return;
+  $('user-panel-body').innerHTML = `
+    <div class="sec">
+      <div class="pu-id"><strong>@${esc(u.u)}</strong> <span class="dim mono">${esc(u.ul)}</span></div>
+      <div class="dim">created ${fmtDate(u.createdAt)}</div>
+    </div>
+    <div class="sec">
+      <h3>Verification</h3>
+      <label class="toggle-row">
+        <input type="checkbox" class="verify-toggle" data-verify="${esc(u.ul)}" ${u.verified ? 'checked' : ''} />
+        <span>${u.verified && u.verifiedAt ? 'verified ' + esc(fmtDate(u.verifiedAt)) : 'not verified'}</span>
+      </label>
+      <p class="dim small-note">unverified accounts carry a red notice to their contacts</p>
+    </div>
+    <div class="sec">
+      <h3>Profile photo</h3>
+      ${u.hasAvatar
+        ? `<img class="avatar-thumb" data-avatar-for="${esc(u.ul)}" alt="profile photo" title="Click to enlarge" />`
+          + '<p class="dim small-note">only ever shown to mutual friends; click to enlarge</p>'
+        : '<span class="dim">no photo</span>'}
+    </div>
+    <div class="sec">
+      <h3>ID document</h3>
+      ${u.idDoc
+        ? `<span class="dim">${esc(u.idDoc.contentType.replace('image/', ''))} · uploaded ${fmtDate(u.idDoc.uploadedAt)}</span>
+           <div class="row">
+             <button class="tiny" data-view-id="${esc(u.ul)}">view</button>
+             <button class="danger tiny" data-del-id="${esc(u.ul)}">delete photo</button>
+           </div>`
+        : '<span class="dim">none</span>'}
+    </div>
+    <div class="sec">
+      <h3>Max devices</h3>
+      <div class="row">
+        <input type="number" min="1" max="1000" value="${u.maxDevices}" class="max-devices" data-max-for="${esc(u.ul)}" />
+        <button class="tiny" data-set-max="${esc(u.ul)}">set</button>
+      </div>
+    </div>
+    <div class="sec">
+      <h3>Devices <span class="dim">(${u.devices.length})</span></h3>
+      ${u.devices
+        .map(
+          (d) => `<div class="device">
+            <span class="mono" title="${esc(d.id)}">${esc(d.id.slice(0, 8))}…</span>
+            <span class="dim">seen ${fmtAgo(d.lastSeenAt)}</span>
+            <button class="danger tiny" data-del-device="${esc(u.ul)}" data-device="${esc(d.id)}">remove</button>
+          </div>`,
+        )
+        .join('') || '<span class="dim">none</span>'}
+      <p class="dim small-note">removing the LAST device deletes the account outright</p>
+    </div>
+    <div class="sec">
+      <h3>Account limits</h3>
+      <p class="dim small-note">per-user overrides beat the app-wide tuning; reset falls back. First four are the verify/trust budgets.</p>
+      <table class="limits-table">
+        <thead><tr><th>Limit</th><th>Def</th><th>App</th><th>User</th><th></th></tr></thead>
+        <tbody>${panelLimitsRows(u.ul)}</tbody>
+      </table>
+    </div>
+    <div class="sec">
+      <button class="danger" data-del-user="${esc(u.ul)}">delete user</button>
+    </div>`;
+  // repaint kept the DOM fresh — reuse the blob URL we already have so the
+  // 10s refresh cycle never refetches the avatar
+  const kept = avatarUrls.get(u.ul);
+  if (kept) {
+    const img = document.querySelector(`img[data-avatar-for="${CSS.escape(u.ul)}"]`);
+    if (img && !img.src) img.src = kept;
+  }
+}
+
+// Account-scoped limiters for the user panel's limits table (IP-subject
+// limiters are app-wide only — the API rejects them per user). The verify/
+// trust budgets lead: they're the ones a reviewer actually adjusts.
+const PANEL_LIMIT_ORDER = ['fvday', 'fvweek', 'ftday', 'ftweek'];
+function panelLimitsRows(ul) {
+  const cfg = lastLimitsCfg;
+  const rows = (cfg.limiters ?? [])
+    .filter((l) => l.scope === 'account')
+    .sort((a, b) => {
+      const ai = PANEL_LIMIT_ORDER.indexOf(a.name);
+      const bi = PANEL_LIMIT_ORDER.indexOf(b.name);
+      return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+    })
+    .map((l) => {
+      const own = (cfg.userOverrides ?? []).find((o) => o.ul === ul && o.name === l.name);
+      return `<tr>
+        <td>${esc(l.label.replace(/ \(per account\)| \(acct\)/, ''))}<br /><span class="dim mono">${esc(l.name)}</span></td>
+        <td class="mono">${l.defaultLimit}</td>
+        <td class="mono dim">${l.override?.limit ?? '—'}</td>
+        <td><input class="lu-limit" type="number" min="1" placeholder="—"
+             value="${own?.limit ?? ''}" data-lu-name="${esc(l.name)}" /></td>
+        <td>
+          <button class="tiny" data-lu-set="${esc(l.name)}" data-lu-user="${esc(ul)}">set</button>
+          ${own ? `<button class="danger tiny" data-lu-clear="${esc(l.name)}" data-lu-user="${esc(ul)}">reset</button>` : ''}
+        </td>
+      </tr>`;
+    })
+    .join('');
+  return rows || '<tr><td colspan="5" class="dim">none applicable</td></tr>';
 }
 
 let lastDiags = [];
 let lastUsers = [];
+let lastLimitsCfg = { limiters: [], userOverrides: [] };
+
+function renderLimitsConfig(cfg) {
+  lastLimitsCfg = cfg;
+  // don't rebuild the app-wide table while a value is being typed into it
+  if (['lc-limit', 'lc-window'].includes(document.activeElement?.className)) return;
+  const rows = (cfg.limiters ?? [])
+    .map(
+      (l) => `<tr>
+        <td>${esc(l.label)}<br /><span class="dim mono">${esc(l.name)}</span></td>
+        <td>${l.scope}</td>
+        <td class="mono">${l.defaultLimit} / ${l.defaultWindowSec}s</td>
+        <td><input class="lc-limit" data-lc-name="${esc(l.name)}" type="number" min="1"
+             value="${l.override?.limit ?? ''}" placeholder="—" /></td>
+        <td><input class="lc-window" data-lc-name="${esc(l.name)}" type="number" min="1"
+             value="${l.override?.windowSec ?? ''}" placeholder="—" /></td>
+        <td class="dim mono">now ${l.effective.limit} / ${l.effective.windowSec}s</td>
+        <td>
+          <button class="tiny" data-lc-set="${esc(l.name)}">set</button>
+          <button class="danger tiny" data-lc-clear="${esc(l.name)}">reset</button>
+        </td>
+      </tr>`,
+    )
+    .join('');
+  $('limits-config-body').innerHTML = rows;
+}
 
 // Warning appended to the device-remove confirm when the account would be
 // left with zero devices (username stays reserved, account inaccessible).
@@ -186,18 +333,18 @@ function renderOps(o) {
 
 async function refresh() {
   try {
-    const [users, limits, diags, branding, ops] = await Promise.all([
+    const [users, limits, limitsCfg, diags, branding, ops] = await Promise.all([
       api('/api/admin/users'),
       api('/api/admin/rate-limits'),
+      api('/api/admin/limits'),
       api('/api/admin/diagnostics'),
       api('/api/admin/branding'),
       api('/api/admin/ops'),
     ]);
-    // Don't clobber the row being edited: skip the users table re-render
-    // while a max-devices input has focus.
-    if (!document.activeElement?.classList?.contains('max-devices')) {
-      renderUsers(users);
-    }
+    // limits data FIRST: renderUsers → renderPanel reads lastLimitsCfg for
+    // the panel's account-limits table
+    renderLimitsConfig(limitsCfg);
+    renderUsers(users);
     renderLimits(limits);
     renderDiags(diags);
     renderBranding(branding);
@@ -264,7 +411,54 @@ $('btn-set-branding').addEventListener('click', () => {
   $('branding-name').blur();
 });
 
+// ---- limit tuning ----
+async function patchLimits(body) {
+  try {
+    const data = await api('/api/admin/limits', { method: 'PATCH', body: JSON.stringify(body) });
+    setStatus(`${body.name} → ${data.effective.limit} / ${data.effective.windowSec}s${body.user ? ` (user @${body.user})` : ''} — done`, 'ok');
+  } catch (err) {
+    setStatus(`Setting ${body.name} failed: ${err.message}`, 'error');
+  }
+  await refresh();
+}
+
+const intOr0 = (v) => { const n = parseInt(v, 10); return Number.isInteger(n) && n >= 1 ? n : 0; };
+
 document.addEventListener('click', (e) => {
+  const setBtn = e.target.closest?.('[data-lc-set]');
+  if (setBtn) {
+    const row = setBtn.closest('tr');
+    const value = {};
+    const limit = intOr0(row.querySelector('.lc-limit')?.value);
+    const windowSec = intOr0(row.querySelector('.lc-window')?.value);
+    if (limit) value.limit = limit;
+    if (windowSec) value.windowSec = windowSec;
+    if (!Object.keys(value).length) return setStatus('Enter a limit and/or window (seconds) to override', 'error');
+    return patchLimits({ name: setBtn.dataset.lcSet, value });
+  }
+  const clearBtn = e.target.closest?.('[data-lc-clear]')?.dataset.lcClear;
+  if (clearBtn) return patchLimits({ name: clearBtn, value: null });
+  // per-user overrides: edited from the USER PANEL (view more → Account limits)
+  const luSet = e.target.closest?.('[data-lu-set]');
+  if (luSet) {
+    const limit = intOr0(luSet.closest('tr')?.querySelector('.lu-limit')?.value);
+    if (!limit) return setStatus('Enter a limit of at least 1', 'error');
+    return patchLimits({ name: luSet.dataset.luSet, user: luSet.dataset.luUser, value: { limit } });
+  }
+  const luClear = e.target.closest?.('[data-lu-clear]');
+  if (luClear) {
+    return patchLimits({ name: luClear.dataset.luClear, user: luClear.dataset.luUser, value: null });
+  }
+});
+
+document.addEventListener('click', (e) => {
+  // slim list → detail panel
+  const viewUser = e.target.closest?.('[data-view-user]')?.dataset.viewUser;
+  if (viewUser) {
+    openPanel(viewUser);
+    return;
+  }
+
   const copyDiag = e.target.closest('[data-copy-diag]')?.dataset.copyDiag;
   if (copyDiag) {
     const report = lastDiags.find((d) => d.id === copyDiag)?.report ?? '';
@@ -334,6 +528,13 @@ document.addEventListener('change', (e) => {
     api(`/api/admin/users/${encodeURIComponent(ul)}/verified`, {
       method: 'PUT', body: JSON.stringify({ verified: on }),
     }));
+});
+
+// ---- user detail side panel: close affordances ----
+$('btn-user-close').addEventListener('click', closePanel);
+$('user-overlay').addEventListener('click', closePanel);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('user-panel').hidden) closePanel();
 });
 
 // ---- photo lightbox (click a profile thumbnail to enlarge) ----

@@ -1,5 +1,6 @@
 import { rateLimit } from '../../lib/rateLimit.js';
 import { fail, limited } from '../shared.js';
+import { effectiveLimit } from '../../lib/limits.js';
 
 const MAX_REPORT_LEN = 16 * 1024;
 
@@ -9,14 +10,16 @@ const MAX_REPORT_LEN = 16 * 1024;
 // Works signed (JWT attached when present) or anonymous — problems before
 // login are exactly the ones worth reporting — so the per-IP rate limit is
 // the spam gate, plus a size cap and TTL on the collection.
-export default async function diagnosticsRoutes(app, { redis, config, diagnostics }) {
+export default async function diagnosticsRoutes(app, { redis, config, diagnostics, settings }) {
   app.post('/api/diagnostics', async (request, reply) => {
-    const rl = await rateLimit(redis, `rl:diag:${request.ip}`, config.diagIpLimit, config.diagIpWindowSec);
+    const lim = await effectiveLimit(settings, config, 'diag');
+    const rl = await rateLimit(redis, `rl:diag:${request.ip}`, lim.limit, lim.windowSec);
     if (!rl.ok) return limited(reply, rl);
     // Signed reports get a second, account-scoped budget: one device cannot
     // burn the whole quota by roaming across IPs.
     if (request.auth?.sub) {
-      const rlAcct = await rateLimit(redis, `rl:diagacct:${request.auth.sub}`, config.diagAccountLimit, config.diagAccountWindowSec);
+      const limAcct = await effectiveLimit(settings, config, 'diagacct', request.auth.sub);
+      const rlAcct = await rateLimit(redis, `rl:diagacct:${request.auth.sub}`, limAcct.limit, limAcct.windowSec);
       if (!rlAcct.ok) return limited(reply, rlAcct);
     }
 

@@ -87,6 +87,11 @@ export class Api {
     });
   }
 
+  // own verify/trust stage budgets (limits in force + spend this window)
+  stageLimits(token) {
+    return this.#request('/api/me/stage-limits', { token });
+  }
+
   appInfo() {
     return this.#request('/api/app-info');
   }

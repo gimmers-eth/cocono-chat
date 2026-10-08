@@ -1,6 +1,7 @@
 import { fail, requireAuth, limited } from '../shared.js';
 import { rateLimit } from '../../lib/rateLimit.js';
 import { b64uDecode } from '../../lib/b64u.js';
+import { effectiveLimit } from '../../lib/limits.js';
 
 const ID_DOC_TYPES = new Set(['image/png', 'image/jpeg']);
 const ID_DOC_MIN_BYTES = 128; // reject trivially-empty "photos"
@@ -32,7 +33,7 @@ async function hasTrustedVerifier(users, ul) {
     .then((doc) => !!doc);
 }
 
-export default async function meRoutes(app, { users, redis, config, idDocs }) {
+export default async function meRoutes(app, { users, redis, config, idDocs, settings }) {
   app.get('/api/me', async (request, reply) => {
     const denied = requireAuth(request, reply);
     if (denied) return denied;
@@ -60,9 +61,11 @@ export default async function meRoutes(app, { users, redis, config, idDocs }) {
     if (denied) return denied;
     const ul = request.auth.sub;
 
-    const rlIp = await rateLimit(redis, `rl:iddocip:${request.ip}`, config.idDocIpLimit, config.idDocWindowSec);
+    const limIp = await effectiveLimit(settings, config, 'iddocip');
+    const rlIp = await rateLimit(redis, `rl:iddocip:${request.ip}`, limIp.limit, limIp.windowSec);
     if (!rlIp.ok) return limited(reply, rlIp);
-    const rlAcct = await rateLimit(redis, `rl:iddoc:${ul}`, config.idDocAccountLimit, config.idDocWindowSec);
+    const limAcct = await effectiveLimit(settings, config, 'iddoc', ul);
+    const rlAcct = await rateLimit(redis, `rl:iddoc:${ul}`, limAcct.limit, limAcct.windowSec);
     if (!rlAcct.ok) return limited(reply, rlAcct);
 
     const user = await users.findOne({ ul }, { projection: { verified: 1 } });

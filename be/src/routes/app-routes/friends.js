@@ -1,6 +1,7 @@
 import { fail, requireAuth, limited } from '../shared.js';
 import { rateLimit } from '../../lib/rateLimit.js';
 import { USERNAME_RE } from '../../lib/username.js';
+import { effectiveLimit } from '../../lib/limits.js';
 import { createNotifier } from '../../lib/notify.js';
 
 // Friends: a per-account, ONE-WAY trust list ANCHORED TO IDENTITY KEYS.
@@ -35,14 +36,38 @@ import { createNotifier } from '../../lib/notify.js';
 // Live sync between a user's OWN devices rides E2EE system messages from
 // the acting device; the server list remains the source of truth that new
 // and offline devices reconcile against (GET /api/me/friends on app entry).
-export default async function friendsRoutes(app, { users, redis, config }) {
+export default async function friendsRoutes(app, { users, redis, config, settings }) {
   const key = (request) => `rl:friends:${request.ip}`;
 
-  async function guard(request, reply, limit) {
+  async function guard(request, reply, limiterName) {
     const denied = requireAuth(request, reply);
     if (denied) return denied;
-    const rl = await rateLimit(redis, key(request), limit, config.friendsIpWindowSec);
+    // 'friends' = reads, 'friendschange' = mutations; both admin-tunable
+    // (lib/limits.js) and sharing one per-IP counter, limit applied per verb.
+    const lim = await effectiveLimit(settings, config, limiterName);
+    const rl = await rateLimit(redis, key(request), lim.limit, lim.windowSec);
     return rl.ok ? null : limited(reply, rl);
+  }
+
+  // Per-account BUDGETS on the vouching actions (verify / trust): daily and
+  // weekly fixed-window counters (fvday/fvweek/ftday/ftweek), admin-tunable
+  // globally AND per user. Rejected attempts still consume the counter — the
+  // budget caps grinding, not just successes. Returns a reply to send, or null.
+  const fmtWait = (sec) => (sec >= 3600 ? `${Math.ceil(sec / 3600)}h` : `${Math.max(1, Math.ceil(sec / 60))}m`);
+  async function stageBudget(reply, ul, names, verb) {
+    for (const nm of names) {
+      const lim = await effectiveLimit(settings, config, nm, ul);
+      const rl = await rateLimit(redis, `rl:${nm}:${ul}`, lim.limit, lim.windowSec);
+      if (rl.ok) continue;
+      reply.header('retry-after', String(rl.retryAfterSec));
+      const unit = nm.endsWith('week') ? 'week' : 'day';
+      // 'stage_limited' (not plain rate_limited): the daily/weekly budget is
+      // a policy allowance, not an abuse signal — the app shows this exact
+      // human sentence instead of the generic "too many messages" copy.
+      return fail(reply, 'stage_limited',
+        `${verb} limit: ${lim.limit} per ${unit} — try again in ${fmtWait(rl.retryAfterSec)}.`, 429);
+    }
+    return null;
   }
 
   function targetOf(request) {
@@ -107,13 +132,44 @@ export default async function friendsRoutes(app, { users, redis, config }) {
   }
 
   app.get('/api/me/friends', async (request, reply) => {
-    const denied = await guard(request, reply, config.friendsIpLimit);
+    const denied = await guard(request, reply, 'friends');
     if (denied) return denied;
     return { friends: await enriched(request.auth.sub) };
   });
 
+  // GET /api/me/stage-limits — the app's Settings > Usage panel shows the
+  // vouching budgets THIS account has: the limit actually in force (same
+  // resolver as enforcement: user override > app override > default) and the
+  // spend from the very counters the budget checks use. Safe to return:
+  // subjects only ever read their own counters, and the numbers are theirs.
+  app.get('/api/me/stage-limits', async (request, reply) => {
+    const denied = requireAuth(request, reply);
+    if (denied) return denied;
+    const ul = request.auth.sub;
+    const spec = [
+      ['verifyDaily', 'fvday'], ['verifyWeekly', 'fvweek'],
+      ['trustDaily', 'ftday'], ['trustWeekly', 'ftweek'],
+    ];
+    const out = {};
+    for (const [key, nm] of spec) {
+      const lim = await effectiveLimit(settings, config, nm, ul);
+      const [count, ttl] = await Promise.all([
+        redis.get(`rl:${nm}:${ul}`),
+        redis.ttl(`rl:${nm}:${ul}`),
+      ]);
+      out[key] = {
+        limit: lim.limit,
+        // blocked attempts still consume the counter by design (grinding
+        // protection) — clamp the display so it never reads '5 of 4'
+        used: Math.min(lim.limit, Math.max(0, Number(count ?? 0))),
+        resetInSec: Math.max(0, Number(ttl ?? 0)),
+      };
+    }
+    return out;
+  });
+
   app.put('/api/me/friends/:ul', async (request, reply) => {
-    const denied = await guard(request, reply, config.friendsChangeIpLimit);
+    const denied = await guard(request, reply, 'friendschange');
     if (denied) return denied;
     const ul = request.auth.sub;
     const target = targetOf(request);
@@ -148,7 +204,7 @@ export default async function friendsRoutes(app, { users, redis, config }) {
 
   // shared flag setter for the two post-add stages (verify / trust)
   async function setFlag(request, reply, field, bodyKey, requires) {
-    const denied = await guard(request, reply, config.friendsChangeIpLimit);
+    const denied = await guard(request, reply, 'friendschange');
     if (denied) return denied;
     const target = targetOf(request);
     if (!target) return fail(reply, 'bad_username', 'Invalid username', 400);
@@ -184,17 +240,36 @@ export default async function friendsRoutes(app, { users, redis, config }) {
         if (!back) {
           return fail(reply, 'not_mutual', `${target} has not added you back — verification unlocks once both of you have added each other`, 409);
         }
+        // …and the per-account verify budget must allow it (fvday/fvweek)
+        const over = await stageBudget(reply, ul, ['fvday', 'fvweek'], 'Verification');
+        if (over) return over;
       }
     }
     return setFlag(request, reply, 'v', 'verified', null);
   });
 
   // PUT /api/me/friends/:ul/trust — third stage: "I know this person".
-  // Requires the verify stage (a key you never confirmed cannot be trusted).
-  app.put('/api/me/friends/:ul/trust', (request, reply) => setFlag(request, reply, 't', 'trust', 'v'));
+  // Requires the verify stage (a key you never confirmed cannot be trusted),
+  // and spends the per-account trust budget (ftday/ftweek) — but only for a
+  // genuine candidate (existing + verified), so impossible calls that
+  // setFlag rejects with 404/409 never consume the budget.
+  app.put('/api/me/friends/:ul/trust', async (request, reply) => {
+    if (request.body?.trust === true) {
+      const target = targetOf(request);
+      if (!target) return fail(reply, 'bad_username', 'Invalid username', 400);
+      const ul = String(request.auth.sub ?? '').toLowerCase();
+      const meDoc = await users.findOne({ ul }, { projection: { friends: 1 } });
+      const existing = normalize(meDoc?.friends).find((f) => f.u === target);
+      if (existing?.v === true) {
+        const over = await stageBudget(reply, ul, ['ftday', 'ftweek'], 'Trust');
+        if (over) return over;
+      }
+    }
+    return setFlag(request, reply, 't', 'trust', 'v');
+  });
 
   app.delete('/api/me/friends/:ul', async (request, reply) => {
-    const denied = await guard(request, reply, config.friendsChangeIpLimit);
+    const denied = await guard(request, reply, 'friendschange');
     if (denied) return denied;
     const target = targetOf(request);
     if (!target) return fail(reply, 'bad_username', 'Invalid username', 400);

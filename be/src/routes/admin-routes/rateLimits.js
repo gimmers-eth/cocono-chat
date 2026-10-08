@@ -1,55 +1,47 @@
 import { fail } from '../shared.js';
+import { LIMIT_CATALOG, effectiveLimit } from '../../lib/limits.js';
 
-// Keyed by the middle segment of the Redis rate-limit keys (rl:<name>:<subject>).
-const LIMIT_META = {
-  signup: (config) => ({ limit: config.signupIpLimit, windowSec: config.signupIpWindowSec, scope: 'ip' }),
-  challenge: (config) => ({ limit: config.challengeIpLimit, windowSec: config.challengeIpWindowSec, scope: 'ip' }),
-  verify: (config) => ({ limit: config.verifyAccountLimit, windowSec: config.verifyAccountWindowSec, scope: 'account' }),
-  verifyip: (config) => ({ limit: config.verifyIpLimit, windowSec: config.verifyIpWindowSec, scope: 'ip' }),
-  denroll: (config) => ({ limit: config.deviceEnrollIpLimit, windowSec: config.deviceEnrollIpWindowSec, scope: 'ip' }),
-  dapprove: (config) => ({ limit: config.deviceApproveAccountLimit, windowSec: config.deviceApproveAccountWindowSec, scope: 'account' }),
-  dpending: (config) => ({ limit: config.deviceApproveAccountLimit, windowSec: config.deviceApproveAccountWindowSec, scope: 'account' }),
-  dremove: (config) => ({ limit: config.deviceRemoveAccountLimit, windowSec: config.deviceRemoveWindowSec, scope: 'account' }),
-  denrollstatus: (config) => ({ limit: config.enrollStatusIpLimit, windowSec: config.enrollStatusIpWindowSec, scope: 'ip' }),
-  msg: (config) => ({ limit: config.msgAccountLimit, windowSec: config.msgAccountWindowSec, scope: 'account' }),
-  msgip: (config) => ({ limit: config.msgIpLimit, windowSec: config.msgIpWindowSec, scope: 'ip' }),
-  userkeys: (config) => ({ limit: config.userKeysIpLimit, windowSec: config.userKeysIpWindowSec, scope: 'ip' }),
-  diag: (config) => ({ limit: config.diagIpLimit, windowSec: config.diagIpWindowSec, scope: 'ip' }),
-  diagacct: (config) => ({ limit: config.diagAccountLimit, windowSec: config.diagAccountWindowSec, scope: 'account' }),
-  appinfo: () => ({ limit: 120, windowSec: 600, scope: 'ip' }),
-  'admindiag-list': () => ({ limit: 600, windowSec: 3600, scope: 'ip' }),
-  'admindiag-del': () => ({ limit: 200, windowSec: 3600, scope: 'ip' }),
-  'admindiag-purge': () => ({ limit: 20, windowSec: 3600, scope: 'ip' }),
-  admintoken: () => ({ limit: 10, windowSec: 15 * 60, scope: 'ip' }),
+// Display metadata for limiters NOT in the admin-tunable catalog (the admin
+// surface's own guards — deliberately fixed, ops never needs to tune them).
+const EXTRA_META = {
+  admintoken: () => ({ limit: 10, windowSec: 15 * 60, scope: 'ip', label: 'Admin token (per IP)' }),
 };
 
 /* KEY SHAPE NOTE (keep in sync when adding limiters!):
-   rl:<name>:<subject>  =>  subject is an IP for the *_IP_* limiters and a
-   username for account-scoped ones. admindiag keys are rl:admindiag:<op>:<ip>
-   (two segments). Subjects are IPs (IPv4/IPv6, never ':') or lowercase
-   usernames, so the split by ':' is unambiguous for everything except
-   admindiag. */
-const ACCOUNT_SCOPED = new Set(['verify', 'dapprove', 'dpending', 'dremove', 'msg', 'diagacct']);
-const subjectIsIp = (name, subject) => !ACCOUNT_SCOPED.has(name);
+   rl:<name>:<subject>  =>  subject is an IP for the ip-scoped catalog
+   entries and a username for account-scoped ones. admindiag keys are
+   rl:admindiag:<op>:<ip> (two segments) and are not displayed. Subjects are
+   IPs (IPv4/IPv6, never ':') or lowercase usernames, so the split by ':' is
+   unambiguous. */
+// IP-subject for everything except the account-scoped catalog entries
+// (EXTRA_META entries are IP guards; unknown names clear as IP-shaped).
+const subjectIsIp = (name) => !(LIMIT_CATALOG[name] && !LIMIT_CATALOG[name].ip);
 
 
 // GET /api/admin/rate-limits, POST /api/admin/rate-limits/clear.
-export default async function rateLimitsRoutes(app, { redis, config }) {
+export default async function rateLimitsRoutes(app, { redis, config, settings }) {
   app.get('/api/admin/rate-limits', async () => {
     const entries = [];
     // redis v5's scanIterator yields batches of keys, not single keys.
     for await (const batch of redis.scanIterator({ MATCH: 'rl:*', COUNT: 100 })) {
       for (const key of batch) {
         const [, name, ...rest] = key.split(':');
-        const metaFor = LIMIT_META[name];
-        if (!metaFor) continue;
-        const meta = metaFor(config);
+        const subject = rest.join(':');
+        let meta;
+        if (LIMIT_CATALOG[name]) {
+          // show what is ACTUALLY in force: default < app override < user
+          // override (for account-scoped names the subject is the user)
+          const lim = await effectiveLimit(settings, config, name, LIMIT_CATALOG[name].ip ? null : subject);
+          meta = { ...lim, scope: LIMIT_CATALOG[name].ip ? 'ip' : 'account' };
+        } else if (EXTRA_META[name]) {
+          meta = EXTRA_META[name]();
+        } else continue;
         const [count, ttlSec] = await Promise.all([redis.get(key), redis.ttl(key)]);
         entries.push({
           key,
           name,
           scope: meta.scope,
-          subject: rest.join(':'),
+          subject,
           count: Number(count ?? 0),
           limit: meta.limit,
           windowSec: meta.windowSec,

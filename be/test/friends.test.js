@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { setupApp, makeClient, randomAesKey, nowEpoch } from './helpers.js';
+import { config } from '../src/config.js';
+import limitsAdmin from '../src/routes/admin-routes/limits.js';
 
 const LIMITS = {
   signupIpLimit: 1000,
@@ -283,6 +285,112 @@ test('friends: verify + trust stages gate each other; rebind resets both', async
     const rebind = await app.inject({ method: 'PUT', url: '/api/me/friends/bobby', headers: authA });
     assert.equal(rebind.json().friends[0].verified, false, 'rebind resets verification');
     assert.equal(rebind.json().friends[0].trust, false, 'rebind resets trust');
+  } finally {
+    await teardown();
+  }
+});
+
+test('friends: per-account verify/trust stage budgets (fvday/ftday) gate the endpoints', async () => {
+  const ctx = await setupApp({
+    ...LIMITS,
+    friendVerifyDailyLimit: 2,
+    friendTrustDailyLimit: 2,
+  });
+  const { app, redis, teardown } = ctx;
+  try {
+    const alice = makeClient();
+    const bobby = makeClient();
+    const a = await signupUser(app, alice, 'alice');
+    const b = await signupUser(app, bobby, 'bobby');
+    const authA = { authorization: `Bearer ${await getToken(app, alice, 'alice', a.d)}` };
+    const authB = { authorization: `Bearer ${await getToken(app, bobby, 'bobby', b.d)}` };
+    await app.inject({ method: 'PUT', url: '/api/me/friends/bobby', headers: authA });
+    await app.inject({ method: 'PUT', url: '/api/me/friends/alice', headers: authB });
+
+    const v = (on) => app.inject({ method: 'PUT', url: '/api/me/friends/bobby/verify',
+      headers: authA, payload: { verified: on } });
+    const t = (on) => app.inject({ method: 'PUT', url: '/api/me/friends/bobby/trust',
+      headers: authA, payload: { trust: on } });
+
+    // spend one verify, one trust; undoing neither spends nor refunds
+    assert.equal((await v(true)).statusCode, 200); // fvday 1
+    assert.equal((await t(true)).statusCode, 200); // ftday 1
+    assert.equal((await t(false)).statusCode, 200);
+    assert.equal((await v(false)).statusCode, 200);
+
+    // an unverified entry cannot be trusted — and that rejection must NOT
+    // consume the trust budget (impossible calls are free)
+    const earlyTrust = await t(true);
+    assert.equal(earlyTrust.statusCode, 409);
+    assert.equal(earlyTrust.json().error, 'stage_required');
+    assert.equal(await redis.get('rl:ftday:alice'), '1', 'stage_required did not spend ftday');
+
+    // re-verify: spends the SECOND (final) daily verification
+    assert.equal((await v(true)).statusCode, 200); // fvday 2 — budget spent
+    // trust on the now-verified entry: allowed, spends the second trust
+    assert.equal((await t(true)).statusCode, 200); // ftday 2
+
+    // both budgets exhausted → stage_limited with human copy + retry-after
+    const vCapped = await v(true);
+    assert.equal(vCapped.statusCode, 429);
+    assert.equal(vCapped.json().error, 'stage_limited');
+    assert.match(vCapped.json().message, /Verification limit: 2 per day/);
+    assert.ok(vCapped.headers['retry-after'], 'retry-after advertised');
+
+    const tCapped = await t(true);
+    assert.equal(tCapped.statusCode, 429);
+    assert.match(tCapped.json().message, /Trust limit: 2 per day/);
+
+    // the WEEKLY counters must not burn when the daily gate rejects first
+    assert.equal(await redis.get('rl:fvweek:alice'), '2', 'fvweek saw only the 2 allowed calls');
+    assert.equal(await redis.get('rl:ftweek:alice'), '2', 'ftweek likewise');
+  } finally {
+    await teardown();
+  }
+});
+
+test('friends: GET /api/me/stage-limits reports own budgets, spend, and admin tuning', async () => {
+  const { app, mongo, teardown } = await setupApp(LIMITS);
+  await app.register(limitsAdmin, { config, settings: mongo.db.collection('settings') });
+  try {
+    const alice = makeClient();
+    const bobby = makeClient();
+    const a = await signupUser(app, alice, 'alice');
+    const b = await signupUser(app, bobby, 'bobby');
+    const authA = { authorization: `Bearer ${await getToken(app, alice, 'alice', a.d)}` };
+    const authB = { authorization: `Bearer ${await getToken(app, bobby, 'bobby', b.d)}` };
+
+    const fresh = (await app.inject({ method: 'GET', url: '/api/me/stage-limits', headers: authA })).json();
+    assert.equal(fresh.verifyDaily.limit, 4);
+    assert.equal(fresh.verifyDaily.used, 0);
+
+    await app.inject({ method: 'PUT', url: '/api/me/friends/bobby', headers: authA });
+    await app.inject({ method: 'PUT', url: '/api/me/friends/alice', headers: authB });
+    await app.inject({ method: 'PUT', url: '/api/me/friends/bobby/verify', headers: authA, payload: { verified: true } });
+    await app.inject({ method: 'PUT', url: '/api/me/friends/bobby/trust', headers: authA, payload: { trust: true } });
+
+    const spent = (await app.inject({ method: 'GET', url: '/api/me/stage-limits', headers: authA })).json();
+    assert.equal(spent.verifyDaily.used, 1);
+    assert.equal(spent.verifyWeekly.used, 1);
+    assert.equal(spent.trustDaily.used, 1);
+    assert.ok(spent.verifyDaily.resetInSec > 0, 'window countdown present');
+
+    // undoing is free: spend stays (no refund), nothing new is consumed
+    await app.inject({ method: 'PUT', url: '/api/me/friends/bobby/verify', headers: authA, payload: { verified: false } });
+    const undone = (await app.inject({ method: 'GET', url: '/api/me/stage-limits', headers: authA })).json();
+    assert.equal(undone.verifyDaily.used, 1);
+
+    // admin per-user tuning is visible on the SAME numbers the user sees
+    await app.inject({
+      method: 'PATCH', url: '/api/admin/limits',
+      payload: { name: 'fvday', user: 'alice', value: { limit: 9 } },
+    });
+    const tuned = (await app.inject({ method: 'GET', url: '/api/me/stage-limits', headers: authA })).json();
+    assert.equal(tuned.verifyDaily.limit, 9);
+    assert.equal(tuned.verifyDaily.used, 1, 'spend survives the re-limit');
+
+    // requires auth
+    assert.equal((await app.inject({ method: 'GET', url: '/api/me/stage-limits' })).statusCode, 401);
   } finally {
     await teardown();
   }

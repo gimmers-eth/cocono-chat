@@ -6,6 +6,7 @@ import { verifyJwt } from './lib/jwt.js';
 import { registerSecurityHeaders } from './routes/shared.js';
 import appRoutes from './routes/app-routes/index.js';
 import { resolveAppName } from './routes/app-routes/appInfo.js';
+import { resetLimitsCache } from './lib/limits.js';
 import wsRoutes from './routes/ws-routes/index.js';
 
 // M5 fix: the enroll-status URL carries an unguessable capability and the
@@ -19,6 +20,10 @@ function redactUrl(url) {
 }
 
 export async function buildApp({ mongo, redis, config, feRoot, sdkRoot }) {
+  // the limits override cache is per-process; fresh app instance = fresh
+  // read of the settings doc (test isolation: separate suites would
+  // otherwise inherit a previous app's cached overrides for up to the TTL)
+  resetLimitsCache();
   // TLS is opt-in via TLS_KEY_PATH/TLS_CERT_PATH (validated at boot in
   // server.js). Fastify serves https + wss when the options are present.
   const tls = config.tlsKeyPath && config.tlsCertPath

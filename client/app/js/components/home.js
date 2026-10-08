@@ -57,6 +57,34 @@ export function createHome({ client, chat, onLogout }) {
     wrap.classList.toggle('fade-right', sl < overflow - 2);
   }
 
+  // Settings > General > Usage: the account's verify/trust stage budgets.
+  // Same numbers the server enforcement runs on (GET /api/me/stage-limits),
+  // so the user can always see limit + spend + reset before they hit a cap.
+  const durShort = (sec) => (sec >= 86400 ? `${Math.floor(sec / 86400)}d ${Math.ceil((sec % 86400) / 3600)}h`
+    : sec >= 3600 ? `${Math.ceil(sec / 3600)}h`
+      : `${Math.max(1, Math.ceil(sec / 60))}m`);
+
+  async function renderUsage() {
+    const line = $('usage-line');
+    if (!line) return;
+    try {
+      const u = await client.stageLimits();
+      const part = (d, w, noun) => {
+        const left = `${d.limit - d.used}/${d.limit} ${noun} left today`;
+        const week = `${w.limit - w.used}/${w.limit} this week`;
+        const reset = d.used > 0 && d.resetInSec > 0 ? ` · day resets in ${durShort(d.resetInSec)}` : '';
+        return `${left} · ${week}${reset}`;
+      };
+      line.textContent = [
+        part(u.verifyDaily, u.verifyWeekly, 'verifications'),
+        part(u.trustDaily, u.trustWeekly, 'trusts'),
+      ].join('\n');
+      line.style.whiteSpace = 'pre-line';
+    } catch {
+      line.textContent = 'Usage unavailable offline.';
+    }
+  }
+
   function openSettings(tab) {
     // explicit tab wins; otherwise routing by verification state:
     // unverified → Verify (nag) · verified → Profile (the unlocked tab)
@@ -67,6 +95,7 @@ export function createHome({ client, chat, onLogout }) {
       $('drawer-overlay').hidden = false;
       $('settings-drawer').hidden = false;
       renderDevices();
+      renderUsage();
       refreshSettingsUI();
       wireThemePicker();
       $('btn-settings-close').focus?.();

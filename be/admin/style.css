@@ -54,6 +54,16 @@ pre.log {
 .device { padding: 0.2rem 0; }
 input.max-devices { width: 4.5rem; padding: 0.15rem 0.4rem; font-size: 0.85rem; }
 
+/* Limit tuning panel + user panel Account limits */
+.small-text { font-size: 0.82rem; }
+.lc-cur { color: var(--accent); }
+input.lc-limit { width: 6rem; }
+input.lc-window { width: 7rem; }
+.limits-table { font-size: 0.8rem; }
+.limits-table th, .limits-table td { padding: 0.3rem 0.35rem; }
+.limits-table input.lu-limit { width: 4.5rem; padding: 0.15rem 0.4rem; font-size: 0.85rem; }
+.limits-table td:last-child { white-space: nowrap; }
+
 /* Diagnostics reports */
 details.diag { border-top: 1px solid rgba(127, 127, 127, 0.15); padding: 0.4rem 0; }
 details.diag summary { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; cursor: pointer; }
@@ -82,3 +92,35 @@ details.diag summary { display: flex; gap: 0.6rem; align-items: center; flex-wra
   max-width: 90vw; max-height: 90vh; border-radius: 0.6rem;
   box-shadow: 0 0 40px rgba(0, 0, 0, 0.6); background: #1c1f26;
 }
+
+/* ---- user detail side panel ---- */
+#user-overlay {
+  position: fixed; inset: 0; z-index: 40;
+  background: rgba(0, 0, 0, 0.5);
+}
+#user-overlay[hidden] { display: none; }
+#user-panel {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 41;
+  width: 26rem; max-width: 92vw; overflow-y: auto;
+  background: var(--panel); border-left: 1px solid var(--line);
+  padding: 1rem 1.25rem 2rem;
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.45);
+}
+#user-panel[hidden] { display: none; }
+.pu-bar { display: flex; align-items: center; justify-content: space-between; margin: 0 0 .5rem; }
+.pu-bar h2 { margin: 0; font-size: 1rem; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
+.pu-id strong { font-size: 1.05rem; }
+#user-panel .sec { border-top: 1px solid var(--line); padding: .85rem 0; }
+#user-panel .sec:first-child { border-top: none; padding-top: .25rem; }
+#user-panel .sec h3 {
+  margin: 0 0 .5rem; font-size: .78rem; color: var(--dim);
+  text-transform: uppercase; letter-spacing: .05em; font-weight: 600;
+}
+#user-panel .sec .row { margin-bottom: 0; }
+#user-panel .device { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; padding: .35rem 0; }
+.toggle-row { display: flex; gap: .55rem; align-items: center; cursor: pointer; }
+.small-note { font-size: .78rem; margin: .4rem 0 0; }
+
+/* verified state badges in the slim list */
+.badge.ok-badge { background: rgba(111, 191, 115, 0.16); color: #6fbf73; }
+.badge.no-badge { background: rgba(239, 105, 117, 0.15); color: var(--danger); }

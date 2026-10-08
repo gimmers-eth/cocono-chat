@@ -5,14 +5,16 @@ import { signJwt } from '../../lib/jwt.js';
 import { rateLimit } from '../../lib/rateLimit.js';
 import { isValidDeviceId, isValidUsername } from '../../lib/username.js';
 import { fail, limited } from '../shared.js';
+import { effectiveLimit } from '../../lib/limits.js';
 
 // POST /api/auth/challenge + POST /api/auth/verify — passwordless login.
-export default async function authRoutes(app, { users, redis, config }) {
+export default async function authRoutes(app, { users, redis, config, settings }) {
   // L1 fix: always issue a nonce. A 404 here used to confirm which
   // (username, device) pairs exist; now unknown pairs get a nonce that will
   // simply never verify, indistinguishable from a real one.
   app.post('/api/auth/challenge', async (request, reply) => {
-    const rl = await rateLimit(redis, `rl:challenge:${request.ip}`, config.challengeIpLimit, config.challengeIpWindowSec);
+    const lim = await effectiveLimit(settings, config, 'challenge');
+    const rl = await rateLimit(redis, `rl:challenge:${request.ip}`, lim.limit, lim.windowSec);
     if (!rl.ok) return limited(reply, rl);
 
     const { u, d } = request.body ?? {};
@@ -52,9 +54,11 @@ export default async function authRoutes(app, { users, redis, config }) {
       return fail(reply, 'bad_nonce', 'Nonce unknown, expired or mismatched', 401);
     }
 
-    const rlAccount = await rateLimit(redis, `rl:verify:${ul}`, config.verifyAccountLimit, config.verifyAccountWindowSec);
+    const limV = await effectiveLimit(settings, config, 'verify', ul);
+    const rlAccount = await rateLimit(redis, `rl:verify:${ul}`, limV.limit, limV.windowSec);
     if (!rlAccount.ok) return limited(reply, rlAccount);
-    const rlIp = await rateLimit(redis, `rl:verifyip:${request.ip}`, config.verifyIpLimit, config.verifyIpWindowSec);
+    const limVI = await effectiveLimit(settings, config, 'verifyip');
+    const rlIp = await rateLimit(redis, `rl:verifyip:${request.ip}`, limVI.limit, limVI.windowSec);
     if (!rlIp.ok) return limited(reply, rlIp);
 
     const user = await users.findOne({ ul });

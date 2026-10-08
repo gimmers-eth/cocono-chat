@@ -55,6 +55,9 @@ export const ERROR_TEXT = {
   not_friends: 'Add them first.',
   stage_required: 'Verify the safety number first.',
   not_mutual: 'They must add you back first — verification needs a mutual add.',
+  // per-account verify/trust budget (4/day, 10/week defaults; admin-tunable)
+  // — the server message IS the human sentence, so no override here; SDK
+  // humanError passes it through untouched.
 
   // --- identity verification / ID photo ---
   already_verified: 'Already verified.',

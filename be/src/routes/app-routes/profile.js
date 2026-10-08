@@ -2,6 +2,7 @@ import { fail, requireAuth, limited } from '../shared.js';
 import { rateLimit } from '../../lib/rateLimit.js';
 import { USERNAME_RE } from '../../lib/username.js';
 import { createNotifier } from '../../lib/notify.js';
+import { effectiveLimit } from '../../lib/limits.js';
 
 // Profiles: a short bio (≤ PROFILE_BIO_MAX_LEN) + a tiny avatar
 // (≤ PROFILE_AVATAR_MAX_BYTES, JPEG only — clients resize on-canvas before
@@ -11,7 +12,7 @@ import { createNotifier } from '../../lib/notify.js';
 // viewer and target have MUTUALLY added each other — or the viewer is the
 // owner. Unfriending in either direction therefore makes the photo vanish
 // with no cleanup jobs: it is a read-time property, not stored copies.
-export default async function profileRoutes(app, { users, redis, config, profiles }) {
+export default async function profileRoutes(app, { users, redis, config, profiles, settings }) {
   const decodeAvatar = (b64) => {
     if (typeof b64 !== 'string' || !b64.length) return null;
     const buf = Buffer.from(b64.replaceAll('-', '+').replaceAll('_', '/'), 'base64');
@@ -43,7 +44,8 @@ export default async function profileRoutes(app, { users, redis, config, profile
     const denied = requireAuth(request, reply);
     if (denied) return denied;
     const ul = request.auth.sub;
-    const rl = await rateLimit(redis, `rl:profile:${ul}`, config.profileEditAccountLimit, config.profileEditWindowSec);
+    const lim = await effectiveLimit(settings, config, 'profile', ul);
+    const rl = await rateLimit(redis, `rl:profile:${ul}`, lim.limit, lim.windowSec);
     if (!rl.ok) return limited(reply, rl);
 
     const { bio, avatar, clearAvatar } = request.body ?? {};
@@ -81,7 +83,8 @@ export default async function profileRoutes(app, { users, redis, config, profile
     const denied = requireAuth(request, reply);
     if (denied) return denied;
     const viewer = request.auth.sub;
-    const rl = await rateLimit(redis, `rl:profileip:${request.ip}`, config.userKeysIpLimit, config.userKeysIpWindowSec);
+    const lim = await effectiveLimit(settings, config, 'profileip');
+    const rl = await rateLimit(redis, `rl:profileip:${request.ip}`, lim.limit, lim.windowSec);
     if (!rl.ok) return limited(reply, rl);
     const username = request.params.username;
     if (typeof username !== 'string' || !USERNAME_RE.test(username)) {

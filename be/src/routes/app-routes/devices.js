@@ -6,6 +6,7 @@ import { rateLimit } from '../../lib/rateLimit.js';
 import { isValidUsername, isValidDeviceId } from '../../lib/username.js';
 import { fail, limited, requireAuth, isReplayedSignature, payloadTooOld } from '../shared.js';
 import { cleanupAccountState, purgeFriendReferences } from '../../lib/accountState.js';
+import { effectiveLimit } from '../../lib/limits.js';
 
 const AES_KEY_BYTES = new Set([16, 24, 32]);
 const CODE_RE = /^\d{6}$/;
@@ -30,13 +31,14 @@ function validateDevicePayload(body) {
   return null;
 }
 
-export default async function deviceRoutes(app, { users, redis, config, messages, profiles }) {
+export default async function deviceRoutes(app, { users, redis, config, messages, profiles, settings }) {
   // POST /api/devices/enroll — a new device asks to join an existing account.
   // Body is shaped like signup: { u, p, a, d, t, s }, signed by the NEW
   // device's key. An already-registered device must then approve the 6-digit
   // code. (M6 fix: t + replay protection, same as signup.)
   app.post('/api/devices/enroll', async (request, reply) => {
-    const rl = await rateLimit(redis, `rl:denroll:${request.ip}`, config.deviceEnrollIpLimit, config.deviceEnrollIpWindowSec);
+    const lim = await effectiveLimit(settings, config, 'denroll');
+    const rl = await rateLimit(redis, `rl:denroll:${request.ip}`, lim.limit, lim.windowSec);
     if (!rl.ok) return limited(reply, rl);
 
     const problem = validateDevicePayload(request.body);
@@ -93,7 +95,8 @@ export default async function deviceRoutes(app, { users, redis, config, messages
   // an unguessable 192-bit capability. Generous per-IP limit because devices
   // poll every couple of seconds; the capability entropy is the real gate.
   app.get('/api/devices/enroll-status/:enrollId', async (request, reply) => {
-    const rl = await rateLimit(redis, `rl:denrollstatus:${request.ip}`, config.enrollStatusIpLimit, config.enrollStatusIpWindowSec);
+    const lim = await effectiveLimit(settings, config, 'denrollstatus');
+    const rl = await rateLimit(redis, `rl:denrollstatus:${request.ip}`, lim.limit, lim.windowSec);
     if (!rl.ok) return limited(reply, rl);
 
     const { enrollId } = request.params;
@@ -113,7 +116,8 @@ export default async function deviceRoutes(app, { users, redis, config, messages
     if (denied) return denied;
 
     const ul = request.auth.sub;
-    const rl = await rateLimit(redis, `rl:dpending:${ul}`, config.deviceApproveAccountLimit, config.deviceApproveAccountWindowSec);
+    const lim = await effectiveLimit(settings, config, 'dpending', ul);
+    const rl = await rateLimit(redis, `rl:dpending:${ul}`, lim.limit, lim.windowSec);
     if (!rl.ok) return limited(reply, rl);
 
     const { code } = request.body ?? {};
@@ -133,7 +137,8 @@ export default async function deviceRoutes(app, { users, redis, config, messages
     if (denied) return denied;
 
     const ul = request.auth.sub;
-    const rl = await rateLimit(redis, `rl:dapprove:${ul}`, config.deviceApproveAccountLimit, config.deviceApproveAccountWindowSec);
+    const lim = await effectiveLimit(settings, config, 'dapprove', ul);
+    const rl = await rateLimit(redis, `rl:dapprove:${ul}`, lim.limit, lim.windowSec);
     if (!rl.ok) return limited(reply, rl);
 
     const { code } = request.body ?? {};
@@ -204,7 +209,8 @@ export default async function deviceRoutes(app, { users, redis, config, messages
     if (!isValidDeviceId(deviceId)) return fail(reply, 'invalid_device_id', 'Malformed device id', 400);
 
     const ul = request.auth.sub;
-    const rl = await rateLimit(redis, `rl:dremove:${ul}`, config.deviceRemoveAccountLimit, config.deviceRemoveWindowSec);
+    const lim = await effectiveLimit(settings, config, 'dremove', ul);
+    const rl = await rateLimit(redis, `rl:dremove:${ul}`, lim.limit, lim.windowSec);
     if (!rl.ok) return limited(reply, rl);
 
     const result = await users.updateOne(

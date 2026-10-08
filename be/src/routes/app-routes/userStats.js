@@ -2,6 +2,7 @@ import { rateLimit } from '../../lib/rateLimit.js';
 import { isValidUsername } from '../../lib/username.js';
 import { fail, limited, requireAuth } from '../shared.js';
 import { cocoScore } from '../../lib/cocoScore.js';
+import { effectiveLimit } from '../../lib/limits.js';
 
 // GET /api/users/:username/stats — COUNTS ONLY (never who), about a
 // profile's reputation. The three buckets are EXCLUSIVE stages of each
@@ -12,11 +13,12 @@ import { cocoScore } from '../../lib/cocoScore.js';
 // CoCo score + Social verdict come from lib/cocoScore.js (single source of
 // truth: weights, trust threshold, account-age rule). Requires a JWT (same
 // posture as the keys lookup) and is rate limited.
-export default async function userStatsRoutes(app, { users, redis, config }) {
+export default async function userStatsRoutes(app, { users, redis, config, settings }) {
   app.get('/api/users/:username/stats', async (request, reply) => {
     const denied = requireAuth(request, reply);
     if (denied) return denied;
-    const rl = await rateLimit(redis, `rl:ustats:${request.ip}`, config.userKeysIpLimit, config.userKeysIpWindowSec);
+    const lim = await effectiveLimit(settings, config, 'ustats');
+    const rl = await rateLimit(redis, `rl:ustats:${request.ip}`, lim.limit, lim.windowSec);
     if (!rl.ok) return limited(reply, rl);
 
     const username = request.params.username;

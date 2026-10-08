@@ -43,6 +43,19 @@
       <p id="limits-empty" class="dim" hidden>No active rate-limit counters.</p>
     </div>
 
+    <h2>Limit tuning</h2>
+    <div class="panel">
+      <p class="dim small-text">Runtime overrides layer <strong>user → app → default</strong> and take effect within ~10s.
+        This table is app-wide; per-user overrides live in the user side panel
+        (view more → Account limits) for account-scoped limiters.</p>
+      <table>
+        <thead>
+          <tr><th>Limit</th><th>Scope</th><th>Default</th><th>App override limit</th><th>App override window (s)</th><th></th></tr>
+        </thead>
+        <tbody id="limits-config-body"></tbody>
+      </table>
+    </div>
+
     <h2>Diagnostics</h2>
     <div class="panel">
       <div class="row">
@@ -77,17 +90,29 @@
       <pre id="ops-log" class="log" hidden></pre>
     </div>
 
-    <h2>Users &amp; devices</h2>
+    <h2>Users</h2>
     <div class="panel">
       <table>
         <thead>
-          <tr><th>User</th><th>Created</th><th>Verified</th><th>Photo</th><th>ID document</th><th>Max devices</th><th>Devices</th><th></th></tr>
+          <tr><th>User</th><th>Created</th><th>Verified</th><th>Max devices</th><th></th></tr>
         </thead>
         <tbody id="users-body"></tbody>
       </table>
       <p id="users-empty" class="dim" hidden>No users yet.</p>
     </div>
   </main>
+
+  <!-- User detail side panel: opened by 'view more' in the users list.
+       All per-user actions (verify toggle, ID doc, max devices, device
+       removal, delete user) live here, keeping the list slim. -->
+  <div id="user-overlay" hidden></div>
+  <aside id="user-panel" hidden aria-label="User details">
+    <header class="pu-bar">
+      <h2>User details</h2>
+      <button id="btn-user-close" class="tiny">close</button>
+    </header>
+    <div id="user-panel-body"></div>
+  </aside>
   <div id="lightbox" hidden><img id="lightbox-img" alt="profile photo, enlarged" /></div>
   <script type="module" src="/app.js"></script>
 </body>

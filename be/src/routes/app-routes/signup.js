@@ -4,6 +4,7 @@ import { importRawPublicKey, importRawX25519PublicKey, verifySignature } from '.
 import { rateLimit } from '../../lib/rateLimit.js';
 import { isValidUsername, isValidDeviceId, isReserved } from '../../lib/username.js';
 import { fail, limited, isReplayedSignature, payloadTooOld } from '../shared.js';
+import { effectiveLimit } from '../../lib/limits.js';
 
 const AES_KEY_BYTES = new Set([16, 24, 32]);
 
@@ -12,9 +13,10 @@ const AES_KEY_BYTES = new Set([16, 24, 32]);
 // X25519 key-agreement public key (milestone 3), t a client epoch-seconds
 // timestamp, and s the Ed25519 signature over canonical({ a, d, p, t, u, x })
 // (M6 fix: freshness + replay protection).
-export default async function signupRoutes(app, { users, redis, config }) {
+export default async function signupRoutes(app, { users, redis, config, settings }) {
   app.post('/api/signup', async (request, reply) => {
-    const rl = await rateLimit(redis, `rl:signup:${request.ip}`, config.signupIpLimit, config.signupIpWindowSec);
+    const lim = await effectiveLimit(settings, config, 'signup');
+    const rl = await rateLimit(redis, `rl:signup:${request.ip}`, lim.limit, lim.windowSec);
     if (!rl.ok) return limited(reply, rl);
 
     const { u, p, x, a, d, t, s } = request.body ?? {};

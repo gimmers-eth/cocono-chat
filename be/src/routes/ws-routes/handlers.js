@@ -2,11 +2,12 @@
 // seams flagged in DESIGN.md for a future worker_threads move.
 import { randomUUID } from 'node:crypto';
 import { rateLimit } from '../../lib/rateLimit.js';
+import { effectiveLimit } from '../../lib/limits.js';
 import { verifyEnvelope } from './envelope.js';
 import { devKey, sendJson, PENDING_BATCH } from './protocol.js';
 import { sendBlindPush, presenceKey, pushSentKey } from '../../lib/push.js';
 
-export function createHandlers({ users, redis, pub, config, messages }) {
+export function createHandlers({ users, redis, pub, config, messages, settings }) {
   async function handleSend(socket, request, body, auth) {
     const env = body.msg;
     const m = env?.m;
@@ -16,9 +17,11 @@ export function createHandlers({ users, redis, pub, config, messages }) {
 
     if (!m || typeof m !== 'object') return ack(false, 'invalid_envelope');
 
-    const rlAccount = await rateLimit(redis, `rl:msg:${auth.sub}`, config.msgAccountLimit, config.msgAccountWindowSec);
+    const limMsg = await effectiveLimit(settings, config, 'msg', auth.sub);
+    const rlAccount = await rateLimit(redis, `rl:msg:${auth.sub}`, limMsg.limit, limMsg.windowSec);
     if (!rlAccount.ok) return ack(false, 'rate_limited');
-    const rlIp = await rateLimit(redis, `rl:msgip:${request.ip}`, config.msgIpLimit, config.msgIpWindowSec);
+    const limIp = await effectiveLimit(settings, config, 'msgip');
+    const rlIp = await rateLimit(redis, `rl:msgip:${request.ip}`, limIp.limit, limIp.windowSec);
     if (!rlIp.ok) return ack(false, 'rate_limited');
 
     // The claimed sender must match the authenticated connection.

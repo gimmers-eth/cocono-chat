@@ -1,6 +1,10 @@
 const env = process.env;
 
 const DEFAULT_TIME_WINDOW = 900 // 15 * 60 = 15 mins
+// 2026-10 policy: IP-scoped limits run on a tight 5-minute window (a real
+// user rarely exceeds any of them from one IP; a script abuser gets capped
+// fast) with doubled allowances, since the window is 3x shorter.
+const IP_TIME_WINDOW = 300
 
 const listOf = (value, fallback) =>
   value ? value.split(',').map((s) => s.trim()).filter(Boolean) : fallback;
@@ -76,39 +80,52 @@ export const config = {
   ]),
   maxDevicesDefault: numOf(env.MAX_DEVICES, 3),
 
-  signupIpLimit: numOf(env.SIGNUP_IP_LIMIT, 10),
-  signupIpWindowSec: numOf(env.SIGNUP_IP_WINDOW_SEC, DEFAULT_TIME_WINDOW),
-  challengeIpLimit: numOf(env.CHALLENGE_IP_LIMIT, 30),
-  challengeIpWindowSec: numOf(env.CHALLENGE_IP_WINDOW_SEC, DEFAULT_TIME_WINDOW),
+  signupIpLimit: numOf(env.SIGNUP_IP_LIMIT, 20),
+  signupIpWindowSec: numOf(env.SIGNUP_IP_WINDOW_SEC, IP_TIME_WINDOW),
+  challengeIpLimit: numOf(env.CHALLENGE_IP_LIMIT, 60),
+  challengeIpWindowSec: numOf(env.CHALLENGE_IP_WINDOW_SEC, IP_TIME_WINDOW),
   verifyAccountLimit: numOf(env.VERIFY_ACCOUNT_LIMIT, 20),
   verifyAccountWindowSec: numOf(env.VERIFY_ACCOUNT_WINDOW_SEC, DEFAULT_TIME_WINDOW),
-  verifyIpLimit: numOf(env.VERIFY_IP_LIMIT, 50),
-  verifyIpWindowSec: numOf(env.VERIFY_IP_WINDOW_SEC, DEFAULT_TIME_WINDOW),
+  verifyIpLimit: numOf(env.VERIFY_IP_LIMIT, 100),
+  verifyIpWindowSec: numOf(env.VERIFY_IP_WINDOW_SEC, IP_TIME_WINDOW),
   deviceCodeTtlSec: numOf(env.DEVICE_CODE_TTL_SEC, 10 * 60),
-  deviceEnrollIpLimit: numOf(env.DEVICE_ENROLL_IP_LIMIT, 10),
-  deviceEnrollIpWindowSec: numOf(env.DEVICE_ENROLL_IP_WINDOW_SEC, DEFAULT_TIME_WINDOW),
+  deviceEnrollIpLimit: numOf(env.DEVICE_ENROLL_IP_LIMIT, 20),
+  deviceEnrollIpWindowSec: numOf(env.DEVICE_ENROLL_IP_WINDOW_SEC, IP_TIME_WINDOW),
   deviceApproveAccountLimit: numOf(env.DEVICE_APPROVE_ACCOUNT_LIMIT, 20),
   deviceApproveAccountWindowSec: numOf(env.DEVICE_APPROVE_ACCOUNT_WINDOW_SEC, DEFAULT_TIME_WINDOW),
-  enrollStatusIpLimit: numOf(env.ENROLL_STATUS_IP_LIMIT, 600),
-  enrollStatusIpWindowSec: numOf(env.ENROLL_STATUS_IP_WINDOW_SEC, DEFAULT_TIME_WINDOW),
+  enrollStatusIpLimit: numOf(env.ENROLL_STATUS_IP_LIMIT, 1200),
+  enrollStatusIpWindowSec: numOf(env.ENROLL_STATUS_IP_WINDOW_SEC, IP_TIME_WINDOW),
 
   // Messaging (milestone 3)
   msgAccountLimit: numOf(env.MSG_ACCOUNT_LIMIT, 120),
   msgAccountWindowSec: numOf(env.MSG_ACCOUNT_WINDOW_SEC, DEFAULT_TIME_WINDOW),
-  msgIpLimit: numOf(env.MSG_IP_LIMIT, 240),
+  msgIpLimit: numOf(env.MSG_IP_LIMIT, 480),
   // Retention: how long PULLED copies stay server-side (expireAt = pulledAt +
   // this) for re-delivery via 'resync'. Never-pulled copies stay queued.
   msgRetentionSec: numOf(env.MSG_RETENTION_SEC, 30 * 24 * 3600),
-  msgIpWindowSec: numOf(env.MSG_IP_WINDOW_SEC, DEFAULT_TIME_WINDOW),
-  userKeysIpLimit: numOf(env.USER_KEYS_IP_LIMIT, 60),
-  userKeysIpWindowSec: numOf(env.USER_KEYS_IP_WINDOW_SEC, DEFAULT_TIME_WINDOW),
+  msgIpWindowSec: numOf(env.MSG_IP_WINDOW_SEC, IP_TIME_WINDOW),
+  userKeysIpLimit: numOf(env.USER_KEYS_IP_LIMIT, 120),
+  userKeysIpWindowSec: numOf(env.USER_KEYS_IP_WINDOW_SEC, IP_TIME_WINDOW),
 
   // Friends (one-way trust list, stored per account; devices sync via
   // GET + E2EE system messages broadcast by the acting device).
   friendsMax: numOf(env.FRIENDS_MAX, 500),
-  friendsIpLimit: numOf(env.FRIENDS_IP_LIMIT, 300),
-  friendsChangeIpLimit: numOf(env.FRIENDS_CHANGE_IP_LIMIT, 60),
-  friendsIpWindowSec: numOf(env.FRIENDS_IP_WINDOW_SEC, DEFAULT_TIME_WINDOW),
+  friendsIpLimit: numOf(env.FRIENDS_IP_LIMIT, 600),
+  friendsChangeIpLimit: numOf(env.FRIENDS_CHANGE_IP_LIMIT, 120),
+  friendsIpWindowSec: numOf(env.FRIENDS_IP_WINDOW_SEC, IP_TIME_WINDOW),
+
+  // Per-ACCOUNT budgets on the friendship stages that vouch for real people:
+  // verifying a safety number and trusting an account. Daily AND weekly per
+  // action — the week caps slow grinding past the daily allowance. All four
+  // admin-tunable app-wide or per user (see lib/limits.js + admin Limits).
+  friendVerifyDailyLimit: numOf(env.FRIEND_VERIFY_DAILY_LIMIT, 4),
+  friendVerifyDailyWindowSec: numOf(env.FRIEND_VERIFY_DAILY_WINDOW_SEC, 24 * 3600),
+  friendVerifyWeeklyLimit: numOf(env.FRIEND_VERIFY_WEEKLY_LIMIT, 10),
+  friendVerifyWeeklyWindowSec: numOf(env.FRIEND_VERIFY_WEEKLY_WINDOW_SEC, 7 * 24 * 3600),
+  friendTrustDailyLimit: numOf(env.FRIEND_TRUST_DAILY_LIMIT, 4),
+  friendTrustDailyWindowSec: numOf(env.FRIEND_TRUST_DAILY_WINDOW_SEC, 24 * 3600),
+  friendTrustWeeklyLimit: numOf(env.FRIEND_TRUST_WEEKLY_LIMIT, 10),
+  friendTrustWeeklyWindowSec: numOf(env.FRIEND_TRUST_WEEKLY_WINDOW_SEC, 7 * 24 * 3600),
 
   // Self-service device removal (DELETE /api/devices/:id).
   deviceRemoveAccountLimit: numOf(env.DEVICE_REMOVE_ACCOUNT_LIMIT, 10),
@@ -116,8 +133,8 @@ export const config = {
 
   // Diagnostics upload ('Send diagnostics' button) — payload size-capped and
   // TTL-expired server-side; the per-IP limit is the spam gate.
-  diagIpLimit: numOf(env.DIAG_IP_LIMIT, 30),
-  diagIpWindowSec: numOf(env.DIAG_IP_WINDOW_SEC, 3600),
+  diagIpLimit: numOf(env.DIAG_IP_LIMIT, 60),
+  diagIpWindowSec: numOf(env.DIAG_IP_WINDOW_SEC, IP_TIME_WINDOW),
   diagAccountLimit: numOf(env.DIAG_ACCOUNT_LIMIT, 30),
   diagAccountWindowSec: numOf(env.DIAG_ACCOUNT_WINDOW_SEC, 24 * 3600),
   wsHeartbeatSec: numOf(env.WS_HEARTBEAT_SEC, 30),
@@ -147,9 +164,14 @@ export const config = {
   // ID upload unlocks once at least one VERIFIED user has TRUSTED this
   // account (trusting = vouching on the platform; see friends trust stage)
   idUploadRequiresTrustedVerifier: env.ID_UPLOAD_REQUIRES_TRUSTED_VERIFIER !== 'false',
-  idDocIpLimit: numOf(env.ID_DOC_IP_LIMIT, 10),
+  idDocIpLimit: numOf(env.ID_DOC_IP_LIMIT, 20),
+  idDocIpWindowSec: numOf(env.ID_DOC_IP_WINDOW_SEC, IP_TIME_WINDOW),
   idDocAccountLimit: numOf(env.ID_DOC_ACCOUNT_LIMIT, 5),
   idDocWindowSec: numOf(env.ID_DOC_WINDOW_SEC, 24 * 3600),
+
+  // app-info endpoint poll guard (the FE fetches it on boot; cached 30s)
+  appInfoIpLimit: numOf(env.APP_INFO_IP_LIMIT, 240),
+  appInfoWindowSec: numOf(env.APP_INFO_WINDOW_SEC, IP_TIME_WINDOW),
 };
 
 config.jwtSecretInsecure = config.jwtSecret === 'dev-secret-change-me' || config.jwtSecret.length < 32;

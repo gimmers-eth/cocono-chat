@@ -464,6 +464,16 @@ export class CoconoClient extends Emitter {
     return entries;
   }
 
+  /**
+   * This account's verify/trust stage budgets (Settings > Usage): limits
+   * actually in force + spend in the current daily/weekly windows.
+   * @returns {Promise<object>} {verifyDaily:{limit,used,resetInSec},
+   *           verifyWeekly, trustDaily, trustWeekly}
+   */
+  async stageLimits() {
+    return this.api.stageLimits(this.#requireToken());
+  }
+
   #broadcastFlag(sys, ul, extra) {
     if (!this.#identity || !this.#transport || this.#transport.state !== 'open') return;
     this.sendMessage(this.#identity.username, JSON.stringify({ sys, ul, ...extra }))

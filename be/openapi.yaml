@@ -283,6 +283,32 @@ paths:
                         changed: { type: boolean }
                         trusted: { type: boolean }
 
+  /api/me/stage-limits:
+    get:
+      tags: [friends]
+      operationId: stageLimits
+      summary: Own verify/trust stage budgets (limits in force + usage)
+      description: >
+        Per-account vouching budgets (fvday/fvweek/ftday/ftweek): the limit
+        actually in force (admin layering: user override > app override >
+        default) and the spend from the current fixed-window counters. Only
+        ever returns the caller's own numbers; used is clamped to the limit
+        because blocked attempts still count (grinding protection).
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The four budget windows.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  verifyDaily: { $ref: '#/components/schemas/StageBudget' }
+                  verifyWeekly: { $ref: '#/components/schemas/StageBudget' }
+                  trustDaily: { $ref: '#/components/schemas/StageBudget' }
+                  trustWeekly: { $ref: '#/components/schemas/StageBudget' }
+
   /api/me/friends/{username}:
     put:
       tags: [friends]
@@ -690,6 +716,20 @@ components:
             $ref: '#/components/schemas/Error'
 
   schemas:
+    StageBudget:
+      type: object
+      description: One fixed-window vouching budget (verify/trust × daily/weekly).
+      properties:
+        limit:
+          type: integer
+          description: Actions allowed in the window (admin layering: user > app > default).
+        used:
+          type: integer
+          description: Spend so far, clamped to the limit (blocked attempts still count).
+        resetInSec:
+          type: integer
+          description: Seconds until the window resets (0 when untouched).
+
     Username:
       type: string
       description: 5-64 characters of `[a-zA-Z0-9_-]`; normalised to lowercase at signup, case-insensitively unique.

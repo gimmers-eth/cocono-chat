@@ -42,7 +42,7 @@ import { MAX_FRAME_BYTES, sendJson } from './protocol.js';
 import { presenceKey, pushSentPattern } from '../../lib/push.js';
 import { createHandlers } from './handlers.js';
 
-export default async function wsRoutes(app, { users, redis, config, messages }) {
+export default async function wsRoutes(app, { users, redis, config, messages, settings }) {
   await app.register(fastifyWebsocket);
 
   // Dedicated pub/sub clients: a redis client in subscribe mode cannot run
@@ -92,6 +92,7 @@ export default async function wsRoutes(app, { users, redis, config, messages }) 
     pub,
     config,
     messages,
+    settings,
   });
 
   app.get('/ws', { websocket: true }, async (socket, request) => {
