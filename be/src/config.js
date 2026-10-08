@@ -77,7 +77,14 @@ export const config = {
     'root',
     'system',
     'support',
+    'user',
+    'username',
+    'cocono',
+    'co-co-no',
   ]),
+  // names may not START with these either (brand impersonation): covers the
+  // app name 'CoCoNo' in its dashed domain spelling too
+  reservedUsernamePrefixes: listOf(env.RESERVED_USERNAME_PREFIXES, ['cocono', 'co-co-no']),
   maxDevicesDefault: numOf(env.MAX_DEVICES, 3),
 
   signupIpLimit: numOf(env.SIGNUP_IP_LIMIT, 20),

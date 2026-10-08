@@ -71,6 +71,14 @@ test('username validation', () => {
 test('reserved usernames are case-insensitive', () => {
   assert.ok(isReserved('Server', ['server', 'admin']));
   assert.ok(!isReserved('alice', ['server', 'admin']));
+  // two-arg form keeps working (no prefixes)
+  assert.ok(!isReserved('coconofan', ['cocono'])); // exact list only matches exact
+  // prefixes block any name STARTING with them (case-insensitive)
+  assert.ok(isReserved('CoCoNo', ['cocono'], ['cocono', 'co-co-no']));
+  assert.ok(isReserved('coconofan', ['cocono'], ['cocono', 'co-co-no']));
+  assert.ok(isReserved('co-co-no-dev', [], ['cocono', 'co-co-no']));
+  assert.ok(!isReserved('myco', [], ['cocono', 'co-co-no'])); // contains, not starts
+  assert.ok(!isReserved('cocon', [], ['cocono', 'co-co-no'])); // one char short
 });
 
 test('device id validation', () => {

@@ -5,8 +5,12 @@ export function isValidUsername(username) {
   return typeof username === 'string' && USERNAME_RE.test(username);
 }
 
-export function isReserved(username, reservedUsernames) {
-  return reservedUsernames.includes(username.toLowerCase());
+// Reserved NAMES are exact (case-insensitive); reserved PREFIXES block any
+// name STARTING with them ('coconofan', 'co-co-no-dev'). Prefixes default to
+// empty so callers/tests using the two-arg form keep working.
+export function isReserved(username, reservedUsernames, reservedPrefixes = []) {
+  const ul = username.toLowerCase();
+  return reservedUsernames.includes(ul) || reservedPrefixes.some((p) => ul.startsWith(p));
 }
 
 export function isValidDeviceId(deviceId) {

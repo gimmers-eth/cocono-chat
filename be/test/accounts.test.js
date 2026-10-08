@@ -69,10 +69,17 @@ test('signup rejects invalid usernames and reserved names', async () => {
     const d = 'device-one-123';
 
     const tooLong = 'a'.repeat(65); // L3 fix: usernames capped at 64
-    for (const u of ['abc', 'has space', 'punct!', 'server', 'admin', tooLong]) {
+    // reserved exact names + reserved prefixes ('cocono*' / 'co-co-no*')
+    for (const u of ['abc', 'has space', 'punct!', 'server', 'admin', 'user', 'username',
+      'CoCoNo', 'coconofan', 'co-co-no', 'co-co-no-x', tooLong]) {
       const res = await signupUser(app, client, u, randomAesKey(), d);
       assert.equal(res.statusCode, 400, `username ${u.slice(0, 20)} should be rejected`);
     }
+
+    // prefix rule must NOT eat names that merely contain the brand
+    const near = makeClient();
+    assert.equal((await signupUser(app, near, 'myco', randomAesKey(), 'device-near-999')).statusCode, 201,
+      'myco contains but does not start with a reserved prefix');
 
     // 4-char minimum (relaxed 2026-10-07): exactly-4 signs up fine
     const four = makeClient();
