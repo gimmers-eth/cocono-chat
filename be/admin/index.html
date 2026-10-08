@@ -7,100 +7,147 @@
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <main>
-    <h1 id="admin-title">CoCoNo — internal admin</h1>
-    <div class="panel">
-      <div class="row">
-        <label class="dim" for="token">Admin token</label>
-        <input id="token" type="password" placeholder="ADMIN_TOKEN (blank if not set)" size="36" />
-        <button id="btn-refresh">Refresh</button>
-        <span id="updated" class="dim"></span>
-      </div>
-      <p id="status"></p>
-    </div>
+  <div class="admin-shell">
+    <aside class="admin-nav">
+      <div class="nav-brand" id="admin-title">CoCoNo</div>
+      <nav aria-label="Sections">
+        <button class="nav-item" data-page="users" aria-current="page">Users</button>
+        <button class="nav-item" data-page="app">App</button>
+        <button class="nav-item" data-page="traffic">Traffic</button>
+        <button class="nav-item" data-page="diagnostics">Diagnostics</button>
+        <button class="nav-item" data-page="ops">Ops</button>
+      </nav>
+      <p id="updated" class="nav-foot"></p>
+    </aside>
 
-    <div class="panel">
-      <div class="row">
-        <label class="dim" for="branding-name">App name</label>
-        <input id="branding-name" type="text" maxlength="40" placeholder="APP_NAME default" size="24" />
-        <button id="btn-set-branding">Set</button>
-        <span class="dim">shown in the sign-in screen, chat header and PWA; empty = env default</span>
+    <main class="admin-main">
+      <!-- Session control: the token gates every API call; shared across pages. -->
+      <div class="panel token-panel">
+        <div class="row">
+          <label class="dim" for="token">Admin token</label>
+          <input id="token" type="password" placeholder="ADMIN_TOKEN (blank if not set)" size="36" />
+          <button id="btn-refresh">Refresh</button>
+        </div>
+        <p id="status"></p>
       </div>
-    </div>
 
-    <h2>Rate limits</h2>
-    <div class="panel">
-      <div class="row">
-        <input id="clear-ip" type="text" placeholder="IP address" size="24" />
-        <button id="btn-clear-ip">Clear limits for IP</button>
-      </div>
-      <table>
-        <thead>
-          <tr><th>Limit</th><th>Scope</th><th>Subject</th><th>Count / limit</th><th>Window</th><th>Resets in</th><th></th></tr>
-        </thead>
-        <tbody id="limits-body"></tbody>
-      </table>
-      <p id="limits-empty" class="dim" hidden>No active rate-limit counters.</p>
-    </div>
+      <!-- ===== Users ===== -->
+      <section class="page" data-page="users">
+        <h2>Users</h2>
+        <div class="panel">
+          <div class="row">
+            <input id="users-search" type="text" size="28" autocomplete="off"
+                   placeholder="name contains… (comma separated for several)" />
+            <span id="users-count" class="dim"></span>
+            <span class="pager-space"></span>
+            <button id="btn-users-prev" class="tiny" disabled>← prev</button>
+            <span id="users-page-label" class="dim"></span>
+            <button id="btn-users-next" class="tiny">next →</button>
+          </div>
+          <table>
+            <thead>
+              <tr><th>User</th><th>Created</th><th>Verified</th><th>Max devices</th><th></th></tr>
+            </thead>
+            <tbody id="users-body"></tbody>
+          </table>
+          <p id="users-empty" class="dim" hidden>No users yet.</p>
+        </div>
+      </section>
 
-    <h2>Limit tuning</h2>
-    <div class="panel">
-      <p class="dim small-text">Runtime overrides layer <strong>user → app → default</strong> and take effect within ~10s.
-        This table is app-wide; per-user overrides live in the user side panel
-        (view more → Account limits) for account-scoped limiters.</p>
-      <table>
-        <thead>
-          <tr><th>Limit</th><th>Scope</th><th>Default</th><th>App override limit</th><th>App override window (s)</th><th></th></tr>
-        </thead>
-        <tbody id="limits-config-body"></tbody>
-      </table>
-    </div>
+      <!-- ===== App (branding) ===== -->
+      <section class="page" data-page="app" hidden>
+        <h2>App</h2>
+        <div class="panel">
+          <div class="row">
+            <label class="dim" for="branding-name">App name</label>
+            <input id="branding-name" type="text" maxlength="40" placeholder="APP_NAME default" size="24" />
+            <button id="btn-set-branding">Set</button>
+            <span class="dim">shown in the sign-in screen, chat header and PWA; empty = env default</span>
+          </div>
+        </div>
+      </section>
 
-    <h2>Diagnostics</h2>
-    <div class="panel">
-      <div class="row">
-        <button id="btn-purge-diags" class="danger tiny">Purge all reports</button>
-        <span class="dim">uploaded via the app's "Send diagnostics" button; auto-expire after 30 days</span>
-      </div>
-      <div id="diags-list"></div>
-      <p id="diags-empty" class="dim" hidden>No diagnostics reports.</p>
-    </div>
+      <!-- ===== Traffic (search + tuning) ===== -->
+      <section class="page" data-page="traffic" hidden>
+        <h2>Traffic</h2>
+        <div class="subtabs" role="tablist" aria-label="Traffic sections">
+          <button class="subtab active" data-sub="search" role="tab" aria-selected="true">Search</button>
+          <button class="subtab" data-sub="tune" role="tab" aria-selected="false">Tune</button>
+        </div>
 
-    <h2>Backup &amp; Ops</h2>
-    <div class="panel">
-      <div class="row">
-        <button id="btn-ops-hourly">Backup now</button>
-        <button id="btn-ops-daily">Box bundle now</button>
-        <button id="btn-ops-drill">Test selected backup (drill)</button>
-        <span id="ops-running" class="dim" hidden>⏳ ops run in progress…</span>
-      </div>
-      <table>
-        <thead>
-          <tr><th>Job</th><th>Result</th><th>Started</th><th>Duration</th><th>Detail</th></tr>
-        </thead>
-        <tbody id="ops-status-body"></tbody>
-      </table>
-      <p id="ops-empty" class="dim" hidden>No ops runs recorded yet.</p>
-      <div class="row">
-        <select id="restore-archive" size="1"></select>
-        <input id="restore-confirm" type="text" placeholder="type RESTORE" size="12" autocomplete="off" />
-        <button id="btn-ops-restore" class="danger tiny">Restore prod</button>
-        <span class="dim">selected hourly archive — used by the drill AND by restore</span>
-      </div>
-      <pre id="ops-log" class="log" hidden></pre>
-    </div>
+        <div id="sub-search">
+          <div class="panel">
+            <div class="row">
+              <input id="rl-search" type="text" size="40" autocomplete="off"
+                     placeholder="IPs or usernames, comma separated — e.g. 192.168.1.7, alice" />
+              <button id="btn-rl-search">Search</button>
+            </div>
+            <table>
+              <thead>
+                <tr><th>Limit</th><th>Scope</th><th>Subject</th><th>Count / limit</th><th>Window</th><th>Resets in</th><th></th></tr>
+              </thead>
+              <tbody id="limits-body"></tbody>
+            </table>
+            <p id="limits-empty" class="dim" hidden>Nothing yet — enter subjects above (the full counter space is not listed anymore).</p>
+          </div>
+        </div>
 
-    <h2>Users</h2>
-    <div class="panel">
-      <table>
-        <thead>
-          <tr><th>User</th><th>Created</th><th>Verified</th><th>Max devices</th><th></th></tr>
-        </thead>
-        <tbody id="users-body"></tbody>
-      </table>
-      <p id="users-empty" class="dim" hidden>No users yet.</p>
-    </div>
-  </main>
+        <div id="sub-tune" hidden>
+          <div class="panel">
+            <p class="dim small-text">Runtime overrides layer <strong>user → app → default</strong> and take effect within ~10s.
+              This table is app-wide; per-user overrides live in the user side panel
+              (view more → Account limits) for account-scoped limiters.</p>
+            <table>
+              <thead>
+                <tr><th>Limit</th><th>Scope</th><th>Default</th><th>App override limit</th><th>App override window (s)</th><th></th></tr>
+              </thead>
+              <tbody id="limits-config-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== Diagnostics ===== -->
+      <section class="page" data-page="diagnostics" hidden>
+        <h2>Diagnostics</h2>
+        <div class="panel">
+          <div class="row">
+            <button id="btn-purge-diags" class="danger tiny">Purge all reports</button>
+            <span class="dim">uploaded via the app's "Send diagnostics" button; auto-expire after 30 days</span>
+          </div>
+          <div id="diags-list"></div>
+          <p id="diags-empty" class="dim" hidden>No diagnostics reports.</p>
+        </div>
+      </section>
+
+      <!-- ===== Ops ===== -->
+      <section class="page" data-page="ops" hidden>
+        <h2>Backup &amp; Ops</h2>
+        <div class="panel">
+          <div class="row">
+            <button id="btn-ops-hourly">Backup now</button>
+            <button id="btn-ops-daily">Box bundle now</button>
+            <button id="btn-ops-drill">Test selected backup (drill)</button>
+            <span id="ops-running" class="dim" hidden>⏳ ops run in progress…</span>
+          </div>
+          <table>
+            <thead>
+              <tr><th>Job</th><th>Result</th><th>Started</th><th>Duration</th><th>Detail</th></tr>
+            </thead>
+            <tbody id="ops-status-body"></tbody>
+          </table>
+          <p id="ops-empty" class="dim" hidden>No ops runs recorded yet.</p>
+          <div class="row">
+            <select id="restore-archive" size="1"></select>
+            <input id="restore-confirm" type="text" placeholder="type RESTORE" size="12" autocomplete="off" />
+            <button id="btn-ops-restore" class="danger tiny">Restore prod</button>
+            <span class="dim">selected hourly archive — used by the drill AND by restore</span>
+          </div>
+          <pre id="ops-log" class="log" hidden></pre>
+        </div>
+      </section>
+    </main>
+  </div>
 
   <!-- User detail side panel: opened by 'view more' in the users list.
        All per-user actions (verify toggle, ID doc, max devices, device

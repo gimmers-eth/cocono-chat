@@ -140,6 +140,18 @@ export const config = {
   deviceRemoveAccountLimit: numOf(env.DEVICE_REMOVE_ACCOUNT_LIMIT, 10),
   deviceRemoveWindowSec: numOf(env.DEVICE_REMOVE_WINDOW_SEC, 3600),
 
+  // Device egress-IP tracking (app.js auth hook): the latest IP is kept per
+  // device (admin 'known IPs'); an IP CHANGE costs the device one unit from
+  // a fixed-window budget — more than `limit` changes inside `windowSec` and
+  // that device's API calls get 429 until the window passes. Fixed-window
+  // expiry makes this self-healing: a device behind flapping carrier NAT
+  // cools back in within minutes; a proxy-hopper gets a hard stall per
+  // device without punishing the account's other devices.
+  deviceIpFlapLimit: numOf(env.DEVICE_IP_FLAP_LIMIT, 5),
+  deviceIpFlapWindowSec: numOf(env.DEVICE_IP_FLAP_WINDOW_SEC, 300),
+  // how long a device's last-seen IP survives quiet periods (redis)
+  deviceIpTtlSec: numOf(env.DEVICE_IP_TTL_SEC, 24 * 3600),
+
   // Diagnostics upload ('Send diagnostics' button) — payload size-capped and
   // TTL-expired server-side; the per-IP limit is the spam gate.
   diagIpLimit: numOf(env.DIAG_IP_LIMIT, 60),

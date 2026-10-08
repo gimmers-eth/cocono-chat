@@ -3,7 +3,8 @@ import path from 'node:path';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { verifyJwt } from './lib/jwt.js';
-import { registerSecurityHeaders } from './routes/shared.js';
+import { rateLimit } from './lib/rateLimit.js';
+import { registerSecurityHeaders, limited } from './routes/shared.js';
 import appRoutes from './routes/app-routes/index.js';
 import { resolveAppName } from './routes/app-routes/appInfo.js';
 import { resetLimitsCache } from './lib/limits.js';
@@ -68,14 +69,43 @@ app.addHook('onSend', async (request, reply, payload) => {
   // H4 fix: also re-check that the token's device is still registered — a
   // removed device loses access immediately, not at token expiry.
   app.decorateRequest('auth', null);
-  app.addHook('onRequest', async (request) => {
+  app.addHook('onRequest', async (request, reply) => {
     const header = request.headers.authorization ?? '';
     if (!header.startsWith('Bearer ')) return;
     const payload = verifyJwt(header.slice(7), config.jwtSecret);
     if (!payload) return;
 
     const user = await users.findOne({ ul: payload.sub }, { projection: { 'devices.id': 1 } });
-    if (user?.devices.some((dev) => dev.id === payload.d)) request.auth = payload;
+    if (user?.devices.some((dev) => dev.id === payload.d)) {
+      request.auth = payload;
+      // Device egress-IP tracking + FLAP limiter: the latest IP per device
+      // is kept (Redis fast path + devices.$.lastIp for the admin 'known
+      // IPs' display), and every genuine IP CHANGE spends one unit of a
+      // fixed-window budget (rl:ipflap:<ul>:<dv>, default 5 / 5 min).
+      // Over budget the device gets 429 until the window passes — self-
+      // healing for carrier-NAT reshuffles, a hard stall for proxy hops,
+      // and scoped to THIS device (siblings on the account are untouched).
+      const ipKey = `devip:${payload.sub}:${payload.d}`;
+      const seen = await redis.get(ipKey);
+      if (seen !== request.ip) {
+        // first sighting (fresh device / TTL lapsed / redis restart) records
+        // for free — only a genuine CHANGE spends the budget
+        if (seen !== null) {
+          const fl = await rateLimit(
+            redis, `rl:ipflap:${payload.sub}:${payload.d}`,
+            config.deviceIpFlapLimit, config.deviceIpFlapWindowSec,
+          );
+          if (!fl.ok) return limited(reply, fl);
+        }
+        await Promise.all([
+          redis.set(ipKey, request.ip, { EX: config.deviceIpTtlSec }),
+          users.updateOne(
+            { ul: payload.sub, 'devices.id': payload.d },
+            { $set: { 'devices.$.lastIp': request.ip, 'devices.$.lastIpAt': new Date() } },
+          ),
+        ]);
+      }
+    }
   });
 
   const ctx = {

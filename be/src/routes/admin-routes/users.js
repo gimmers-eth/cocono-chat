@@ -28,9 +28,13 @@ export default async function usersRoutes(app, { users, redis, messages, idDocs,
       verifiedAt: doc.verifiedAt ?? null,
       idDoc: byUl.get(doc.ul) ?? null,
       hasAvatar: hasAvatar.has(doc.ul),
+      // 'known IPs' = the LATEST egress IP per device (written by the auth
+      // hook's flap tracker); feeds the user panel's rate-limit search link
+      ips: (doc.devices ?? []).map((d) => d.lastIp).filter(Boolean),
       devices: (doc.devices ?? []).map((dev) => ({
         id: dev.id,
         name: dev.name ?? null,
+        lastIp: dev.lastIp ?? null,
         createdAt: dev.createdAt,
         lastSeenAt: dev.lastSeenAt,
       })),

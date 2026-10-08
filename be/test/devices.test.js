@@ -564,3 +564,56 @@ test('device names: reviewer sees the requester UA, approve carries a name, rena
     await teardown();
   }
 });
+
+test('device IP flap: latest IP tracked per device; >5 changes in window = 429', async () => {
+  const { app, mongo, teardown } = await setupApp(LIMITS);
+  try {
+    const alice = makeClient();
+    await signupUser(app, alice, 'alice', 'alice-device-001');
+    const token = await getToken(app, alice, 'alice', 'alice-device-001');
+    const auth = { authorization: `Bearer ${token}` };
+    const get = (ip) => app.inject({ method: 'GET', url: '/api/devices', headers: auth, remoteAddress: ip });
+
+    // first sighting records for free; repeats of the same IP never spend
+    assert.equal((await get('10.0.0.1')).statusCode, 200);
+    assert.equal((await get('10.0.0.1')).statusCode, 200);
+
+    // five genuine changes are allowed (the default budget)
+    for (const i of [2, 3, 4, 5, 6]) {
+      assert.equal((await get(`10.0.0.${i}`)).statusCode, 200, `change to .${i} must be allowed`);
+    }
+
+    // the sixth change within the window is throttled — and keeps being
+    // throttled while the fixed window lives
+    { const r = await get('10.0.0.7'); assert.equal(r.statusCode, 429, r.body); }
+    { const r = await get('10.0.0.7'); assert.equal(r.statusCode, 429, r.body); }
+
+    // the device record holds the LAST ACCEPTED ip (the blocked one never lands)
+    const doc = await mongo.db.collection('users').findOne({ ul: 'alice' });
+    assert.equal(doc.devices[0].lastIp, '10.0.0.6');
+
+    // a second device on the account is unaffected (budget is per device).
+    // Pair it for real: approve from the device's CURRENT ip — a same-IP
+    // request short-circuits the hook before the spent flap budget.
+    const second = makeClient();
+    const dSecond = 'alice-device-002';
+    const en = (await enroll(app, second, 'alice', dSecond)).json();
+    const ap = await app.inject({
+      method: 'POST', url: '/api/devices/approve',
+      headers: { authorization: `Bearer ${token}` },
+      remoteAddress: '10.0.0.6',
+      payload: { code: en.code },
+    });
+    assert.equal(ap.statusCode, 200, ap.body);
+    const token2 = await getToken(app, second, 'alice', dSecond);
+    const get2 = (ip) => app.inject({
+      method: 'GET', url: '/api/devices',
+      headers: { authorization: `Bearer ${token2}` }, remoteAddress: ip,
+    });
+    assert.equal((await get2('172.16.0.1')).statusCode, 200, 'sibling device has its own budget');
+    assert.equal((await get2('172.16.0.2')).statusCode, 200);
+
+  } finally {
+    await teardown();
+  }
+});

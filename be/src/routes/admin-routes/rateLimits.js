@@ -5,49 +5,87 @@ import { LIMIT_CATALOG, effectiveLimit } from '../../lib/limits.js';
 // surface's own guards — deliberately fixed, ops never needs to tune them).
 const EXTRA_META = {
   admintoken: () => ({ limit: 10, windowSec: 15 * 60, scope: 'ip', label: 'Admin token (per IP)' }),
+  // admin-surface guards (rl:admindiag:<op>:<ip>) — fixed, not tunable, but
+  // searchable like everything else
+  'admindiag-list': () => ({ limit: 600, windowSec: 3600, scope: 'ip', label: 'Admin diag list' }),
+  'admindiag-del': () => ({ limit: 200, windowSec: 3600, scope: 'ip', label: 'Admin diag delete' }),
+  'admindiag-purge': () => ({ limit: 20, windowSec: 3600, scope: 'ip', label: 'Admin diag purge' }),
 };
 
 /* KEY SHAPE NOTE (keep in sync when adding limiters!):
    rl:<name>:<subject>  =>  subject is an IP for the ip-scoped catalog
    entries and a username for account-scoped ones. admindiag keys are
-   rl:admindiag:<op>:<ip> (two segments) and are not displayed. Subjects are
-   IPs (IPv4/IPv6, never ':') or lowercase usernames, so the split by ':' is
-   unambiguous. */
+   rl:admindiag:<op>:<ip> (two segments) and surface under the
+   'admindiag-<op>' meta names. Subjects are IPs (IPv4/IPv6, never ':') or
+   lowercase usernames, so the split by ':' is unambiguous. */
 // IP-subject for everything except the account-scoped catalog entries
 // (EXTRA_META entries are IP guards; unknown names clear as IP-shaped).
 const subjectIsIp = (name) => !(LIMIT_CATALOG[name] && !LIMIT_CATALOG[name].ip);
 
+// rl:admindiag:<op>:<ip> → name 'admindiag-<op>', real subject last
+function parseKey(key) {
+  const [, name, ...rest] = key.split(':');
+  if (name === 'admindiag') {
+    const [op, ...ip] = rest;
+    return { name: `admindiag-${op}`, subject: ip.join(':') };
+  }
+  return { name, subject: rest.join(':') };
+}
 
-// GET /api/admin/rate-limits, POST /api/admin/rate-limits/clear.
+// Scan one pattern into a Set (redis scanIterator yields batches).
+async function collectKeys(redis, pattern, into) {
+  for await (const batch of redis.scanIterator({ MATCH: pattern, COUNT: 100 })) {
+    for (const key of batch) into.add(key);
+  }
+}
+
+// GET /api/admin/rate-limits — full sweep (no subjects) or, preferred by the
+// admin UI, ?subjects=ip,user,… scoped SCANs so a busy box never ships its
+// entire counter space to the browser. POST /api/admin/rate-limits/clear.
 export default async function rateLimitsRoutes(app, { redis, config, settings }) {
-  app.get('/api/admin/rate-limits', async () => {
-    const entries = [];
-    // redis v5's scanIterator yields batches of keys, not single keys.
-    for await (const batch of redis.scanIterator({ MATCH: 'rl:*', COUNT: 100 })) {
-      for (const key of batch) {
-        const [, name, ...rest] = key.split(':');
-        const subject = rest.join(':');
-        let meta;
-        if (LIMIT_CATALOG[name]) {
-          // show what is ACTUALLY in force: default < app override < user
-          // override (for account-scoped names the subject is the user)
-          const lim = await effectiveLimit(settings, config, name, LIMIT_CATALOG[name].ip ? null : subject);
-          meta = { ...lim, scope: LIMIT_CATALOG[name].ip ? 'ip' : 'account' };
-        } else if (EXTRA_META[name]) {
-          meta = EXTRA_META[name]();
-        } else continue;
-        const [count, ttlSec] = await Promise.all([redis.get(key), redis.ttl(key)]);
-        entries.push({
-          key,
-          name,
-          scope: meta.scope,
-          subject,
-          count: Number(count ?? 0),
-          limit: meta.limit,
-          windowSec: meta.windowSec,
-          ttlSec,
-        });
+  app.get('/api/admin/rate-limits', async (request) => {
+    const subjects = typeof request.query?.subjects === 'string'
+      ? request.query.subjects
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter((s) => s.length > 0 && s.length <= 80)
+        .slice(0, 20)
+      : null;
+    if (subjects && !subjects.length) return [];
+
+    const keys = new Set();
+    if (subjects) {
+      for (const s of subjects) {
+        await collectKeys(redis, `rl:*:${s}`, keys);
+        await collectKeys(redis, `rl:admindiag:*:${s}`, keys);
       }
+    } else {
+      await collectKeys(redis, 'rl:*', keys);
+    }
+
+    const entries = [];
+    for (const key of keys) {
+      const { name, subject } = parseKey(key);
+      let meta;
+      if (LIMIT_CATALOG[name]) {
+        // show what is ACTUALLY in force: default < app override < user
+        // override (for account-scoped names the subject is the user)
+        const lim = await effectiveLimit(settings, config, name, LIMIT_CATALOG[name].ip ? null : subject);
+        meta = { ...lim, scope: LIMIT_CATALOG[name].ip ? 'ip' : 'account' };
+      } else if (EXTRA_META[name]) {
+        meta = EXTRA_META[name]();
+      } else continue;
+      const [count, ttlSec] = await Promise.all([redis.get(key), redis.ttl(key)]);
+      entries.push({
+        key,
+        name,
+        scope: meta.scope,
+        subject,
+        count: Number(count ?? 0),
+        limit: meta.limit,
+        windowSec: meta.windowSec,
+        ttlSec,
+      });
     }
     entries.sort((a, b) => a.key.localeCompare(b.key));
     return entries;

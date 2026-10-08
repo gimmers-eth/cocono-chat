@@ -86,11 +86,33 @@ async function fillAvatarThumbs(users) {
 // so actions keep working unchanged — only the layout moved.
 let selectedUl = null;
 
+// Users page: client-side search (comma terms, substring on the lowercase
+// handle) + 50-per-page pagination. The list is already fully in memory
+// (the side panel needs it), so no server round-trips were added.
+const USERS_PAGE_SIZE = 50;
+let usersPage = 1;
+
 function renderUsers(users) {
   lastUsers = users;
+  const terms = $('users-search').value.trim().toLowerCase().split(',').map((s) => s.trim()).filter(Boolean);
+  const matched = terms.length
+    ? users.filter((u) => terms.some((t) => u.ul.includes(t) || u.u.toLowerCase().includes(t)))
+    : users;
+  const pages = Math.max(1, Math.ceil(matched.length / USERS_PAGE_SIZE));
+  if (usersPage > pages) usersPage = pages;
+  const start = (usersPage - 1) * USERS_PAGE_SIZE;
+  const view = matched.slice(start, start + USERS_PAGE_SIZE);
+
+  $('users-count').textContent = `${matched.length} user${matched.length === 1 ? '' : 's'}${terms.length ? ` matching “${terms.join(', ')}”` : ''}`;
+  $('users-page-label').textContent = `page ${usersPage} / ${pages}`;
+  $('btn-users-prev').disabled = usersPage <= 1;
+  $('btn-users-next').disabled = usersPage >= pages;
+
+  const emptyEl = $('users-empty');
+  emptyEl.textContent = terms.length ? 'No users match that search.' : 'No users yet.';
+  emptyEl.hidden = matched.length > 0;
   const body = $('users-body');
-  $('users-empty').hidden = users.length > 0;
-  body.innerHTML = users
+  body.innerHTML = view
     .map(
       (u) => `<tr>
         <td><strong>@${esc(u.u)}</strong><br /><span class="dim mono">${esc(u.ul)}</span></td>
@@ -104,7 +126,13 @@ function renderUsers(users) {
     )
     .join('');
   renderPanel();
-  fillAvatarThumbs(users).catch(() => {});
+  // thumbs: visible page + (search may have paged it away) the panel's user
+  const thumbs = [...view];
+  if (selectedUl && !view.some((u) => u.ul === selectedUl)) {
+    const su = users.find((x) => x.ul === selectedUl);
+    if (su) thumbs.push(su);
+  }
+  fillAvatarThumbs(thumbs).catch(() => {});
 }
 
 function openPanel(ul) {
@@ -174,11 +202,19 @@ function renderPanel() {
           (d) => `<div class="device">
             ${d.name ? `<strong>${esc(d.name)}</strong> <span class="dim">·</span> ` : ''}<span class="mono" title="${esc(d.id)}">${esc(d.id.slice(0, 8))}…</span>
             <span class="dim">seen ${fmtAgo(d.lastSeenAt)}</span>
+            ${d.lastIp ? `<span class="dim mono">${esc(d.lastIp)}</span>` : ''}
             <button class="danger tiny" data-del-device="${esc(u.ul)}" data-device="${esc(d.id)}">remove</button>
           </div>`,
         )
         .join('') || '<span class="dim">none</span>'}
       <p class="dim small-note">removing the LAST device deletes the account outright</p>
+    </div>
+    <div class="sec">
+      <h3>Traffic</h3>
+      <p class="dim small-note">${(u.ips ?? []).length
+        ? `latest egress IP per device: ${esc(u.ips.join(', '))} (from their authenticated calls)`
+        : 'no IPs recorded yet'}</p>
+      <button class="tiny" data-rl-for="${esc(u.ul)}">search rate limits →</button>
     </div>
     <div class="sec">
       <h3>Account limits</h3>
@@ -294,7 +330,7 @@ function renderBranding(b) {
   const name = b.appName ?? b.defaultName ?? 'CoCoNo';
   document.title = `${name} admin`;
   const title = $('admin-title');
-  if (title) title.textContent = `${name} — internal admin`;
+  if (title) title.textContent = name;
   // Don't clobber a name mid-edit.
   const input = $('branding-name');
   if (input && document.activeElement !== input) input.value = b.appName ?? '';
@@ -333,9 +369,8 @@ function renderOps(o) {
 
 async function refresh() {
   try {
-    const [users, limits, limitsCfg, diags, branding, ops] = await Promise.all([
+    const [users, limitsCfg, diags, branding, ops] = await Promise.all([
       api('/api/admin/users'),
-      api('/api/admin/rate-limits'),
       api('/api/admin/limits'),
       api('/api/admin/diagnostics'),
       api('/api/admin/branding'),
@@ -345,12 +380,14 @@ async function refresh() {
     // the panel's account-limits table
     renderLimitsConfig(limitsCfg);
     renderUsers(users);
-    renderLimits(limits);
     renderDiags(diags);
     renderBranding(branding);
     renderOps(ops);
     $('updated').textContent = `updated ${new Date().toLocaleTimeString()}`;
     setStatus('');
+    // the counter table is search-scoped now (no full sweep on the page);
+    // an active query just stays live
+    if ($('rl-search').value.trim()) searchRateLimits({ silent: true });
   } catch (err) {
     setStatus(String(err.message), 'error');
   }
@@ -368,12 +405,59 @@ async function run(description, fn) {
 
 $('btn-refresh').addEventListener('click', refresh);
 
-$('btn-clear-ip').addEventListener('click', () => {
-  const ip = $('clear-ip').value.trim();
-  if (!ip) return setStatus('Enter an IP address first', 'error');
-  run(`Cleared rate limits for ${ip}`, () =>
-    api('/api/admin/rate-limits/clear', { method: 'POST', body: JSON.stringify({ ip }) }));
-  $('clear-ip').value = '';
+// ---- users page: search + pager ----
+$('users-search').addEventListener('input', () => {
+  usersPage = 1;
+  renderUsers(lastUsers);
+});
+$('btn-users-prev').addEventListener('click', () => {
+  usersPage = Math.max(1, usersPage - 1);
+  renderUsers(lastUsers);
+});
+$('btn-users-next').addEventListener('click', () => {
+  usersPage += 1; // renderUsers clamps to the real page count
+  renderUsers(lastUsers);
+});
+
+// ---- traffic: Search / Tune sub-tabs ----
+function showTrafficSub(sub) {
+  for (const t of document.querySelectorAll('.subtab')) {
+    const on = t.dataset.sub === sub;
+    t.classList.toggle('active', on);
+    t.setAttribute('aria-selected', String(on));
+  }
+  $('sub-search').hidden = sub !== 'search';
+  $('sub-tune').hidden = sub !== 'tune';
+}
+for (const t of document.querySelectorAll('.subtab')) {
+  t.addEventListener('click', () => showTrafficSub(t.dataset.sub));
+}
+
+// Scoped counter search — comma-separated IPs/usernames, resolved by
+// server-side subject SCANs (the full counter space is never listed).
+async function searchRateLimits({ silent = false } = {}) {
+  const raw = $('rl-search').value.trim();
+  const emptyEl = $('limits-empty');
+  if (!raw) {
+    renderLimits([]);
+    emptyEl.textContent = 'Enter IPs or usernames (comma separated) to look up their counters.';
+    emptyEl.hidden = false;
+    return;
+  }
+  try {
+    const rows = await api(`/api/admin/rate-limits?subjects=${encodeURIComponent(raw)}`);
+    renderLimits(rows);
+    if (!rows.length) {
+      emptyEl.textContent = `No counters found for: ${raw}`;
+      emptyEl.hidden = false;
+    }
+  } catch (err) {
+    if (!silent) setStatus(`Rate-limit search failed: ${err.message}`, 'error');
+  }
+}
+$('btn-rl-search').addEventListener('click', () => searchRateLimits());
+$('rl-search').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') searchRateLimits();
 });
 
 $('btn-purge-diags').addEventListener('click', () => {
@@ -456,6 +540,16 @@ document.addEventListener('click', (e) => {
   const viewUser = e.target.closest?.('[data-view-user]')?.dataset.viewUser;
   if (viewUser) {
     openPanel(viewUser);
+    return;
+  }
+
+  // panel → traffic page: search this user + their known IPs
+  const rlFor = e.target.closest?.('[data-rl-for]')?.dataset.rlFor;
+  if (rlFor) {
+    const su = lastUsers.find((x) => x.ul === rlFor);
+    pendingTrafficSearch = [rlFor, ...(su?.ips ?? [])].join(', ');
+    location.hash = 'traffic'; // hashchange routes; same-page case handled below
+    showPage('traffic');
     return;
   }
 
@@ -583,6 +677,34 @@ document.addEventListener('click', async (e) => {
       api(`/api/admin/users/${encodeURIComponent(delUl)}/id-doc`, { method: 'DELETE' }));
   }
 });
+
+// ---- pages ----
+// Left-nav switches one section at a time; the URL hash carries the page so
+// a reload (or a shared link) lands where you left it. Data keeps refreshing
+// every 10s regardless of the visible page — hidden sections re-render
+// cheaply and the side panel lives outside the pager.
+const PAGES = ['users', 'app', 'traffic', 'diagnostics', 'ops'];
+// set by the user panel's "search rate limits" button: the subjects to load
+// into the traffic page when it opens (cleared on use)
+let pendingTrafficSearch = null;
+function showPage(page) {
+  const want = PAGES.includes(page) ? page : 'users';
+  for (const sec of document.querySelectorAll('.page')) sec.hidden = sec.dataset.page !== want;
+  for (const btn of document.querySelectorAll('.nav-item')) {
+    btn.setAttribute('aria-current', btn.dataset.page === want ? 'page' : 'false');
+  }
+  if (want === 'traffic' && pendingTrafficSearch !== null) {
+    showTrafficSub('search');
+    $('rl-search').value = pendingTrafficSearch;
+    pendingTrafficSearch = null;
+    searchRateLimits();
+  }
+}
+window.addEventListener('hashchange', () => showPage(location.hash.replace(/^#/, '')));
+for (const btn of document.querySelectorAll('.nav-item')) {
+  btn.addEventListener('click', () => { location.hash = btn.dataset.page; });
+}
+showPage(location.hash.replace(/^#/, ''));
 
 refresh();
 setInterval(refresh, 10000);
