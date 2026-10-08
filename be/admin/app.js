@@ -172,7 +172,7 @@ function renderPanel() {
       ${u.devices
         .map(
           (d) => `<div class="device">
-            <span class="mono" title="${esc(d.id)}">${esc(d.id.slice(0, 8))}…</span>
+            ${d.name ? `<strong>${esc(d.name)}</strong> <span class="dim">·</span> ` : ''}<span class="mono" title="${esc(d.id)}">${esc(d.id.slice(0, 8))}…</span>
             <span class="dim">seen ${fmtAgo(d.lastSeenAt)}</span>
             <button class="danger tiny" data-del-device="${esc(u.ul)}" data-device="${esc(d.id)}">remove</button>
           </div>`,

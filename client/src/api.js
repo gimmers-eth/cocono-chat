@@ -121,8 +121,12 @@ export class Api {
     return this.#request('/api/devices/pending', { method: 'POST', body: { code }, token });
   }
 
-  approveDevice(token, code) {
-    return this.#request('/api/devices/approve', { method: 'POST', body: { code }, token });
+  approveDevice(token, code, name) {
+    return this.#request('/api/devices/approve', { method: 'POST', body: name ? { code, name } : { code }, token });
+  }
+
+  setDeviceName(token, deviceId, name) {
+    return this.#request(`/api/devices/${encodeURIComponent(deviceId)}/name`, { method: 'PUT', body: { name }, token });
   }
 
   removeDevice(token, deviceId) {

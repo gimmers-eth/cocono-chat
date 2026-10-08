@@ -80,13 +80,15 @@ export function createAuth({ client, onLoggedIn }) {
       // The BE intentionally answers 'Nonce signature does not verify' for
       // both forged and unknown-device logins (enumeration protection). On a
       // browser this usually means: you switched URL (localhost vs 127.0.0.1
-      // vs LAN IP) — each origin has its own IndexedDB identity.
+      // vs LAN IP) — each origin has its own IndexedDB identity — OR this
+      // device was removed from the account (detach/last-device deletion).
       if (err?.code === 'bad_signature') {
         setStatus(
           els.status,
-          'These browser keys are not recognised for that account. Did you change the URL '
-            + '(localhost vs 127.0.0.1 vs the LAN IP)? Each URL keeps its own keys — use the '
-            + 'original URL, or "Forget this device" and pair again.',
+          'These browser keys are not recognised for that account. Either the URL changed '
+            + '(each of localhost / 127.0.0.1 / the LAN IP keeps its own keys — use the '
+            + 'original URL), or this device has been REMOVED from the account. If another '
+            + 'device remains, re-pair with a code; otherwise "Forget this device" and sign up afresh.',
           true,
         );
         return;

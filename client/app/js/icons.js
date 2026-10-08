@@ -47,6 +47,7 @@ export const ICONS = {
   tabDevices: 'fa-mobile-screen-button',
   tabVerify: 'fa-id-card',
   tabGeneral: 'fa-sliders',
+  tabLimits: 'fa-gauge-high',
   tabDiagnostics: 'fa-heart-pulse',
   tabProfile: 'fa-address-card',
   profile: 'fa-address-card',       // peer profile panel

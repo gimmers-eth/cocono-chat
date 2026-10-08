@@ -191,12 +191,43 @@ img.own-avatar { border-radius: 50%; }
 .new-chat .btn { flex: none; }
 
 .device-list li {
-  display: flex; justify-content: space-between; gap: .5rem;
+  display: flex; justify-content: space-between; align-items: baseline;
+  flex-wrap: wrap; gap: .5rem;
   padding: .35rem 0; border-bottom: 1px dashed var(--divider); font-size: .9rem;
 }
 .device-list .dim { color: var(--muted); }
+.device-list .device-name { font-weight: 600; }
+.device-list .device-rename-input {
+  font: inherit; font-weight: 600; width: 100%;
+  background: var(--panel-raised); color: var(--text);
+  border: 1px solid var(--accent); border-radius: 6px; padding: .15rem .4rem;
+}
 .approve-code { display: flex; gap: .5rem; }
 .approve-code .btn { flex: none; }
+
+/* Settings > Limits: the vouching-budget table */
+.usage-table { width: 100%; border-collapse: collapse; font-size: .88rem; margin: .35rem 0 .5rem; }
+.usage-table th, .usage-table td {
+  text-align: left; padding: .35rem .5rem; border-bottom: 1px dashed var(--divider);
+}
+.usage-table thead th {
+  color: var(--muted); font-weight: 500; font-size: .74rem;
+  text-transform: uppercase; letter-spacing: .05em;
+}
+.usage-table tbody th { font-weight: 600; }
+.usage-table td { font-variant-numeric: tabular-nums; }
+.usage-spent { color: var(--danger); font-weight: 600; }
+
+/* Pairing review modal: the 'who is knocking' block */
+.pair-who {
+  display: flex; align-items: center; gap: .7rem;
+  background: var(--panel-raised); border-radius: 10px; padding: .6rem .8rem;
+  margin-bottom: .8rem;
+}
+.pair-ic { font-size: 1.5rem; color: var(--accent); }
+.pair-body { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
+.pair-platform { font-weight: 700; font-size: 1.02rem; }
+.pair-name-field { display: flex; flex-direction: column; gap: .25rem; margin-bottom: .6rem; }
 .row-actions { display: flex; gap: .5rem; align-items: center; }
 .row-actions .select { width: auto; }
 

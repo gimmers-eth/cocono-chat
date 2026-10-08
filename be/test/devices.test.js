@@ -505,3 +505,62 @@ test('push subscription: PUT stores on the calling device, DELETE clears', async
     await teardown();
   }
 });
+
+test('device names: reviewer sees the requester UA, approve carries a name, rename works', async () => {
+  const { app, teardown } = await setupApp(LIMITS);
+  try {
+    const u = 'alice';
+    const main = makeClient();
+    await signupUser(app, main, u, 'main-device-0001');
+    const tokenMain = await getToken(app, main, u, 'main-device-0001');
+    const authMain = { authorization: `Bearer ${tokenMain}` };
+
+    // enroll presenting a Chrome-on-iPhone UA — the reviewer must see it
+    const second = makeClient();
+    const dSecond = 'second-device-0002';
+    const a = randomAesKey();
+    const t = nowEpoch();
+    const s = second.signSignup({ u, a, d: dSecond, t });
+    const { code } = (await app.inject({
+      method: 'POST', url: '/api/devices/enroll',
+      headers: { 'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/117.0 Mobile/15E148 Safari/604.1' },
+      payload: { u, p: second.p, x: second.x, a, d: dSecond, t, s },
+    })).json();
+
+    // 1) pending relays the agent verbatim for the review modal
+    const pend = (await app.inject({ method: 'POST', url: '/api/devices/pending', headers: authMain, payload: { code } })).json();
+    assert.match(pend.agent, /iPhone/);
+
+    // 2) approve WITH a name — it lands on the device list
+    const ap = await app.inject({ method: 'POST', url: '/api/devices/approve', headers: authMain, payload: { code, name: 'Jenny iPhone' } });
+    assert.equal(ap.statusCode, 200);
+    const devs = (await app.inject({ method: 'GET', url: '/api/devices', headers: authMain })).json();
+    assert.equal(devs.devices.find((d) => d.id === dSecond).name, 'Jenny iPhone');
+    assert.equal(devs.devices.find((d) => d.current).name, null, 'pre-existing device stays unnamed');
+
+    // 3) rename own device; control chars stripped, padded value returned
+    const myId = devs.devices.find((d) => d.current).id;
+    const ren = await app.inject({
+      method: 'PUT', url: `/api/devices/${myId}/name`, headers: authMain,
+      payload: { name: '  Main laptop\u0007 ' },
+    });
+    assert.equal(ren.statusCode, 200);
+    assert.equal(ren.json().name, 'Main laptop');
+    assert.equal((await app.inject({ method: 'GET', url: '/api/devices', headers: authMain })).json()
+      .devices.find((d) => d.id === myId).name, 'Main laptop');
+
+    // 4) rejections: blank, over-length, unknown device, foreign account's device
+    assert.equal((await app.inject({ method: 'PUT', url: `/api/devices/${myId}/name`, headers: authMain, payload: { name: '   ' } })).statusCode, 400);
+    assert.equal((await app.inject({ method: 'PUT', url: `/api/devices/${myId}/name`, headers: authMain, payload: { name: 'x'.repeat(41) } })).statusCode, 400);
+    assert.equal((await app.inject({ method: 'PUT', url: '/api/devices/nosuchdevice0001/name', headers: authMain, payload: { name: 'ghost' } })).statusCode, 404);
+    const intruder = makeClient();
+    await signupUser(app, intruder, 'mallory', 'mallory-device-01');
+    const intrToken = await getToken(app, intruder, 'mallory', 'mallory-device-01');
+    assert.equal((await app.inject({
+      method: 'PUT', url: `/api/devices/${myId}/name`,
+      headers: { authorization: `Bearer ${intrToken}` }, payload: { name: 'hijacked' },
+    })).statusCode, 404, 'cannot rename a device on someone else\u2019s account');
+  } finally {
+    await teardown();
+  }
+});

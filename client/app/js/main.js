@@ -303,9 +303,11 @@ try {
     setStatus(
       $('auth-status'),
       err.code === 'bad_signature'
-        ? 'Stored keys are not recognised for that account — usually a URL change '
-          + '(localhost vs 127.0.0.1 vs LAN IP keeps separate identities). Use the '
-          + 'original URL, or "Forget this device" and pair again.'
+        ? 'Stored keys are not recognised for that account. Either the URL changed '
+          + '(localhost vs 127.0.0.1 vs LAN IP keeps separate identities — use the '
+          + 'original URL), or this device has been REMOVED from the account (by its '
+          + 'owner or an admin). If you still have another device, add this one again '
+          + 'with a pairing code; otherwise "Forget this device" and sign up fresh.'
         : err.message,
       true,
     );

@@ -13,6 +13,16 @@ const CODE_RE = /^\d{6}$/;
 const ENROLL_ID_RE = /^[A-Za-z0-9_-]{16,64}$/;
 const CODE_DRAW_ATTEMPTS = 3;
 
+// Device names: short, printable, human — the user's label for a physical
+// device ('iPhone', 'Office Chromebook'). Empty/null clears (UIs then fall
+// back to their own heuristic). Control chars stripped, ≤ 40 after trim.
+const DEVICE_NAME_MAX = 40;
+function sanitizeDeviceName(raw) {
+  if (typeof raw !== 'string') return null;
+  const clean = raw.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, DEVICE_NAME_MAX);
+  return clean.length ? clean : null;
+}
+
 // Redis keys:
 //   denroll:c:<ul>:<code>  pending enrollment (JSON { p, x, a, d, enrollId, requestedAt }),
 //                          single-use
@@ -71,7 +81,13 @@ export default async function deviceRoutes(app, { users, redis, config, messages
     // L4 fix: SET NX so a drawn code can never clobber another pending
     // enrollment; re-draw on collision (vanishingly rare with 1M codes).
     const enrollId = b64uEncode(randomBytes(24));
-    const enrollment = JSON.stringify({ p, x, a, d, enrollId, requestedAt: new Date().toISOString() });
+    // the enrolling device's User-Agent, carried through to the APPROVING
+    // device's review so a human sees WHICH device is knocking ('iPhone /
+    // Safari', 'Windows / Chrome'…); truncated defensively
+    const agent = String(request.headers['user-agent'] ?? '').slice(0, 200);
+    const enrollment = JSON.stringify({
+      p, x, a, d, enrollId, requestedAt: new Date().toISOString(), agent,
+    });
     let code = null;
     for (let attempt = 0; attempt < CODE_DRAW_ATTEMPTS; attempt++) {
       const candidate = String(randomInt(1_000_000)).padStart(6, '0');
@@ -127,8 +143,8 @@ export default async function deviceRoutes(app, { users, redis, config, messages
 
     const raw = await redis.get(`denroll:c:${ul}:${code}`);
     if (!raw) return fail(reply, 'unknown_code', 'No pending enrollment with that code', 404);
-    const { d, requestedAt } = JSON.parse(raw);
-    return { d, requestedAt };
+    const { d, requestedAt, agent } = JSON.parse(raw);
+    return { d, requestedAt, agent: agent ?? '' };
   });
 
   // POST /api/devices/approve — a registered device approves a code (JWT).
@@ -150,6 +166,9 @@ export default async function deviceRoutes(app, { users, redis, config, messages
     const raw = await redis.getDel(`denroll:c:${ul}:${code}`);
     if (!raw) return fail(reply, 'unknown_code', 'No pending enrollment with that code', 404);
     const { p, x, a, d, enrollId } = JSON.parse(raw);
+    // optional human name chosen AT APPROVAL TIME for the joining device
+    // (the approver knows what the new device is — 'Old phone', 'Work iPad')
+    const name = sanitizeDeviceName(request.body?.name);
 
     const user = await users.findOne({ ul });
     if (!user) return fail(reply, 'unknown_account', 'Account not found', 404);
@@ -162,7 +181,7 @@ export default async function deviceRoutes(app, { users, redis, config, messages
         'devices.id': { $ne: d },
         $expr: { $lt: [{ $size: '$devices' }, '$maxDevices'] },
       },
-      { $push: { devices: { id: d, pub: p, x, aes: a, createdAt: now, lastSeenAt: now } } },
+      { $push: { devices: { id: d, pub: p, x, aes: a, createdAt: now, lastSeenAt: now, ...(name ? { name } : {}) } } },
     );
     if (!res.matchedCount) {
       const fresh = await users.findOne({ ul });
@@ -191,10 +210,39 @@ export default async function deviceRoutes(app, { users, redis, config, messages
       devices: user.devices.map((dev) => ({
         id: dev.id,
         current: dev.id === request.auth.d,
+        name: dev.name ?? null,
         createdAt: dev.createdAt,
         lastSeenAt: dev.lastSeenAt,
       })),
     };
+  });
+
+  // PUT /api/devices/:deviceId/name — rename a device on THIS account
+  // (Settings > Devices). Body { name }: 1..40 printable chars; empty
+  // clears the label. Shares the device-approval budget (both are rare
+  // device-management actions).
+  app.put('/api/devices/:deviceId/name', async (request, reply) => {
+    const denied = requireAuth(request, reply);
+    if (denied) return denied;
+    const ul = request.auth.sub;
+    const lim = await effectiveLimit(settings, config, 'dapprove', ul);
+    const rl = await rateLimit(redis, `rl:dapprove:${ul}`, lim.limit, lim.windowSec);
+    if (!rl.ok) return limited(reply, rl);
+
+    const deviceId = request.params.deviceId;
+    if (!isValidDeviceId(deviceId)) return fail(reply, 'invalid_device_id', 'Malformed device id', 400);
+    const raw = request.body?.name;
+    if (typeof raw !== 'string') return fail(reply, 'invalid_request', 'name must be a string', 400);
+    // strict here (unlike the silent clamp at approval): a rename must not
+    // silently mutate what the user typed — over-length bounces as 400
+    const name = raw.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
+    if (!name || name.length > DEVICE_NAME_MAX) {
+      return fail(reply, 'invalid_name', `Device name needs 1-${DEVICE_NAME_MAX} characters`, 400);
+    }
+
+    const res = await users.updateOne({ ul, 'devices.id': deviceId }, { $set: { 'devices.$.name': name } });
+    if (!res.matchedCount) return fail(reply, 'unknown_device', 'No such device on this account', 404);
+    return { renamed: deviceId, name };
   });
 
   // DELETE /api/devices/:deviceId — detach one device from the account.

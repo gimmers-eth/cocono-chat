@@ -584,9 +584,16 @@ export class CoconoClient extends Emitter {
     return this.api.pendingEnrollment(this.#requireToken(), code);
   }
 
-  /** Pairing, APPROVING-device side: approve a 6-digit pairing code. */
-  async approvePairing(code) {
-    return this.api.approveDevice(this.#requireToken(), code);
+  /** Pairing, APPROVING-device side: approve a 6-digit pairing code.
+   *  An optional human name is stored on the joining device right away
+ *  ('iPhone', 'Work laptop'); omit it and the device self-labels later. */
+  async approvePairing(code, name) {
+    return this.api.approveDevice(this.#requireToken(), code, typeof name === 'string' && name.trim() ? name.trim() : null);
+  }
+
+  /** Label one of this account's devices (Settings → Devices rename). */
+  async nameDevice(deviceId, name) {
+    return this.api.setDeviceName(this.#requireToken(), deviceId, String(name ?? ''));
   }
 
   /**

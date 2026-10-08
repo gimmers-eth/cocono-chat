@@ -192,6 +192,7 @@
           <button class="drawer-tab" id="tabbtn-profile" data-tab="profile" role="tab" data-icon="tabProfile" hidden>Profile</button>
           <button class="drawer-tab" data-tab="verify" role="tab" data-icon="tabVerify">Verify</button>
           <button class="drawer-tab" data-tab="devices" role="tab" data-icon="tabDevices">Devices</button>
+          <button class="drawer-tab" data-tab="limits" role="tab" data-icon="tabLimits">Limits</button>
           <button class="drawer-tab" data-tab="general" role="tab" data-icon="tabGeneral">General</button>
           <button class="drawer-tab" data-tab="diagnostics" role="tab" data-icon="tabDiagnostics">Diagnostics</button>
         </div>
@@ -206,8 +207,6 @@
                  placeholder="6-digit pairing code" autocomplete="off" />
           <button id="btn-approve" class="btn btn-accent">Review</button>
         </div>
-        <p id="approve-preview" class="muted small" hidden></p>
-        <button id="btn-approve-confirm" class="btn btn-primary" hidden>Approve</button>
       </div>
 
       <div id="tabpanel-profile" hidden>
@@ -249,6 +248,21 @@
         <p class="muted small">A photo of your ID is shown only to the service admin, so a human can confirm the account belongs to a real person. Once reviewed it is deleted. While unverified, your name carries a red notice to your contacts — verifying a contact's safety number is separate and remains your own check.</p>
       </div>
 
+      <div id="tabpanel-limits" hidden>
+        <h3>Usage</h3>
+        <table id="usage-table" class="usage-table" aria-label="Trust and verification limits">
+          <thead>
+            <tr><th scope="col"></th><th scope="col">Today</th><th scope="col">This week</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">Verifications</th><td id="usage-vd">—</td><td id="usage-vw">—</td></tr>
+            <tr><th scope="row">Trusts</th><td id="usage-td">—</td><td id="usage-tw">—</td></tr>
+          </tbody>
+        </table>
+        <p id="usage-line" class="muted small"></p>
+        <p class="muted small">Verifying and trusting is capped per day and per week to keep vouching real — the caps count attempts, undoing does not refund.</p>
+      </div>
+
       <div id="tabpanel-general" hidden>
         <h3>Appearance</h3>
         <select id="theme-select" class="select" aria-label="Theme"></select>
@@ -265,9 +279,6 @@
           <span>Push notifications on this device</span>
         </label>
         <p id="notify-hint" class="muted small"></p>
-        <h3>Usage</h3>
-        <p id="usage-line" class="muted small"></p>
-        <p class="muted small">Verifying and trusting is capped per day and per week to keep vouching real — the caps count attempts, undoing does not refund. Need more? Ask the operator with your username.</p>
         <h3>Messages</h3>
         <div class="row-actions">
           <button id="btn-clear-all-msgs" class="btn btn-small btn-danger">Clear all messages</button>
@@ -300,6 +311,36 @@
     <p id="confirm-warning" class="confirm-warning" hidden></p>
     <div class="row-actions">
       <button id="btn-confirm-ok" class="btn btn-primary"></button>
+    </div>
+  </section>
+
+  <!-- Pairing review modal: 'Review' under Settings → Devices opens this
+       instead of the old inline preview. It answers WHICH device is
+       knocking (the joining device's own User-Agent, relayed by the server),
+       lets the approver name it (default: that platform guess), and carries
+       the only-your-own-devices warning approval deserves. -->
+  <div id="pair-overlay" class="overlay" hidden></div>
+  <section id="pair-modal" class="diag-modal" role="dialog" aria-modal="true" aria-labelledby="pair-title" hidden>
+    <header class="drawer-head">
+      <h2 id="pair-title">Approve new device?</h2>
+      <button id="btn-pair-cancel" class="icon-btn" title="Cancel" data-icon="close"></button>
+    </header>
+    <div class="pair-who">
+      <span class="pair-ic" data-icon="tabDevices"></span>
+      <span class="pair-body">
+        <span id="pair-platform" class="pair-platform"></span>
+        <span id="pair-meta" class="dim small"></span>
+      </span>
+    </div>
+    <label class="field pair-name-field">
+      <span class="dim small">Name this device (shown in Settings → Devices)</span>
+      <input id="pair-name" type="text" maxlength="40" spellcheck="false" autocomplete="off"
+             placeholder="e.g. iPhone, Work laptop" />
+    </label>
+    <p class="confirm-warning">Only approve YOUR OWN device. Nobody else ever needs to add a device to your account — whoever approves this code can read your messages and sign in as you. If you did not start pairing a device just now, cancel.</p>
+    <p id="pair-status" class="status" role="status"></p>
+    <div class="row-actions">
+      <button id="btn-pair-approve" class="btn btn-primary btn-danger">Approve device</button>
     </div>
   </section>
 

@@ -8,6 +8,7 @@ import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
 import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, clearAllMessages, loadPeerVerifications, loadPeerAvatars, rememberPeerAvatar, AVATARS_EVENT, FRIENDS_EVENT } from '../store.js';
 import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl } from './peername.js';
+import { guessDeviceName, humanPlatform } from '../devices.js';
 import { refreshSettingsUI } from '../install.js';
 import { loadRegistry, applyTheme, savedTheme, wireThemeSelect } from '../theme.js';
 
@@ -17,7 +18,7 @@ export function createHome({ client, chat, onLogout }) {
   let settingsOpen = false;
 
   // ---- settings drawer tabs ----
-  const SETTINGS_TABS = ['profile', 'verify', 'devices', 'general', 'diagnostics'];
+  const SETTINGS_TABS = ['profile', 'verify', 'devices', 'limits', 'general', 'diagnostics'];
   let settingsTab = 'devices';
   try { settingsTab = localStorage.getItem('cocono.settings.tab') || 'devices'; } catch { /* private mode */ }
   if (!SETTINGS_TABS.includes(settingsTab)) settingsTab = 'devices';
@@ -64,24 +65,35 @@ export function createHome({ client, chat, onLogout }) {
     : sec >= 3600 ? `${Math.ceil(sec / 3600)}h`
       : `${Math.max(1, Math.ceil(sec / 60))}m`);
 
+  // Settings > Limits: a small table of the vouching budgets plus a reset
+  // note line. Cells show what is LEFT (that's what a user is asking when
+  // they open this); an exhausted cell flips red. Offline -> note + dashes.
+  const USAGE_CELLS = ['usage-vd', 'usage-vw', 'usage-td', 'usage-tw'];
   async function renderUsage() {
     const line = $('usage-line');
-    if (!line) return;
+    const cells = USAGE_CELLS.map((id) => $(id));
+    if (!line || cells.some((c) => !c)) return;
+    const clear = (msg) => {
+      for (const el of cells) { el.textContent = '—'; el.classList.remove('usage-spent'); }
+      line.textContent = msg;
+    };
     try {
       const u = await client.stageLimits();
-      const part = (d, w, noun) => {
-        const left = `${d.limit - d.used}/${d.limit} ${noun} left today`;
-        const week = `${w.limit - w.used}/${w.limit} this week`;
-        const reset = d.used > 0 && d.resetInSec > 0 ? ` · day resets in ${durShort(d.resetInSec)}` : '';
-        return `${left} · ${week}${reset}`;
+      const set = (el, s) => {
+        const left = s.limit - s.used;
+        el.textContent = left <= 0 ? 'all used' : `${left} of ${s.limit}`;
+        el.classList.toggle('usage-spent', left <= 0);
       };
-      line.textContent = [
-        part(u.verifyDaily, u.verifyWeekly, 'verifications'),
-        part(u.trustDaily, u.trustWeekly, 'trusts'),
-      ].join('\n');
-      line.style.whiteSpace = 'pre-line';
+      set($('usage-vd'), u.verifyDaily);
+      set($('usage-vw'), u.verifyWeekly);
+      set($('usage-td'), u.trustDaily);
+      set($('usage-tw'), u.trustWeekly);
+      const resets = [];
+      if (u.verifyDaily.used > 0 && u.verifyDaily.resetInSec > 0) resets.push(`daily resets in ${durShort(u.verifyDaily.resetInSec)}`);
+      if (u.verifyWeekly.used > 0 && u.verifyWeekly.resetInSec > 0) resets.push(`weekly resets in ${durShort(u.verifyWeekly.resetInSec)}`);
+      line.textContent = resets.join(' · ');
     } catch {
-      line.textContent = 'Usage unavailable offline.';
+      clear('Usage unavailable offline.');
     }
   }
 
@@ -487,12 +499,30 @@ export function createHome({ client, chat, onLogout }) {
       const frag = document.createDocumentFragment();
       for (const dev of devices) {
         const li = document.createElement('li');
+        li.dataset.deviceRow = dev.id;
+        const name = document.createElement('span');
+        name.className = 'device-name';
+        // named beats guessed beats placeholder; the UA heuristic only
+        // applies to THIS device (we cannot see another device's UA from
+        // here — remote labels come from approval time or a rename)
+        const guessed = !dev.name && dev.current ? guessDeviceName() : '';
+        name.textContent = dev.name || guessed || 'unnamed device';
+        if (!dev.name) name.classList.add('dim');
         const id = document.createElement('span');
+        id.className = 'dim mono';
         id.textContent = dev.id.slice(0, 8) + '…';
-        const tag = document.createElement('span');
-        tag.className = 'dim';
-        tag.textContent = dev.current ? 'this device' : '';
-        li.append(id, tag);
+        li.append(name, id);
+        if (dev.current) {
+          const tag = document.createElement('span');
+          tag.className = 'dim';
+          tag.textContent = 'this device';
+          li.append(tag);
+        }
+        const ren = document.createElement('button');
+        ren.className = 'linkish';
+        ren.textContent = 'rename';
+        ren.dataset.renameDevice = dev.id;
+        li.append(ren);
         if (!dev.current) {
           // Self-removal lives on the login screen ("remove account from this
           // browser"); from settings you detach OTHER devices (e.g. lost phone).
@@ -512,12 +542,56 @@ export function createHome({ client, chat, onLogout }) {
   }
 
   // --- approve a pairing code coming from a NEW device ---
+  // The REVIEW step is a modal: which device is knocking (its own UA, relayed
+  // by the server), a name for it (prefilled with that platform guess), and
+  // the warning that only your OWN devices ever belong on your account.
+  // Inline device rename: swap the row's label for an input. Enter saves,
+  // Escape cancels, blur saves. Re-renders either way.
+  function startDeviceRename(devId) {
+    const list = $('device-list');
+    const row = [...list.querySelectorAll('li')].find((li) => li.dataset.deviceRow === devId);
+    if (!row) return;
+    const nameEl = row.querySelector('.device-name');
+    if (!nameEl || row.querySelector('.device-rename-input')) return;
+    const current = nameEl.textContent;
+    const input = document.createElement('input');
+    input.className = 'device-rename-input';
+    input.type = 'text';
+    input.maxLength = 40;
+    input.value = current;
+    nameEl.replaceWith(input);
+    input.focus();
+    input.select();
+    let settled = false;
+    const settle = async (save) => {
+      if (settled) return;
+      settled = true;
+      const name = input.value.trim();
+      if (save && name && name !== current) {
+        try {
+          await client.nameDevice(devId, name);
+        } catch (err) {
+          setStatus($('drawer-status'), `Rename failed: ${err?.message ?? err}`, true);
+        }
+      }
+      renderDevices().catch(() => {});
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); settle(true); }
+      else if (e.key === 'Escape') { e.stopPropagation(); settle(false); }
+    });
+    input.addEventListener('blur', () => settle(true));
+  }
+
+  function closePairModal() {
+    $('pair-modal').hidden = true;
+    $('pair-overlay').hidden = true;
+  }
 
   function wireApproveCode() {
     const input = $('approve-input');
     const reviewBtn = $('btn-approve');
-    const confirmBtn = $('btn-approve-confirm');
-    const preview = $('approve-preview');
+    const approveBtn = $('btn-pair-approve');
     // Pairing-code feedback belongs in the drawer, not the hidden sidebar.
     const status = $('drawer-status');
     let codeInReview = null;
@@ -528,13 +602,20 @@ export function createHome({ client, chat, onLogout }) {
       try {
         const p = await client.pendingPairing(code);
         codeInReview = code;
-        preview.hidden = false;
-        preview.textContent = `Device "${p.d.slice(0, 8)}…" requests access (requested ${p.requestAt ?? p.requestedAt}).`;
-        confirmBtn.hidden = false;
+        const who = humanPlatform(p.agent);
+        $('pair-platform').textContent = who || 'Unknown device';
+        const when = p.requestedAt ?? p.requestAt;
+        const whenTxt = when && !Number.isNaN(Date.parse(when)) ? new Date(when).toLocaleString() : '—';
+        $('pair-meta').textContent = `id ${String(p.d ?? '').slice(0, 8)}… · requested ${whenTxt}`;
+        $('pair-name').value = who; // approver confirms or overwrites the guess
+        $('pair-status').textContent = '';
+        $('pair-overlay').hidden = false;
+        $('pair-modal').hidden = false;
+        $('pair-name').focus?.();
+        $('pair-name').select?.();
         setStatus(status, '');
       } catch (err) {
-        preview.hidden = true;
-        confirmBtn.hidden = true;
+        codeInReview = null;
         setStatus(status, err.message ?? String(err), true);
       }
     }
@@ -542,18 +623,22 @@ export function createHome({ client, chat, onLogout }) {
     reviewBtn.addEventListener('click', review);
     input.addEventListener('keydown', (e) => e.key === 'Enter' && review());
 
-    confirmBtn.addEventListener('click', async () => {
-      if (!codeInReview) return;
+    $('btn-pair-cancel').addEventListener('click', closePairModal);
+    $('pair-overlay').addEventListener('click', closePairModal);
+    approveBtn.addEventListener('click', async () => {
+      if (!codeInReview) return closePairModal();
+      approveBtn.disabled = true;
       try {
-        await client.approvePairing(codeInReview);
+        await client.approvePairing(codeInReview, $('pair-name').value.trim() || undefined);
         setStatus(status, 'Device approved — it will log in any moment.');
         input.value = '';
-        preview.hidden = true;
-        confirmBtn.hidden = true;
         codeInReview = null;
+        closePairModal();
         renderDevices();
       } catch (err) {
-        setStatus(status, err.message ?? String(err), true);
+        setStatus($('pair-status'), err.message ?? String(err), true);
+      } finally {
+        approveBtn.disabled = false;
       }
     });
   }
@@ -748,7 +833,10 @@ export function createHome({ client, chat, onLogout }) {
     $('btn-settings-close').addEventListener('click', closeSettings);
     $('drawer-overlay').addEventListener('click', closeSettings);
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') closeSettings();
+      if (e.key !== 'Escape') return;
+      // layering: the pairing review modal sits ABOVE the drawer
+      if (!$('pair-modal').hidden) { closePairModal(); return; }
+      closeSettings();
     });
   
     const openNew = async () => {
@@ -764,8 +852,14 @@ export function createHome({ client, chat, onLogout }) {
       if (e.key === 'Enter') openNew();
     });
 
-    // Detach another device (lost phone, old laptop) from this account.
+    // Detach another device (lost phone, old laptop) or rename any device
+    // (inline editor; Enter saves, Escape cancels).
     $('device-list').addEventListener('click', async (e) => {
+      const renameId = e.target.closest('[data-rename-device]')?.dataset.renameDevice;
+      if (renameId) {
+        startDeviceRename(renameId);
+        return;
+      }
       const deviceId = e.target.closest('[data-remove-device]')?.dataset.removeDevice;
       if (!deviceId) return;
       const ok = await confirmModal({

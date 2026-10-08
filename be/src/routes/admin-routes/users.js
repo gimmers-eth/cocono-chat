@@ -30,6 +30,7 @@ export default async function usersRoutes(app, { users, redis, messages, idDocs,
       hasAvatar: hasAvatar.has(doc.ul),
       devices: (doc.devices ?? []).map((dev) => ({
         id: dev.id,
+        name: dev.name ?? null,
         createdAt: dev.createdAt,
         lastSeenAt: dev.lastSeenAt,
       })),
