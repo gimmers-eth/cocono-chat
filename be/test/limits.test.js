@@ -183,3 +183,52 @@ test('kill switch: settings-doc flag disables enforcement app-wide and back', as
     await teardown();
   }
 });
+
+test('ipflap limiter: catalogued, tunable app-wide and per device', async () => {
+  const ctx = await setupApp();
+  const { app, mongo, teardown } = ctx;
+  const settings = mongo.db.collection('settings');
+  await app.register(limitsAdmin, { config, settings });
+  try {
+    // appears in the catalog rows, flagged device-scoped, default 20/300
+    const cfg = (await app.inject({ method: 'GET', url: '/api/admin/limits' })).json();
+    const row = cfg.limiters.find((l) => l.name === 'ipflap');
+    assert.ok(row, 'ipflap is tunable via the admin catalog');
+    assert.equal(row.device, true);
+    assert.equal(row.defaultLimit, 20);
+    assert.equal(row.defaultWindowSec, 300);
+
+    // app-wide override applies to every device subject
+    await app.inject({
+      method: 'PATCH', url: '/api/admin/limits',
+      payload: { name: 'ipflap', value: { limit: 1 } },
+    });
+    assert.equal((await effectiveLimit(settings, config, 'ipflap', 'alice:dev-one-000001')).limit, 1);
+
+    // a per-DEVICE override (subject 'user:deviceId') beats the app-wide one
+    const devSet = await app.inject({
+      method: 'PATCH', url: '/api/admin/limits',
+      payload: { name: 'ipflap', user: 'alice:dev-one-000001', value: { limit: 9 } },
+    });
+    assert.equal(devSet.statusCode, 200);
+    assert.equal(devSet.json().effective.limit, 9);
+    assert.equal((await effectiveLimit(settings, config, 'ipflap', 'alice:dev-two-000002')).limit, 1);
+
+    // clearing the device layer falls back to app-wide (1)
+    await app.inject({
+      method: 'PATCH', url: '/api/admin/limits',
+      payload: { name: 'ipflap', user: 'alice:dev-one-000001', value: null },
+    });
+    assert.equal((await effectiveLimit(settings, config, 'ipflap', 'alice:dev-one-000001')).limit, 1);
+
+    // malformed subjects rejected
+    const bad = await app.inject({
+      method: 'PATCH', url: '/api/admin/limits',
+      payload: { name: 'ipflap', user: 'no spaces allowed!', value: { limit: 3 } },
+    });
+    assert.equal(bad.statusCode, 400);
+    assert.equal(bad.json().error, 'bad_username');
+  } finally {
+    await teardown();
+  }
+});

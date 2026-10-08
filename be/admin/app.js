@@ -199,12 +199,23 @@ function renderPanel() {
       <h3>Devices <span class="dim">(${u.devices.length})</span></h3>
       ${u.devices
         .map(
-          (d) => `<div class="device">
-            ${d.name ? `<strong>${esc(d.name)}</strong> <span class="dim">·</span> ` : ''}<span class="mono" title="${esc(d.id)}">${esc(d.id.slice(0, 8))}…</span>
-            <span class="dim">seen ${fmtAgo(d.lastSeenAt)}</span>
-            ${d.lastIp ? `<span class="dim mono">${esc(d.lastIp)}</span>` : ''}
-            <button class="danger tiny" data-del-device="${esc(u.ul)}" data-device="${esc(d.id)}">remove</button>
-          </div>`,
+          (d) => {
+            const f = d.flap ?? {};
+            const blocked = f.count != null && f.limit != null && f.count > f.limit;
+            const mins = f.ttlSec > 0 ? ` · resets ${Math.ceil(f.ttlSec / 60)}m` : '';
+            return `<div class="device" data-flap-dv="${esc(d.id)}">
+              ${d.name ? `<strong>${esc(d.name)}</strong> <span class="dim">·</span> ` : ''}<span class="mono" title="${esc(d.id)}">${esc(d.id.slice(0, 8))}…</span>
+              <span class="dim">seen ${fmtAgo(d.lastSeenAt)}</span>
+              ${d.lastIp ? `<span class="dim mono">${esc(d.lastIp)}</span>` : ''}
+              <button class="flap-meter${blocked ? ' flap-blocked' : ''}" data-rl-for="${esc(u.ul)}:${esc(d.id)}"
+                      title="open Traffic search for this device">IP changes ${f.count ?? 0}/${f.limit ?? '—'}${mins}${blocked ? ' — BLOCKED' : ''}</button>
+              <input class="flap-cap" type="number" min="1" placeholder="cap" aria-label="IP-change budget for this device"
+                     value="${f.override ? (f.limit ?? '') : ''}" />
+              <button class="tiny" data-flap-set="${esc(d.id)}">set</button>
+              ${f.override ? `<button class="danger tiny" data-flap-reset="${esc(d.id)}">reset</button>` : ''}
+              <button class="danger tiny" data-del-device="${esc(u.ul)}" data-device="${esc(d.id)}">remove</button>
+            </div>`;
+          },
         )
         .join('') || '<span class="dim">none</span>'}
       <p class="dim small-note">removing the LAST device deletes the account outright</p>
@@ -243,7 +254,7 @@ const PANEL_LIMIT_ORDER = ['fvday', 'fvweek', 'ftday', 'ftweek'];
 function panelLimitsRows(ul) {
   const cfg = lastLimitsCfg;
   const rows = (cfg.limiters ?? [])
-    .filter((l) => l.scope === 'account')
+    .filter((l) => l.scope === 'account' && !l.device)
     .sort((a, b) => {
       const ai = PANEL_LIMIT_ORDER.indexOf(a.name);
       const bi = PANEL_LIMIT_ORDER.indexOf(b.name);
@@ -279,7 +290,7 @@ function renderLimitsConfig(cfg) {
     .map(
       (l) => `<tr>
         <td>${esc(l.label)}<br /><span class="dim mono">${esc(l.name)}</span></td>
-        <td>${l.scope}</td>
+        <td>${l.device ? 'device' : l.scope}</td>
         <td class="mono">${l.defaultLimit} / ${l.defaultWindowSec}s</td>
         <td><input class="lc-limit" data-lc-name="${esc(l.name)}" type="number" min="1"
              value="${l.override?.limit ?? ''}" placeholder="—" /></td>
@@ -557,6 +568,16 @@ document.addEventListener('click', (e) => {
   if (luClear) {
     return patchLimits({ name: luClear.dataset.luClear, user: luClear.dataset.luUser, value: null });
   }
+  const flapSet = e.target.closest?.('[data-flap-set]');
+  if (flapSet) {
+    const row = flapSet.closest('[data-flap-dv]');
+    const dv = row?.dataset.flapDv;
+    const limit = intOr0(row?.querySelector('.flap-cap')?.value);
+    if (!dv || !limit) return setStatus('Enter a device IP-change cap of at least 1', 'error');
+    return patchLimits({ name: 'ipflap', user: `${selectedUl}:${dv}`, value: { limit } });
+  }
+  const flapReset = e.target.closest?.('[data-flap-reset]')?.dataset.flapReset;
+  if (flapReset) return patchLimits({ name: 'ipflap', user: `${selectedUl}:${flapReset}`, value: null });
 });
 
 document.addEventListener('click', (e) => {
@@ -570,8 +591,12 @@ document.addEventListener('click', (e) => {
   // panel → traffic page: search this user + their known IPs
   const rlFor = e.target.closest?.('[data-rl-for]')?.dataset.rlFor;
   if (rlFor) {
-    const su = lastUsers.find((x) => x.ul === rlFor);
-    pendingTrafficSearch = [rlFor, ...(su?.ips ?? [])].join(', ');
+    if (rlFor.includes(':')) {
+      pendingTrafficSearch = rlFor; // device flap meter: exact subject
+    } else {
+      const su = lastUsers.find((x) => x.ul === rlFor);
+      pendingTrafficSearch = [rlFor, ...(su?.ips ?? [])].join(', ');
+    }
     location.hash = 'traffic'; // hashchange routes; same-page case handled below
     showPage('traffic');
     return;

@@ -147,7 +147,11 @@ export const config = {
   // expiry makes this self-healing: a device behind flapping carrier NAT
   // cools back in within minutes; a proxy-hopper gets a hard stall per
   // device without punishing the account's other devices.
-  deviceIpFlapLimit: numOf(env.DEVICE_IP_FLAP_LIMIT, 5),
+  // default budget: 20 IP changes per 5 min — generous for carrier-NAT /
+  // VPN- hopping humans, still a wall for proxy rotation; the ipflap entry
+  // in lib/limits.js makes it tunable app-wide (Traffic → Tune) AND per
+  // device (user panel device rows)
+  deviceIpFlapLimit: numOf(env.DEVICE_IP_FLAP_LIMIT, 20),
   deviceIpFlapWindowSec: numOf(env.DEVICE_IP_FLAP_WINDOW_SEC, 300),
 
   // Server-wide rate-limit kill switch (dev/ops): hard-off at boot via this

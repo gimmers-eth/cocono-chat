@@ -4,6 +4,7 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { verifyJwt } from './lib/jwt.js';
 import { rateLimit, setRateLimitsGate } from './lib/rateLimit.js';
+import { effectiveLimit } from './lib/limits.js';
 import { registerSecurityHeaders, limited } from './routes/shared.js';
 import appRoutes from './routes/app-routes/index.js';
 import { resolveAppName } from './routes/app-routes/appInfo.js';
@@ -91,10 +92,11 @@ app.addHook('onSend', async (request, reply, payload) => {
         // first sighting (fresh device / TTL lapsed / redis restart) records
         // for free — only a genuine CHANGE spends the budget
         if (seen !== null) {
-          const fl = await rateLimit(
-            redis, `rl:ipflap:${payload.sub}:${payload.d}`,
-            config.deviceIpFlapLimit, config.deviceIpFlapWindowSec,
-          );
+          // catalog-resolved: app-wide Tune defaults + per-device overrides
+          // (subject 'user:device') all apply here, kill switch included
+          const flapSubject = `${payload.sub}:${payload.d}`;
+          const flapLim = await effectiveLimit(ctx.settings, config, 'ipflap', flapSubject);
+          const fl = await rateLimit(redis, `rl:ipflap:${flapSubject}`, flapLim.limit, flapLim.windowSec);
           if (!fl.ok) return limited(reply, fl);
         }
         await Promise.all([

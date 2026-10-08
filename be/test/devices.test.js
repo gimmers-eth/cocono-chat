@@ -565,8 +565,9 @@ test('device names: reviewer sees the requester UA, approve carries a name, rena
   }
 });
 
-test('device IP flap: latest IP tracked per device; >5 changes in window = 429', async () => {
-  const { app, mongo, teardown } = await setupApp(LIMITS);
+test('device IP flap: latest IP tracked per device; >budget changes in window = 429', async () => {
+  // budget pinned small for the test — the shipped default is 20/5min
+  const { app, mongo, teardown } = await setupApp({ ...LIMITS, deviceIpFlapLimit: 5 });
   try {
     const alice = makeClient();
     await signupUser(app, alice, 'alice', 'alice-device-001');

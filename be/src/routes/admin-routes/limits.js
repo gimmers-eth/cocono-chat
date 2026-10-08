@@ -25,6 +25,7 @@ export default async function limitsRoutes(app, { config, settings }) {
         name,
         label: entry.label,
         scope: entry.ip ? 'ip' : 'account',
+        device: entry.device === true,
         defaultLimit: def.limit,
         defaultWindowSec: def.windowSec,
         override: doc.global[name] ?? null,
@@ -42,7 +43,7 @@ export default async function limitsRoutes(app, { config, settings }) {
 
   // PATCH /api/admin/limits
   //   { name, value: {limit?, windowSec?} | null }                 → app-wide
-  //   { name, user: '<ul>', value: {limit?} | null }               → per user
+  //   { name, user: '<ul>' | '<ul>:<deviceId>', value }            → per subject
   // value null clears that override layer (falls back a level).
   app.patch('/api/admin/limits', async (request, reply) => {
     const { name, value, user } = request.body ?? {};
@@ -50,10 +51,13 @@ export default async function limitsRoutes(app, { config, settings }) {
     if (!entry) return fail(reply, 'bad_limiter', `Unknown limiter '${name}'`, 400);
     if (user !== undefined && user !== null) {
       if (entry.ip) {
-        return fail(reply, 'ip_scoped', `${name} is IP-scoped — tune it app-wide, not per user`, 400);
+        return fail(reply, 'ip_scoped', `${name} is IP-scoped — tune it app-wide, not per subject`, 400);
       }
-      if (typeof user !== 'string' || !USERNAME_RE.test(user)) {
-        return fail(reply, 'bad_username', 'Invalid username', 400);
+      // subject: an account ('alice') or a DEVICE ('alice:<deviceId>' — the
+      // ipflap limiter's key shape); stored verbatim as the override key
+      const compound = /^([a-zA-Z0-9_-]{4,64}):([a-zA-Z0-9_-]{8,64})$/.exec(String(user));
+      if (typeof user !== 'string' || (!USERNAME_RE.test(user) && !compound)) {
+        return fail(reply, 'bad_username', 'Subject must be a username or username:deviceId', 400);
       }
     }
     const check = validOverride(value === undefined ? null : value);

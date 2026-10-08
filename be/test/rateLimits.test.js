@@ -113,3 +113,23 @@ test('admin users list: ips = latest egress IP per device, devices carry lastIp'
     await teardown();
   }
 });
+
+test('admin users list carries live ipflap state per device', async () => {
+  const { admin: app, redis, mongo, teardown } = await setupAdmin();
+  try {
+    await mongo.db.collection('users').insertOne({
+      ul: 'flapzy', u: 'flapzy', maxDevices: 3, createdAt: new Date(),
+      devices: [{ id: 'flap-device-00001', lastIp: '203.0.113.200' }],
+    });
+    await redis.set('rl:ipflap:flapzy:flap-device-00001', '7');
+    await redis.expire('rl:ipflap:flapzy:flap-device-00001', 180);
+    const users = (await app.inject({ method: 'GET', url: '/api/admin/users' })).json();
+    const dev = users.find((u) => u.ul === 'flapzy').devices[0];
+    assert.equal(dev.flap.count, 7);
+    assert.equal(dev.flap.limit, config.deviceIpFlapLimit); // shipped default 20
+    assert.ok(dev.flap.ttlSec > 0 && dev.flap.ttlSec <= 180);
+    assert.equal(dev.flap.override, false);
+  } finally {
+    await teardown();
+  }
+});

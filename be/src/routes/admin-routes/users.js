@@ -1,6 +1,7 @@
 import { fail } from '../shared.js';
 import { cleanupAccountState, purgeFriendReferences } from '../../lib/accountState.js';
 import { createNotifier } from '../../lib/notify.js';
+import { effectiveLimit, readLimitsDoc } from '../../lib/limits.js';
 
 // Per-account device cap: 1..MAX_DEVICES_CAP. Raising it lets a user enroll
 // more devices; lowering it below the current device count is allowed (the
@@ -9,7 +10,7 @@ const MAX_DEVICES_CAP = 1000;
 
 // GET /api/admin/users, PATCH max-devices, DELETE user, DELETE device,
 // PUT verified (identity-verification toggle), GET/DELETE id-doc (review).
-export default async function usersRoutes(app, { users, redis, messages, idDocs, profiles }) {
+export default async function usersRoutes(app, { users, redis, config, messages, idDocs, profiles, settings }) {
   // account-review outcomes are invisible to the reviewed user otherwise —
   // content-free 'identity' nudges (lib/notify.js) make the app re-pull
   const { notify: notifyAccount, notifyPeers } = createNotifier({ redis, users });
@@ -19,26 +20,51 @@ export default async function usersRoutes(app, { users, redis, messages, idDocs,
     const byUl = new Map(metas.map((d) => [d.ul, d]));
     const avatars = await profiles.find({}, { projection: { ul: 1, avatar: 1, _id: 0 } }).toArray();
     const hasAvatar = new Set(avatars.filter((a) => a.avatar).map((a) => a.ul));
-    return docs.map((doc) => ({
-      u: doc.u,
-      ul: doc.ul,
-      createdAt: doc.createdAt,
-      maxDevices: doc.maxDevices,
-      verified: !!doc.verified,
-      verifiedAt: doc.verifiedAt ?? null,
-      idDoc: byUl.get(doc.ul) ?? null,
-      hasAvatar: hasAvatar.has(doc.ul),
-      // 'known IPs' = the LATEST egress IP per device (written by the auth
-      // hook's flap tracker); feeds the user panel's rate-limit search link
-      ips: (doc.devices ?? []).map((d) => d.lastIp).filter(Boolean),
-      devices: (doc.devices ?? []).map((dev) => ({
-        id: dev.id,
-        name: dev.name ?? null,
-        lastIp: dev.lastIp ?? null,
-        createdAt: dev.createdAt,
-        lastSeenAt: dev.lastSeenAt,
-      })),
-    }));
+    // live IP-flap state per device: the counter (count/ttl) + the EFFECTIVE
+    // budget (catalog layering: device override > app override > default),
+    // so the user panel shows exactly what enforcement applies right now
+    const limitsDoc = await readLimitsDoc(settings);
+    const rows = [];
+    for (const doc of docs) {
+      const devices = [];
+      for (const dev of doc.devices ?? []) {
+        const subject = `${doc.ul}:${dev.id}`;
+        const [count, ttl, eff] = await Promise.all([
+          redis.get(`rl:ipflap:${subject}`),
+          redis.ttl(`rl:ipflap:${subject}`),
+          effectiveLimit(settings, config, 'ipflap', subject),
+        ]);
+        devices.push({
+          id: dev.id,
+          name: dev.name ?? null,
+          lastIp: dev.lastIp ?? null,
+          createdAt: dev.createdAt,
+          lastSeenAt: dev.lastSeenAt,
+          flap: {
+            count: Math.max(0, Number(count ?? 0)),
+            limit: eff.limit,
+            windowSec: eff.windowSec,
+            ttlSec: Math.max(0, Number(ttl ?? 0)),
+            override: !!limitsDoc.users[subject]?.ipflap,
+          },
+        });
+      }
+      rows.push({
+        u: doc.u,
+        ul: doc.ul,
+        createdAt: doc.createdAt,
+        maxDevices: doc.maxDevices,
+        verified: !!doc.verified,
+        verifiedAt: doc.verifiedAt ?? null,
+        idDoc: byUl.get(doc.ul) ?? null,
+        hasAvatar: hasAvatar.has(doc.ul),
+        // 'known IPs' = the LATEST egress IP per device (written by the auth
+        // hook's flap tracker); feeds the user panel's rate-limit search link
+        ips: devices.map((d) => d.lastIp).filter(Boolean),
+        devices,
+      });
+    }
+    return rows;
   });
 
   // PUT /api/admin/users/:username/verified {verified} — the admin toggle.
