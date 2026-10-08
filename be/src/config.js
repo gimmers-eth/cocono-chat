@@ -149,6 +149,11 @@ export const config = {
   // device without punishing the account's other devices.
   deviceIpFlapLimit: numOf(env.DEVICE_IP_FLAP_LIMIT, 5),
   deviceIpFlapWindowSec: numOf(env.DEVICE_IP_FLAP_WINDOW_SEC, 300),
+
+  // Server-wide rate-limit kill switch (dev/ops): hard-off at boot via this
+  // env, or at runtime via settings {_id:'traffic'}.rateLimitsDisabled — see
+  // lib/rateLimit.js + the admin state endpoint. Used by ops/fake-users.
+  rateLimitsDisabled: env.RATE_LIMITS_DISABLED === 'true',
   // how long a device's last-seen IP survives quiet periods (redis)
   deviceIpTtlSec: numOf(env.DEVICE_IP_TTL_SEC, 24 * 3600),
 

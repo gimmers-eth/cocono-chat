@@ -17,6 +17,7 @@ import {
 export default async function limitsRoutes(app, { config, settings }) {
   app.get('/api/admin/limits', async () => {
     const doc = await readLimitsDoc(settings);
+    const traffic = await settings.findOne({ _id: 'traffic' });
     const limiters = [];
     for (const [name, entry] of Object.entries(LIMIT_CATALOG)) {
       const def = entry.def(config);
@@ -36,7 +37,7 @@ export default async function limitsRoutes(app, { config, settings }) {
         userOverrides.push({ ul, name, ...o });
       }
     }
-    return { limiters, userOverrides };
+    return { limiters, userOverrides, rateLimitsDisabled: traffic?.rateLimitsDisabled === true };
   });
 
   // PATCH /api/admin/limits

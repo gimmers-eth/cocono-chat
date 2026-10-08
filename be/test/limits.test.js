@@ -142,3 +142,44 @@ test('limits: enforcement honours the admin override on a real route (challenge)
     await ctx.teardown();
   }
 });
+
+test('kill switch: settings-doc flag disables enforcement app-wide and back', async () => {
+  const ctx = await setupApp({ challengeIpLimit: 2 });
+  const { app, mongo, redis, teardown } = ctx;
+  try {
+    // wire both admin endpoints (buildApp already wired the GATE on the app)
+    await app.register(limitsAdmin, { config, settings: mongo.db.collection('settings') });
+    await app.register(rateLimitsAdmin, { redis, config, settings: mongo.db.collection('settings') });
+
+    const challenge = () => app.inject({
+      method: 'POST', url: '/api/auth/challenge', payload: { u: 'nobody' },
+    });
+
+    // ON: third hit over the 2-challenge budget is 429
+    await redis.del('rl:challenge:127.0.0.1');
+    assert.notEqual((await challenge()).statusCode, 429);
+    assert.notEqual((await challenge()).statusCode, 429);
+    assert.equal((await challenge()).statusCode, 429, 'limits should bite while enabled');
+
+    // OFF via the admin state endpoint — same process, instant
+    const off = await app.inject({
+      method: 'PUT', url: '/api/admin/rate-limits/state', payload: { disabled: true },
+    });
+    assert.equal(off.json().rateLimitsDisabled, true);
+    assert.notEqual((await challenge()).statusCode, 429, 'kill switch off: no 429s');
+
+    // the limits GET reports the state for the admin UI
+    const cfg = (await app.inject({ method: 'GET', url: '/api/admin/limits' })).json();
+    assert.equal(cfg.rateLimitsDisabled, true);
+
+    // back ON
+    await app.inject({
+      method: 'PUT', url: '/api/admin/rate-limits/state', payload: { disabled: false },
+    });
+    await redis.del('rl:challenge:127.0.0.1');
+    await challenge(); await challenge();
+    assert.equal((await challenge()).statusCode, 429, 'limits bite again');
+  } finally {
+    await teardown();
+  }
+});

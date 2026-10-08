@@ -75,6 +75,23 @@ user data (config-ish like branding) and must survive. Client-side state
 (IndexedDB transcripts/identities in users' browsers) is NOT reachable from
 here — the wiped server simply refuses old identities and devices re-pair.
 
+## Fake traffic / fake users (dev only)
+
+`./ops/fake-users.sh [--count N] [--types a,b] [--fresh] [--keep-limits] [--list]`
+— generates scenario accounts through the REAL SDK/API (keys live in memory
+only): `normal`, `verified` (admin flag), `friendly` (pairs that mutually
+add/verify/trust + exchange live E2EE messages), `diagnostic` (report pile),
+`ratelimited` (account limiters seeded spent), `ipratelimited` / `ipflapper`
+(TEST-NET egress IPs + live counters, visible via the user panel's
+"search rate limits" link). At least 1 of every scenario always; usernames
+are `<prefix>-N`. The run flips the server-wide **kill switch** off and back
+on itself (settings `{_id:'traffic'}`, admin Traffic page toggle) — never
+leave it off by hand unless you mean to.
+
+New scenarios: drop a `FakeUserType` subclass in `ops/fake-users/types/` and
+add it to `TYPES` in `index.mjs`. Seeded limiter state is indistinguishable
+from earned state on the Traffic page — that is the point.
+
 ## Deploying updates
 
 **Use `./update.sh`** — it IS the deploy flow: fetch → fast-forward →

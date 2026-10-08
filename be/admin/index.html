@@ -70,6 +70,18 @@
       <!-- ===== Traffic (search + tuning) ===== -->
       <section class="page" data-page="traffic" hidden>
         <h2>Traffic</h2>
+        <div class="rl-banner" id="rl-banner" hidden>
+          ⚠ Server-wide rate limiting is OFF — the app enforces no limits until
+          it is switched back on. (ops/fake-users toggles this.)
+        </div>
+        <div class="panel">
+          <div class="row">
+            <span class="dim">Server-wide rate limiting:</span>
+            <strong id="rl-state">…</strong>
+            <button id="btn-rl-toggle" class="tiny">turn off</button>
+            <span class="dim small-text">kill switch for ops tooling — the admin surface's own guards are unaffected</span>
+          </div>
+        </div>
         <div class="subtabs" role="tablist" aria-label="Traffic sections">
           <button class="subtab active" data-sub="search" role="tab" aria-selected="true">Search</button>
           <button class="subtab" data-sub="tune" role="tab" aria-selected="false">Tune</button>

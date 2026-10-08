@@ -1,5 +1,6 @@
 import { fail } from '../shared.js';
 import { LIMIT_CATALOG, effectiveLimit } from '../../lib/limits.js';
+import { invalidateRateLimitsGate } from '../../lib/rateLimit.js';
 
 // Display metadata for limiters NOT in the admin-tunable catalog (the admin
 // surface's own guards — deliberately fixed, ops never needs to tune them).
@@ -89,6 +90,25 @@ export default async function rateLimitsRoutes(app, { redis, config, settings })
     }
     entries.sort((a, b) => a.key.localeCompare(b.key));
     return entries;
+  });
+
+  // PUT /api/admin/rate-limits/state { disabled: bool } — the server-wide
+  // KILL SWITCH (cocono-be enforcement). Runtime-off exists for ops tooling
+  // (ops/fake-users bulk traffic); flip it back on when done — the admin
+  // Traffic page shows a loud banner while off. Invalidating here makes the
+  // change instant in this process; the app server follows within the 5s
+  // gate cache. NOTE: guards around the admin surface itself (token, admin
+  // diag/ops limiters) live in the admin process, which never wires the gate.
+  app.put('/api/admin/rate-limits/state', async (request, reply) => {
+    const disabled = request.body?.disabled === true;
+    await settings.updateOne(
+      { _id: 'traffic' },
+      { $set: { rateLimitsDisabled: disabled, updatedAt: new Date() } },
+      { upsert: true },
+    );
+    invalidateRateLimitsGate();
+    request.log.warn(`[admin] rate limits ${disabled ? 'DISABLED server-wide' : 're-enabled'}`);
+    return { rateLimitsDisabled: disabled };
   });
 
   // Body: { ip } clears every IP-scoped limit for that IP,

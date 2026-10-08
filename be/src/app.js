@@ -3,7 +3,7 @@ import path from 'node:path';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { verifyJwt } from './lib/jwt.js';
-import { rateLimit } from './lib/rateLimit.js';
+import { rateLimit, setRateLimitsGate } from './lib/rateLimit.js';
 import { registerSecurityHeaders, limited } from './routes/shared.js';
 import appRoutes from './routes/app-routes/index.js';
 import { resolveAppName } from './routes/app-routes/appInfo.js';
@@ -118,6 +118,11 @@ app.addHook('onSend', async (request, reply, payload) => {
     idDocs: mongo.db.collection('id_docs'),
     profiles: mongo.db.collection('profiles'),
   };
+  // Kill switch: env hard-off, else the runtime settings-doc flag (cached 5s
+  // inside rateLimit; admin writes invalidate this process instantly).
+  setRateLimitsGate(config.rateLimitsDisabled
+    ? async () => true
+    : async () => (await ctx.settings.findOne({ _id: 'traffic' }))?.rateLimitsDisabled === true);
   await app.register(appRoutes, ctx);
   await app.register(wsRoutes, ctx);
 

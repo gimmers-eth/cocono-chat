@@ -161,3 +161,11 @@ details.diag summary { display: flex; gap: 0.6rem; align-items: center; flex-wra
 }
 .subtab.active { color: var(--text); border-color: var(--accent); background: rgba(79, 140, 255, 0.12); }
 .pager-space { flex: 1; }
+
+/* Kill-switch state row on the traffic page */
+.rl-on { color: #6fbf73; }
+.rl-off { color: var(--danger); }
+.rl-banner {
+  display: block; background: rgba(239, 105, 117, 0.14); border: 1px solid var(--danger);
+  color: #f2a5a5; border-radius: 8px; padding: .6rem .8rem; margin-bottom: .75rem; font-size: .88rem;
+}

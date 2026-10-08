@@ -379,6 +379,7 @@ async function refresh() {
     // limits data FIRST: renderUsers → renderPanel reads lastLimitsCfg for
     // the panel's account-limits table
     renderLimitsConfig(limitsCfg);
+    renderTrafficState(limitsCfg);
     renderUsers(users);
     renderDiags(diags);
     renderBranding(branding);
@@ -419,7 +420,30 @@ $('btn-users-next').addEventListener('click', () => {
   renderUsers(lastUsers);
 });
 
+// ---- traffic page: kill-switch state + toggle ----
+let rlOff = false;
+function renderTrafficState(cfg) {
+  rlOff = cfg.rateLimitsDisabled === true;
+  const st = $('rl-state');
+  st.textContent = rlOff ? 'OFF (kill switch engaged)' : 'on';
+  st.className = rlOff ? 'rl-off' : 'rl-on';
+  $('btn-rl-toggle').textContent = rlOff ? 'turn on' : 'turn off';
+  $('rl-banner').hidden = !rlOff;
+}
+$('btn-rl-toggle').addEventListener('click', async () => {
+  const disable = !rlOff;
+  if (disable && !confirm('Disable ALL server-wide rate limiting? The app becomes unthrottled until you turn it back on.')) return;
+  try {
+    await api('/api/admin/rate-limits/state', { method: 'PUT', body: JSON.stringify({ disabled: disable }) });
+    setStatus(disable ? 'Rate limits OFF server-wide' : 'Rate limits back ON', 'ok');
+  } catch (err) {
+    setStatus(`Toggle failed: ${err.message}`, 'error');
+  }
+  await refresh();
+});
+
 // ---- traffic: Search / Tune sub-tabs ----
+
 function showTrafficSub(sub) {
   for (const t of document.querySelectorAll('.subtab')) {
     const on = t.dataset.sub === sub;
