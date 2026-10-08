@@ -2,6 +2,8 @@ import { fail } from '../shared.js';
 import { cleanupAccountState, purgeFriendReferences } from '../../lib/accountState.js';
 import { createNotifier } from '../../lib/notify.js';
 import { effectiveLimit, readLimitsDoc } from '../../lib/limits.js';
+import { effectiveMaxDevices } from '../../lib/devicePolicy.js';
+import { badgeById, badgesFor, badgeOverview, evaluateBadges } from '../../lib/badges.js';
 
 // Per-account device cap: 1..MAX_DEVICES_CAP. Raising it lets a user enroll
 // more devices; lowering it below the current device count is allowed (the
@@ -18,8 +20,9 @@ export default async function usersRoutes(app, { users, redis, config, messages,
     const docs = await users.find({}, { projection: { _id: 0 } }).sort({ ul: 1 }).toArray();
     const metas = await idDocs.find({}, { projection: { ul: 1, contentType: 1, uploadedAt: 1, _id: 0 } }).toArray();
     const byUl = new Map(metas.map((d) => [d.ul, d]));
-    const avatars = await profiles.find({}, { projection: { ul: 1, avatar: 1, _id: 0 } }).toArray();
-    const hasAvatar = new Set(avatars.filter((a) => a.avatar).map((a) => a.ul));
+    const profileDocs = await profiles.find({}, { projection: { ul: 1, avatar: 1, bio: 1, _id: 0 } }).toArray();
+    const hasAvatar = new Set(profileDocs.filter((a) => a.avatar).map((a) => a.ul));
+    const bioBy = new Map(profileDocs.filter((b) => b.bio).map((b) => [b.ul, b.bio]));
     // live IP-flap state per device: the counter (count/ttl) + the EFFECTIVE
     // budget (catalog layering: device override > app override > default),
     // so the user panel shows exactly what enforcement applies right now
@@ -53,11 +56,18 @@ export default async function usersRoutes(app, { users, redis, config, messages,
         u: doc.u,
         ul: doc.ul,
         createdAt: doc.createdAt,
-        maxDevices: doc.maxDevices,
+        // policy-derived cap (override > premium > verified > unverified) —
+        // exactly what enroll/approve enforce
+        maxDevices: effectiveMaxDevices(doc, config),
+        maxDevicesOverride: Number.isInteger(doc.maxDevicesOverride) ? doc.maxDevicesOverride : null,
         verified: !!doc.verified,
+        premium: !!doc.premium,
         verifiedAt: doc.verifiedAt ?? null,
         idDoc: byUl.get(doc.ul) ?? null,
         hasAvatar: hasAvatar.has(doc.ul),
+        bio: bioBy.get(doc.ul) ?? '',
+        badges: badgesFor(doc),
+        displayBadge: doc.displayBadge ?? null,
         // 'known IPs' = the LATEST egress IP per device (written by the auth
         // hook's flap tracker); feeds the user panel's rate-limit search link
         ips: devices.map((d) => d.lastIp).filter(Boolean),
@@ -89,6 +99,117 @@ export default async function usersRoutes(app, { users, redis, config, messages,
     return { ul, verified };
   });
 
+  // PUT /api/admin/users/:username/premium {premium} — the premium toggle.
+  // Effect: device cap jumps to the premium tier (default 5) and every UI
+  // (app + admin) badges the account with the gold certificate. No device
+  // rows change — the cap is policy-derived (lib/devicePolicy.js).
+  app.put('/api/admin/users/:username/premium', async (request, reply) => {
+    const ul = request.params.username.toLowerCase();
+    const { premium } = request.body ?? {};
+    if (typeof premium !== 'boolean') {
+      return fail(reply, 'invalid_request', 'premium must be a boolean', 400);
+    }
+    const set = { premium, ...(premium ? { premiumAt: new Date() } : { premiumAt: null }) };
+    if (!premium) {
+      // revoking premium while it is the WORN badge must not leave the gold
+      // chip on their name — clear the choice (they show no badge until
+      // they pick/earn another)
+      const cur = await users.findOne({ ul }, { projection: { displayBadge: 1 } });
+      if (cur?.displayBadge === 'premium') set.displayBadge = null;
+    }
+    const res = await users.updateOne({ ul }, { $set: set });
+    if (!res.matchedCount) return fail(reply, 'unknown_account', 'No such user', 404);
+    await notifyAccount(ul, 'identity'); // the badge + cap changed; re-pull
+    return { ul, premium };
+  });
+
+  // GET /api/admin/badges — every badge class with live holder counts and
+  // cap state; the admin Badges table renders straight from this.
+  app.get('/api/admin/badges', async () => ({ badges: await badgeOverview(users, config) }));
+
+  // PUT /api/admin/users/:username/badge { id } — award a capped badge from
+  // the admin panel (premium stays its own toggle). Queued serially so the
+  // OG/early-bird caps survive concurrent awards; refuses when full.
+  app.put('/api/admin/users/:username/badge', async (request, reply) => {
+    const ul = request.params.username.toLowerCase();
+    const id = request.body?.id;
+    const badge = badgeById.get(String(id));
+    if (!badge || badge.mode === 'derived') {
+      return fail(reply, 'bad_badge', 'Unknown or non-awardable badge (premium is a toggle)', 400);
+    }
+    if (!await users.findOne({ ul })) return fail(reply, 'unknown_account', 'No such user', 404);
+    await evaluateBadges(users, config, ul); // drain queue first: awards stay serial
+    const cap = badge.capOf(config);
+    const held = await users.countDocuments({ [`awards.${badge.id}`]: { $exists: true } });
+    // cap === null means UNCAPPED (Teacher's Pet) — `held >= null` would
+    // coerce to true and falsely report "badge_full"
+    if (cap !== null && held >= cap) {
+      return fail(reply, 'badge_full', `${badge.label} is capped at ${cap} holders — all taken`, 409);
+    }
+    const user = await users.findOne({ ul });
+    if (user.awards?.[badge.id]) return { awarded: false, held: true, id: badge.id };
+    const now = new Date().toISOString();
+    // awarding never auto-wears — wearing is the user's own choice
+    await users.updateOne({ ul }, { $set: { [`awards.${badge.id}`]: now } });
+    request.log.info(`[admin] awarded ${badge.id} to ${ul}`);
+    return { awarded: true, id: badge.id, at: now };
+  });
+
+  // DELETE /api/admin/users/:username/badge/:id — revoke a CAPPED badge
+  // (og/earlybird). Premium is toggled, not revoked here. Clearing the worn
+  // badge follows the same rule as the premium toggle.
+  app.delete('/api/admin/users/:username/badge/:id', async (request, reply) => {
+    const ul = request.params.username.toLowerCase();
+    const badge = badgeById.get(String(request.params.id));
+    if (!badge || badge.mode === 'derived') {
+      return fail(reply, 'bad_badge', 'Unknown or non-revocable badge (premium is a toggle)', 400);
+    }
+    const user = await users.findOne({ ul }, { projection: { awards: 1, displayBadge: 1 } });
+    if (!user) return fail(reply, 'unknown_account', 'No such user', 404);
+    const set = {};
+    const unset = {};
+    if (user.awards?.[badge.id]) unset[`awards.${badge.id}`] = '';
+    if (user.displayBadge === badge.id) set.displayBadge = null;
+    if (!Object.keys(unset).length && !Object.keys(set).length) return { revoked: false };
+    await users.updateOne({ ul }, { ...(Object.keys(unset).length ? { $unset: unset } : {}), ...(Object.keys(set).length ? { $set: set } : {}) });
+    await notifyAccount(ul, 'identity'); // client re-pulls /api/me: chip + row update live
+    return { revoked: true, id: badge.id };
+  });
+
+  // GET /api/admin/users/:username/relationships — how ONE account stands
+  // toward every other and back: {ul, added (they're on my list),
+  // theyAddedMe, verified / trust (mine, gated on mutuality exactly like the
+  // app sees them)}. Feeds the user panel's Relationships tab; tiny-box
+  // brute force (two collection reads) over anything index gymnastics.
+  app.get('/api/admin/users/:username/relationships', async (request, reply) => {
+    const ul = request.params.username.toLowerCase();
+    const actor = await users.findOne({ ul }, { projection: { friends: 1 } });
+    if (!actor) return fail(reply, 'unknown_account', 'No such user', 404);
+    const toList = (doc) => (doc?.friends ?? []).map((f) => (typeof f === 'string' ? { u: f } : f));
+    const mine = new Map(toList(actor).map((f) => [String(f.u).toLowerCase(), f]));
+    const others = await users.find(
+      { ul: { $ne: ul } },
+      { projection: { ul: 1, friends: 1, verified: 1, premium: 1 } },
+    ).toArray();
+    const rows = [];
+    for (const other of others) {
+      const m = mine.get(other.ul);
+      const theirs = toList(other).find((f) => String(f.u).toLowerCase() === ul);
+      if (!m && !theirs) continue;
+      const mutual = !!m && !!theirs;
+      rows.push({
+        ul: other.ul,
+        premium: other.premium === true,
+        theyAddedMe: !!theirs,
+        added: !!m,
+        verified: !!(m?.v && mutual),   // same mutuality gate the app enforces
+        trust: !!(m?.v && m?.t && mutual),
+      });
+    }
+    rows.sort((a, b) => (Number(b.added) - Number(a.added)) || a.ul.localeCompare(b.ul));
+    return { ul, relationships: rows };
+  });
+
   // GET /api/admin/users/:username/id-doc — the photo itself (admin-only,
   // token-gated + loopback-bound surface).
   app.get('/api/admin/users/:username/id-doc', async (request, reply) => {
@@ -115,15 +236,23 @@ export default async function usersRoutes(app, { users, redis, config, messages,
     return { deleted: true };
   });
 
+  // PATCH /api/admin/users/:username/max-devices {maxDevices:int|null} —
+  // the admin OVERRIDE that beats the premium/verified/unverified policy
+  // tiers; null clears it back to policy (lib/devicePolicy.js).
   app.patch('/api/admin/users/:username/max-devices', async (request, reply) => {
     const ul = request.params.username.toLowerCase();
     const { maxDevices } = request.body ?? {};
-    if (!Number.isInteger(maxDevices) || maxDevices < 1 || maxDevices > MAX_DEVICES_CAP) {
-      return fail(reply, 'invalid_request', `maxDevices must be a whole number between 1 and ${MAX_DEVICES_CAP}`, 400);
+    if (maxDevices === null) {
+      const cleared = await users.updateOne({ ul }, { $unset: { maxDevicesOverride: '' } });
+      if (!cleared.matchedCount) return fail(reply, 'unknown_account', 'No such user', 404);
+      return { ul, maxDevicesOverride: null };
     }
-    const res = await users.updateOne({ ul }, { $set: { maxDevices } });
+    if (!Number.isInteger(maxDevices) || maxDevices < 1 || maxDevices > MAX_DEVICES_CAP) {
+      return fail(reply, 'invalid_request', `maxDevices must be a whole number between 1 and ${MAX_DEVICES_CAP}, or null for policy`, 400);
+    }
+    const res = await users.updateOne({ ul }, { $set: { maxDevicesOverride: maxDevices } });
     if (!res.matchedCount) return fail(reply, 'unknown_account', 'No such user', 404);
-    return { ul, maxDevices };
+    return { ul, maxDevicesOverride: maxDevices };
   });
 
   app.delete('/api/admin/users/:username', async (request, reply) => {

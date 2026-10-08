@@ -7,6 +7,7 @@ import { isValidUsername, isValidDeviceId } from '../../lib/username.js';
 import { fail, limited, requireAuth, isReplayedSignature, payloadTooOld } from '../shared.js';
 import { cleanupAccountState, purgeFriendReferences } from '../../lib/accountState.js';
 import { effectiveLimit } from '../../lib/limits.js';
+import { effectiveMaxDevices } from '../../lib/devicePolicy.js';
 
 const AES_KEY_BYTES = new Set([16, 24, 32]);
 const CODE_RE = /^\d{6}$/;
@@ -74,8 +75,11 @@ export default async function deviceRoutes(app, { users, redis, config, messages
     if (user.devices.some((dev) => dev.id === d)) {
       return fail(reply, 'device_exists', 'That device is already registered', 409);
     }
-    if (user.devices.length >= user.maxDevices) {
-      return fail(reply, 'device_limit', `Account already has ${user.maxDevices} devices`, 409);
+    // cap is POLICY-derived (override > premium > verified > unverified) —
+    // an unverified account is single-device by design
+    const maxNow = effectiveMaxDevices(user, config);
+    if (user.devices.length >= maxNow) {
+      return fail(reply, 'device_limit', `Account already has ${user.devices.length} of ${maxNow} devices (limits rise with verification & premium)`, 409);
     }
 
     // L4 fix: SET NX so a drawn code can never clobber another pending
@@ -172,6 +176,7 @@ export default async function deviceRoutes(app, { users, redis, config, messages
 
     const user = await users.findOne({ ul });
     if (!user) return fail(reply, 'unknown_account', 'Account not found', 404);
+    const approveMaxNow = effectiveMaxDevices(user, config);
 
     const now = new Date();
     // Atomic: only push if the device is new and the cap is not yet reached.
@@ -179,7 +184,9 @@ export default async function deviceRoutes(app, { users, redis, config, messages
       {
         ul,
         'devices.id': { $ne: d },
-        $expr: { $lt: [{ $size: '$devices' }, '$maxDevices'] },
+        // literal, policy-derived: '$maxDevices' is no longer the source of
+        // truth (the stored field is legacy); the atomicity stays
+        $expr: { $lt: [{ $size: '$devices' }, approveMaxNow] },
       },
       { $push: { devices: { id: d, pub: p, x, aes: a, createdAt: now, lastSeenAt: now, ...(name ? { name } : {}) } } },
     );
@@ -206,7 +213,7 @@ export default async function deviceRoutes(app, { users, redis, config, messages
     const user = await users.findOne({ ul: request.auth.sub });
     if (!user) return fail(reply, 'unknown_account', 'Account not found', 404);
     return {
-      maxDevices: user.maxDevices,
+      maxDevices: effectiveMaxDevices(user, config),
       devices: user.devices.map((dev) => ({
         id: dev.id,
         current: dev.id === request.auth.d,

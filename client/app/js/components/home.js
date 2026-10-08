@@ -6,9 +6,10 @@ import { $, setStatus, fmtTime, confirmModal, openLightbox } from '../ui.js';
 import { humanError } from '../errors.js';
 import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
-import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, clearAllMessages, loadPeerVerifications, loadPeerAvatars, rememberPeerAvatar, AVATARS_EVENT, FRIENDS_EVENT } from '../store.js';
+import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, clearAllMessages, loadPeerVerifications, loadPeerPremiums, loadPeerAvatars, rememberPeerAvatar, rememberPeerVerified, rememberPeerChip, loadPeerChips, AVATARS_EVENT, FRIENDS_EVENT } from '../store.js';
 import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl } from './peername.js';
 import { guessDeviceName, humanPlatform } from '../devices.js';
+import { BADGE_UI, nameChipEl } from '../badges.js';
 import { refreshSettingsUI } from '../install.js';
 import { loadRegistry, applyTheme, savedTheme, wireThemeSelect } from '../theme.js';
 
@@ -25,6 +26,9 @@ export function createHome({ client, chat, onLogout }) {
   // our own identity-verification state (null = unknown/offline); while
   // false, opening settings ALWAYS lands on the Verify tab
   let myVerified = null;
+  let myPremium = false; // premium gold cert for MY OWN name (side-head + own profile tab)
+  let myBadges = [];     // held badges [{id, at}] from /api/me
+  let myDisplay = null;  // chosen name badge ('' = explicitly none)
 
   function showSettingsTab() {
     for (const t of SETTINGS_TABS) {
@@ -68,7 +72,79 @@ export function createHome({ client, chat, onLogout }) {
   // Settings > Limits: a small table of the vouching budgets plus a reset
   // note line. Cells show what is LEFT (that's what a user is asking when
   // they open this); an exhausted cell flips red. Offline -> note + dashes.
-  const USAGE_CELLS = ['usage-vd', 'usage-vw', 'usage-td', 'usage-tw'];
+  // ---- name-badge surface (mine) ----
+  function myChipId() {
+    // visibility gate: unverified accounts show NO badge name-side, whatever
+    // they have chosen; '' is the explicit "none"
+    if (!myVerified || !myDisplay) return null;
+    return myDisplay === '' ? null : myDisplay;
+  }
+
+  function renderNameBadge(el, display) {
+    if (!el) return;
+    el.replaceChildren();
+    const badgeId = display === '' ? null : (display || null);
+    const chip = badgeId ? nameChipEl(badgeId) : null;
+    if (chip) {
+      chip.classList.add('name-chip-inline');
+      el.append(chip);
+    }
+  }
+
+  // Settings > Profile badges card: a table — Badge · Received · Select.
+  // Wearing a badge is a click on its row; the worn row is marked.
+  function renderOwnBadges() {
+    const host = $('own-badges');
+    if (!host) return;
+    host.replaceChildren();
+    const held = (myBadges ?? []).filter((b) => BADGE_UI.has(b.id));
+    const none = $('own-badges-none');
+    if (none) none.hidden = held.length > 0;
+    renderNameBadge($('profile-own-premium'), myChipId(), false);
+    if (!held.length) return;
+    const table = document.createElement('table');
+    table.className = 'badge-table';
+    const thead = document.createElement('tr');
+    for (const t of ['Badge', 'Received', '']) {
+      const th = document.createElement('th');
+      th.textContent = t;
+      thead.append(th);
+    }
+    const theadEl = document.createElement('thead');
+    theadEl.append(thead);
+    const tbody = document.createElement('tbody');
+    table.append(theadEl, tbody);
+    const current = myChipId();
+    for (const b of held) {
+      const def = BADGE_UI.get(b.id);
+      const tr = document.createElement('tr');
+      const cName = document.createElement('td');
+      cName.append(def.icon(18));
+      const lab = document.createElement('span');
+      lab.textContent = ` ${def.label}`;
+      cName.append(lab);
+      const cWhen = document.createElement('td');
+      cWhen.className = 'dim';
+      cWhen.textContent = b.at ? new Date(b.at).toLocaleDateString() : '—';
+      const cSel = document.createElement('td');
+      const btn = document.createElement('button');
+      btn.className = `btn btn-small${current === b.id ? ' btn-accent' : ''}`;
+      btn.textContent = current === b.id ? 'Worn' : 'Wear';
+      btn.addEventListener('click', async () => {
+        try {
+          await client.setProfile({ displayBadge: b.id });
+          myDisplay = b.id;
+          renderNameBadge($('me-premium-badge'), myVerified ? myDisplay : null);
+        } catch { /* offline */ }
+        renderOwnBadges();
+      });
+      cSel.append(btn);
+      tr.append(cName, cWhen, cSel);
+      tbody.append(tr);
+    }
+    host.append(table);
+  }
+
   async function renderUsage() {
     const line = $('usage-line');
     const cells = USAGE_CELLS.map((id) => $(id));
@@ -146,6 +222,10 @@ export function createHome({ client, chat, onLogout }) {
     let me = null;
     try { me = await client.identity(); } catch { /* offline/no session */ }
     myVerified = me ? !!me.verified : null;
+    myPremium = me ? !!me.premium : false;
+    if (me) { myBadges = me.badges ?? myBadges; myDisplay = me.displayBadge ?? myDisplay; }
+    renderNameBadge($('me-premium-badge'), myVerified ? myDisplay : null);
+    renderOwnBadges();
     const show = (txt, cls, noteTxt) => {
       if (!state) return;
       state.textContent = txt;
@@ -224,6 +304,7 @@ export function createHome({ client, chat, onLogout }) {
     try {
       const me = await client.profile();
       $('profile-own-name').textContent = client.username ?? '';
+      renderNameBadge($('profile-own-premium'), myChipId());
       $('profile-own-initial').textContent = String(client.username ?? '?').slice(0, 1);
       const bio = me.bio ?? '';
       const field = $('profile-bio');
@@ -372,7 +453,17 @@ export function createHome({ client, chat, onLogout }) {
       if (Date.now() - last < 5 * 60_000) continue;
       avatarPriming.set(peer, Date.now());
       client.viewProfile(peer)
-        .then((prof) => rememberPeerAvatar(peer, prof.avatar))
+        .then((prof) => {
+          rememberPeerAvatar(peer, prof.avatar);
+          if (peer !== selfUl) {
+            rememberPeerVerified(peer, undefined, prof.premium);
+            rememberPeerChip(peer, prof.displayBadge || null);
+          } else {
+            myBadges = prof.badges ?? myBadges;
+            myDisplay = prof.displayBadge ?? myDisplay;
+            renderOwnBadges();
+          }
+        })
         .catch(() => avatarPriming.delete(peer)); // retry after cooldown
     }
   }
@@ -395,8 +486,8 @@ export function createHome({ client, chat, onLogout }) {
 
   async function renderConversationList() {
     const list = $('conversation-list');
-    const [all, friends, pins, peerVerified, avatars] = await Promise.all(
-      [allMessages(), loadFriends(), loadPins(), loadPeerVerifications(), loadPeerAvatars()],
+    const [all, friends, pins, peerVerified, avatars, peerPremium, peerChips] = await Promise.all(
+      [allMessages(), loadFriends(), loadPins(), loadPeerVerifications(), loadPeerAvatars(), loadPeerPremiums(), loadPeerChips()],
     );
     const latestByPeer = new Map();
     for (const m of all) {
@@ -448,6 +539,7 @@ export function createHome({ client, chat, onLogout }) {
       name.append(peer);
       // red circle for accounts WITHOUT admin identity verification;
       // only when we actually looked the peer up (Map value false, not undefined)
+      { const chip = nameChipEl(peerChips.get(peer)); if (chip) { chip.classList.add('name-chip-inline'); name.append(chip); } }
       if (peerVerified.get(peer) === false) name.append(unverifiedBadgeEl());
       name.classList.toggle('gone', state === PS.GONE);
       const preview = document.createElement('span');
@@ -880,6 +972,16 @@ export function createHome({ client, chat, onLogout }) {
       renderDevices();
     });
 
+    $('btn-badge-none')?.addEventListener('click', async () => {
+      try { await client.setProfile({ displayBadge: '' }); myDisplay = ''; } catch { /* offline */ }
+      renderNameBadge($('me-premium-badge'), myVerified ? myDisplay : null);
+      renderOwnBadges();
+    });
+    // a fresh award landed (main.js poll) or a wear choice was made from the
+    // badge modal: own tab + head chip re-read
+    for (const ev of ['cocono:newbadges', 'cocono:badges-changed']) {
+      window.addEventListener(ev, () => { renderIdentity().catch(() => {}); });
+    }
     wireApproveCode();
   }
 

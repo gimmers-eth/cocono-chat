@@ -167,10 +167,21 @@
   <div id="user-overlay" hidden></div>
   <aside id="user-panel" hidden aria-label="User details">
     <header class="pu-bar">
-      <h2>User details</h2>
+      <div class="pu-bar-left">
+        <h2 id="user-panel-title">User</h2>
+        <div class="up-tabs" role="tablist" aria-label="User sections">
+          <button class="uptab active" data-uptab="details" role="tab" aria-selected="true">Details</button>
+          <button class="uptab" data-uptab="verification" role="tab" aria-selected="false">Verification</button>
+          <button class="uptab" data-uptab="badges" role="tab" aria-selected="false">Badges</button>
+          <button class="uptab" data-uptab="devices" role="tab" aria-selected="false">Devices</button>
+          <button class="uptab" data-uptab="traffic" role="tab" aria-selected="false">Traffic</button>
+          <button class="uptab" data-uptab="relations" role="tab" aria-selected="false">Relationships</button>
+        </div>
+      </div>
       <button id="btn-user-close" class="tiny">close</button>
     </header>
     <div id="user-panel-body"></div>
+    <div id="user-relations" hidden></div>
   </aside>
   <div id="lightbox" hidden><img id="lightbox-img" alt="profile photo, enlarged" /></div>
   <script type="module" src="/app.js"></script>

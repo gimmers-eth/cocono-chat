@@ -68,6 +68,16 @@ export function unverifiedBadgeEl() {
 }
 
 /**
+ * Gold certificate for PREMIUM accounts — rendered wherever a name is
+ * displayed (conversation rows, side-head, chat head, profile sheets).
+ * Purely decorative: the certificate never replaces the red unverified
+ * mark, it layers ON TOP of whatever trust state the name already wears.
+ */
+export function premiumBadgeEl(extraClass = '') {
+  return iconEl('premium', `premium-badge${extraClass ? ` ${extraClass}` : ''}`);
+}
+
+/**
  * Inline-flex tag: icon + username (italic for gone). Returns the wrapper
  * so callers can drop it straight into a row/title.
  */

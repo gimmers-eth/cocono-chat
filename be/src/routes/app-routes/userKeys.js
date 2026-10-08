@@ -2,6 +2,7 @@ import { rateLimit } from '../../lib/rateLimit.js';
 import { isValidUsername } from '../../lib/username.js';
 import { fail, limited, requireAuth } from '../shared.js';
 import { effectiveLimit } from '../../lib/limits.js';
+import { badgesFor, visibleDisplayBadge } from '../../lib/badges.js';
 
 // GET /api/users/:username/keys — authenticated lookup of a user's device key
 // material (Ed25519 verification key + X25519 agreement key), so clients can
@@ -32,6 +33,9 @@ export default async function userKeysRoutes(app, { users, redis, config, settin
       // public account facts like this are directory-visible metadata (JWT
       // gate already required); drives the grey certificate badge in clients
       verified: !!user.verified,
+      premium: !!user.premium,
+      badges: badgesFor(user),
+      displayBadge: visibleDisplayBadge(user),
       id: user.identity?.p ?? user.devices?.[0]?.pub ?? null,
       devices: user.devices.map((dev) => ({ d: dev.id, p: dev.pub, x: dev.x ?? null })),
     };

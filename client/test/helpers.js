@@ -11,6 +11,9 @@ export const TEST_REDIS_URL = process.env.TEST_REDIS_URL ?? 'redis://127.0.0.1:6
 
 // Generous limits so tests don't trip rate-limits.
 const LIMITS = {
+  // SDK tests pair second devices freely — the shipped 1-device unverified
+  // policy is covered by be/test/premium.test.js
+  deviceLimitUnverified: 5,
   signupIpLimit: 1000,
   // transport tests exercise messaging, not the identity policy
   coldSendRequiresVerification: false,

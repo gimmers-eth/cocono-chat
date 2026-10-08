@@ -756,3 +756,81 @@ body[data-view="blocked"] .page-footer { display: none; }
 #profile-avatar-img, #profile-own-avatar, #me-avatar-img, .chat-avatar, .peer-list .avatar-img { cursor: zoom-in; }
 
 .bio-text { margin: 0; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+
+/* Premium gold certificate — layers on top of any trust-state mark */
+.premium-badge { color: #f0c04a; font-size: .82em; margin-left: .28em; vertical-align: -0.05em; }
+.profile-premium-badge { font-size: 1rem; }
+
+/* Premium modal + clickable certificate on profile sheets */
+/* position:relative + z-index lifts the hero ABOVE the modal's sticky
+   header (which paints its opaque background at z-index 1 — that band, not
+   overflow, was shearing off the top of the glow) and gives vertical room. */
+.premium-hero { text-align: center; margin: 1.1rem 0 .9rem; position: relative; z-index: 2; }
+/* the modal content is tiny — let the gold glow spill instead of clipping */
+/* Dedicated layer ABOVE every sheet (profile is .side-sheet z-50 and was
+   winning the tie on DOM order, letting its scrim close the sheet under an
+   open premium modal). Also keep lightbox (>70) above this one. */
+#premium-overlay { z-index: 60; }
+#premium-modal { text-align: left; overflow: visible; z-index: 61; }
+#premium-modal .muted { line-height: 1.45; }
+#premium-modal .premium-points {
+  text-align: right; margin: .8rem 0 0;
+  color: var(--accent); font-weight: 800; font-size: 1.02rem;
+  text-shadow: 0 0 12px rgb(from var(--accent) r g b / .4);
+}
+.premium-hero i { font-size: 3rem; color: #f0c04a; animation: premium-glow 2.8s ease-in-out infinite; }
+@keyframes premium-glow {
+  0%, 100% {
+    text-shadow: 0 0 8px rgba(240, 192, 74, .30), 0 0 18px rgba(240, 192, 74, .22);
+  }
+  50% {
+    text-shadow:
+      0 0 14px rgba(240, 192, 74, .60),
+      0 0 32px rgba(240, 192, 74, .50),
+      0 0 58px rgba(240, 192, 74, .22);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .premium-hero i { animation: none; text-shadow: 0 0 14px rgba(240, 192, 74, .4); }
+}
+#profile-premium .premium-badge, #profile-premium i { cursor: pointer; }
+#profile-premium i { font-size: 1.05rem; }
+
+/* ---------- Badges ---------- */
+.badge-row { display: flex; flex-wrap: wrap; gap: .45rem; align-items: stretch; }
+.badge-chip {
+  display: inline-flex; align-items: center; gap: .35rem;
+  background: var(--panel-raised); border: 1px solid var(--border);
+  border-radius: 999px; padding: .3rem .65rem .3rem .4rem;
+  font: inherit; font-size: .8rem; color: var(--text); cursor: default;
+}
+.badge-chip { cursor: pointer; }
+.badge-chip-premium { border-color: rgba(240, 192, 74, .55); }
+/* the certificate is GOLD everywhere: chips, name badges, row icons, modal.
+   No shadow at the small sizes — the animated drop shadow belongs to the
+   modal hero only (.premium-hero i), where it is meant to breathe. */
+.badge-ic-premium i { color: #f0c04a; }
+.badge-chip-og { border-color: rgba(141, 127, 240, .6); }
+.badge-chip-earlybird { border-color: rgba(127, 212, 255, .5); }
+.badge-selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+.badge-name-chip, .name-chip-inline { display: inline-flex; vertical-align: -2px; margin-left: .3em; cursor: pointer; }
+#profile-badges .badge-chip { cursor: pointer; }
+.badge-hero { display: inline-block; }
+/* the OG badge breathes — float + violet halo, modal size only */
+@keyframes og-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+@keyframes og-halo {
+  0%, 100% { filter: drop-shadow(0 0 5px rgba(143, 127, 240, .45)); }
+  50% { filter: drop-shadow(0 0 20px rgba(143, 127, 240, .95)); }
+}
+.badge-hero-og { animation: og-float 3.4s ease-in-out infinite; display: inline-block; }
+.badge-hero-og .badge-ic, .badge-hero-og svg { animation: og-halo 2.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .badge-hero-og, .badge-hero-og svg, .badge-hero-og .badge-ic { animation: none; filter: none; }
+}
+
+/* Badge picker table + profile sheet dates */
+.badge-table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+.badge-table th { text-align: left; color: var(--muted); font-weight: 500; font-size: .74rem; text-transform: uppercase; letter-spacing: .05em; padding: .2rem .4rem; }
+.badge-table td { padding: .35rem .4rem; border-top: 1px solid var(--divider); vertical-align: middle; }
+.badge-table td:first-child { display: flex; align-items: center; gap: .35rem; font-weight: 600; }
+.badge-dates { margin: .15rem 0 0; text-align: left; }

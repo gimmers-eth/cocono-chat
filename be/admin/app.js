@@ -87,9 +87,9 @@ async function fillAvatarThumbs(users) {
 let selectedUl = null;
 
 // Users page: client-side search (comma terms, substring on the lowercase
-// handle) + 50-per-page pagination. The list is already fully in memory
+// handle) + 10-per-page pagination. The list is already fully in memory
 // (the side panel needs it), so no server round-trips were added.
-const USERS_PAGE_SIZE = 50;
+const USERS_PAGE_SIZE = 10;
 let usersPage = 1;
 
 function renderUsers(users) {
@@ -115,7 +115,7 @@ function renderUsers(users) {
   body.innerHTML = view
     .map(
       (u) => `<tr>
-        <td><strong>@${esc(u.u)}</strong><br /><span class="dim mono">${esc(u.ul)}</span></td>
+        <td><strong>@${esc(u.u)}</strong>${u.premium ? ' <span class="badge gold-badge" title="premium">★ premium</span>' : ''}<br /><span class="dim mono">${esc(u.ul)}</span></td>
         <td>${fmtDate(u.createdAt)}</td>
         <td>${u.verified
           ? '<span class="badge ok-badge">verified</span>'
@@ -135,12 +135,55 @@ function renderUsers(users) {
   fillAvatarThumbs(thumbs).catch(() => {});
 }
 
+let userTab = 'details';
+
+function showUserTab(tab) {
+  userTab = tab;
+  for (const t of document.querySelectorAll('.uptab')) {
+    const on = t.dataset.uptab === tab;
+    t.classList.toggle('active', on);
+    t.setAttribute('aria-selected', String(on));
+  }
+  $('user-panel-body').hidden = tab === 'relations';
+  $('user-relations').hidden = tab !== 'relations';
+  if (tab === 'relations') {
+    loadRelations();
+    return; // the sections dispatcher doesn't own this tab
+  }
+  renderPanel();
+}
+
 function openPanel(ul) {
   selectedUl = ul;
   $('user-panel').hidden = false;
   $('user-overlay').hidden = false;
-  renderPanel();
+  showUserTab('details'); // a new user is always config-first; relations is opt-in
   fillAvatarThumbs(lastUsers).catch(() => {});
+}
+
+// Relationships: who added whom, who this account verified/trusted — the
+// SAME mutuality-gated truth the app enforces (server computes it). Any row
+// opens THAT user's config.
+async function loadRelations() {
+  const el = $('user-relations');
+  if (!selectedUl) return;
+  const ul = selectedUl;
+  try {
+    const { relationships } = await api(`/api/admin/users/${encodeURIComponent(ul)}/relationships`);
+    if (ul !== selectedUl || userTab !== 'relations') return; // stale response guard
+    const mark = (on) => on ? '<span class="rel-yes">✓</span>' : '<span class="dim">—</span>';
+    el.innerHTML = relationships.length
+      ? `<table class="rel-table">
+          <thead><tr><th>User</th><th>Added&nbsp;them</th><th>They&nbsp;added</th><th>Verified</th><th>Trusted</th></tr></thead>
+          <tbody>${relationships.map((r) => `<tr>
+            <td><button class="linkish" data-view-user="${esc(r.ul)}">@${esc(r.ul)}</button>${r.premium ? ' <span class="badge gold-badge">★</span>' : ''}</td>
+            <td>${mark(r.added)}</td><td>${mark(r.theyAddedMe)}</td><td>${mark(r.verified)}</td><td>${mark(r.trust)}</td>
+          </tr>`).join('')}</tbody>
+        </table>`
+      : '<p class="dim">No relationships yet — this account has added nobody, and nobody has added it.</p>';
+  } catch (err) {
+    el.innerHTML = `<p class="dim">Relationships failed: ${esc(err.message)}</p>`;
+  }
 }
 
 function closePanel() {
@@ -149,34 +192,60 @@ function closePanel() {
   $('user-overlay').hidden = true;
 }
 
+// The panel is tabbed like the client's settings drawer: each tab renders
+// only its own sections; relations lazy-loads into its own container.
 function renderPanel() {
   const panel = $('user-panel');
   if (!selectedUl) { if (!panel.hidden) closePanel(); return; }
   const u = lastUsers.find((x) => x.ul === selectedUl);
   if (!u) { closePanel(); return; } // account deleted / no longer visible
-  // don't clobber the panel while a number input in it has focus — the
-  // 10s refresh would reset a half-typed value (max-devices or a per-user
-  // limit)
-  if (['max-devices', 'lu-limit'].includes(document.activeElement?.className)) return;
-  $('user-panel-body').innerHTML = `
-    <div class="sec">
-      <div class="pu-id"><strong>@${esc(u.u)}</strong> <span class="dim mono">${esc(u.ul)}</span></div>
-      <div class="dim">created ${fmtDate(u.createdAt)}</div>
-    </div>
-    <div class="sec">
-      <h3>Verification</h3>
-      <label class="toggle-row">
-        <input type="checkbox" class="verify-toggle" data-verify="${esc(u.ul)}" ${u.verified ? 'checked' : ''} />
-        <span>${u.verified && u.verifiedAt ? 'verified ' + esc(fmtDate(u.verifiedAt)) : 'not verified'}</span>
-      </label>
-      <p class="dim small-note">unverified accounts carry a red notice to their contacts</p>
-    </div>
+  // don't clobber the active tab while a number input in it has focus — the
+  // 10s refresh would reset a half-typed value
+  if (['max-devices', 'lu-limit', 'flap-cap'].includes(document.activeElement?.className)) return;
+  $('user-panel-title').textContent = `@${u.ul}`;
+  $('user-panel-body').innerHTML = (PANEL_SECTIONS[userTab] ?? (() => ''))(u);
+  // repaint kept the DOM fresh — reuse the blob URL we already have so the
+  // 10s refresh cycle never refetches the avatar
+  const kept = avatarUrls.get(u.ul);
+  if (kept) {
+    const img = document.querySelector(`img[data-avatar-for="${CSS.escape(u.ul)}"]`);
+    if (img && !img.src) img.src = kept;
+  }
+}
+
+const accountHead = (u) => `
+  <div class="sec">
+    <div class="pu-id"><strong>@${esc(u.u)}</strong>${u.premium ? ' <span class="badge gold-badge">★ premium</span>' : ''} <span class="dim mono">${esc(u.ul)}</span></div>
+    <div class="dim">created ${fmtDate(u.createdAt)}</div>
+  </div>`;
+
+const PANEL_SECTIONS = {
+  // What the world (well — mutual friends) sees: the client's public profile.
+  details: (u) => `${accountHead(u)}
     <div class="sec">
       <h3>Profile photo</h3>
       ${u.hasAvatar
         ? `<img class="avatar-thumb" data-avatar-for="${esc(u.ul)}" alt="profile photo" title="Click to enlarge" />`
           + '<p class="dim small-note">only ever shown to mutual friends; click to enlarge</p>'
         : '<span class="dim">no photo</span>'}
+    </div>
+    <div class="sec">
+      <h3>Bio</h3>
+      <p class="pu-bio">${u.bio ? esc(u.bio) : '<span class="dim">no bio</span>'}</p>
+    </div>`,
+
+  verification: (u) => `${accountHead(u)}
+    <div class="sec">
+      <h3>Identity verification</h3>
+      <label class="toggle-row">
+        <input type="checkbox" class="verify-toggle" data-verify="${esc(u.ul)}" ${u.verified ? 'checked' : ''} />
+        <span>${u.verified && u.verifiedAt ? 'verified ' + esc(fmtDate(u.verifiedAt)) : 'not verified'}</span>
+      </label>
+      <label class="toggle-row">
+        <input type="checkbox" class="premium-toggle" data-premium="${esc(u.ul)}" ${u.premium ? 'checked' : ''} />
+        <span><span class="badge gold-badge">★</span> PREMIUM — gold certificate, 5-device cap</span>
+      </label>
+      <p class="dim small-note">unverified accounts carry a red notice to their contacts</p>
     </div>
     <div class="sec">
       <h3>ID document</h3>
@@ -186,66 +255,89 @@ function renderPanel() {
              <button class="tiny" data-view-id="${esc(u.ul)}">view</button>
              <button class="danger tiny" data-del-id="${esc(u.ul)}">delete photo</button>
            </div>`
-        : '<span class="dim">none</span>'}
-    </div>
+        : '<span class="dim">none uploaded</span>'}
+    </div>`,
+
+  devices: (u) => `${accountHead(u)}
     <div class="sec">
       <h3>Max devices</h3>
       <div class="row">
-        <input type="number" min="1" max="1000" value="${u.maxDevices}" class="max-devices" data-max-for="${esc(u.ul)}" />
+        <input type="number" min="1" max="1000" value="${u.maxDevicesOverride ?? ''}" class="max-devices" data-max-for="${esc(u.ul)}" placeholder="auto" />
         <button class="tiny" data-set-max="${esc(u.ul)}">set</button>
+        ${u.maxDevicesOverride != null ? `<button class="danger tiny" data-max-auto="${esc(u.ul)}">auto</button>` : ''}
       </div>
+      <p class="dim small-note">currently ${u.maxDevices} — policy: 1 unverified · 2 verified · 5 premium; a set number OVERRIDES the policy, “auto” restores it</p>
     </div>
     <div class="sec">
       <h3>Devices <span class="dim">(${u.devices.length})</span></h3>
       ${u.devices
-        .map(
-          (d) => {
-            const f = d.flap ?? {};
-            const blocked = f.count != null && f.limit != null && f.count > f.limit;
-            const mins = f.ttlSec > 0 ? ` · resets ${Math.ceil(f.ttlSec / 60)}m` : '';
-            return `<div class="device" data-flap-dv="${esc(d.id)}">
-              ${d.name ? `<strong>${esc(d.name)}</strong> <span class="dim">·</span> ` : ''}<span class="mono" title="${esc(d.id)}">${esc(d.id.slice(0, 8))}…</span>
-              <span class="dim">seen ${fmtAgo(d.lastSeenAt)}</span>
-              ${d.lastIp ? `<span class="dim mono">${esc(d.lastIp)}</span>` : ''}
-              <button class="flap-meter${blocked ? ' flap-blocked' : ''}" data-rl-for="${esc(u.ul)}:${esc(d.id)}"
-                      title="open Traffic search for this device">IP changes ${f.count ?? 0}/${f.limit ?? '—'}${mins}${blocked ? ' — BLOCKED' : ''}</button>
-              <input class="flap-cap" type="number" min="1" placeholder="cap" aria-label="IP-change budget for this device"
-                     value="${f.override ? (f.limit ?? '') : ''}" />
-              <button class="tiny" data-flap-set="${esc(d.id)}">set</button>
-              ${f.override ? `<button class="danger tiny" data-flap-reset="${esc(d.id)}">reset</button>` : ''}
-              <button class="danger tiny" data-del-device="${esc(u.ul)}" data-device="${esc(d.id)}">remove</button>
-            </div>`;
-          },
-        )
+        .map((d) => `<div class="device">
+          ${d.name ? `<strong>${esc(d.name)}</strong> <span class="dim">·</span> ` : ''}<span class="mono" title="${esc(d.id)}">${esc(d.id.slice(0, 8))}…</span>
+          <span class="dim">created ${fmtDate(d.createdAt)}</span>
+          <span class="dim">seen ${fmtAgo(d.lastSeenAt)}</span>
+          ${d.lastIp ? `<span class="dim mono">${esc(d.lastIp)}</span>` : ''}
+          <button class="danger tiny" data-del-device="${esc(u.ul)}" data-device="${esc(d.id)}">remove</button>
+        </div>`)
         .join('') || '<span class="dim">none</span>'}
       <p class="dim small-note">removing the LAST device deletes the account outright</p>
-    </div>
+    </div>`,
+
+  traffic: (u) => `${accountHead(u)}
     <div class="sec">
-      <h3>Traffic</h3>
+      <h3>Per-device IP-change budgets</h3>
       <p class="dim small-note">${(u.ips ?? []).length
-        ? `latest egress IP per device: ${esc(u.ips.join(', '))} (from their authenticated calls)`
-        : 'no IPs recorded yet'}</p>
-      <button class="tiny" data-rl-for="${esc(u.ul)}">search rate limits →</button>
+        ? `latest egress IP per device: ${esc(u.ips.join(', '))}`
+        : 'no IPs recorded yet'} · meters link into a Traffic search for that exact subject</p>
+      ${u.devices
+        .map((d) => {
+          const f = d.flap ?? {};
+          const blocked = f.count != null && f.limit != null && f.count > f.limit;
+          const mins = f.ttlSec > 0 ? ` · resets ${Math.ceil(f.ttlSec / 60)}m` : '';
+          return `<div class="device" data-flap-dv="${esc(d.id)}">
+            ${d.name ? `<strong>${esc(d.name)}</strong> ` : ''}<span class="mono">${esc(d.id.slice(0, 8))}…</span>
+            <button class="flap-meter${blocked ? ' flap-blocked' : ''}" data-rl-for="${esc(u.ul)}:${esc(d.id)}"
+                    title="open Traffic search for this device">IP changes ${f.count ?? 0}/${f.limit ?? '—'}${mins}${blocked ? ' — BLOCKED' : ''}</button>
+            <input class="flap-cap" type="number" min="1" placeholder="cap" aria-label="IP-change budget for this device"
+                   value="${f.override ? (f.limit ?? '') : ''}" />
+            <button class="tiny" data-flap-set="${esc(d.id)}">set</button>
+            ${f.override ? `<button class="danger tiny" data-flap-reset="${esc(d.id)}">reset</button>` : ''}
+          </div>`;
+        })
+        .join('') || '<span class="dim">no devices</span>'}
     </div>
     <div class="sec">
       <h3>Account limits</h3>
-      <p class="dim small-note">per-user overrides beat the app-wide tuning; reset falls back. First four are the verify/trust budgets.</p>
+      <p class="dim small-note">per-account overrides beat the app-wide tuning; reset falls back. First four are the verify/trust budgets.</p>
+      <button class="tiny" data-rl-for="${esc(u.ul)}">search rate limits →</button>
       <table class="limits-table">
         <thead><tr><th>Limit</th><th>Def</th><th>App</th><th>User</th><th></th></tr></thead>
         <tbody>${panelLimitsRows(u.ul)}</tbody>
       </table>
-    </div>
+    </div>`,
+
+  badges: (u) => `${accountHead(u)}
     <div class="sec">
-      <button class="danger" data-del-user="${esc(u.ul)}">delete user</button>
-    </div>`;
-  // repaint kept the DOM fresh — reuse the blob URL we already have so the
-  // 10s refresh cycle never refetches the avatar
-  const kept = avatarUrls.get(u.ul);
-  if (kept) {
-    const img = document.querySelector(`img[data-avatar-for="${CSS.escape(u.ul)}"]`);
-    if (img && !img.src) img.src = kept;
-  }
-}
+      <h3>Badges</h3>
+      <p class="dim small-note">every badge carries CoCo points; capped badges are checked against live holder counts before any award (the server queues them serially).</p>
+      <table class="rel-table">
+        <thead><tr><th>Badge</th><th>CoCo</th><th>Holders</th><th>This user</th><th></th></tr></thead>
+        <tbody>${(lastBadgeDefs ?? []).map((d) => {
+          const held = (u.badges ?? []).find((b) => b.id === d.id);
+          const awardable = d.awardable !== false && !held;
+          return `<tr>
+            <td><strong>${esc(d.label)}</strong><br /><span class="dim mono">${esc(d.id)}</span></td>
+            <td class="mono">+${d.score}</td>
+            <td class="mono">${d.holders}${d.cap != null ? ` / ${d.cap}` : ''}${d.full ? ' <span class="badge no-badge">full</span>' : ''}</td>
+            <td>${held ? `<span class="rel-yes">✓</span> <span class="dim">${esc(held.at ? new Date(held.at).toLocaleDateString() : '')}</span>` : '<span class="dim">—</span>'}</td>
+            <td>${awardable ? `<button class="tiny" data-award-badge="${esc(d.id)}" data-award-ul="${esc(u.ul)}" ${d.full ? 'disabled title="all seats taken"' : ''}>award</button>` : ''}${held && d.id !== 'premium' ? ` <button class="danger tiny" data-revoke-badge="${esc(d.id)}" data-revoke-ul="${esc(u.ul)}" title="revoke (worn badge is cleared too)">revoke</button>` : ''}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>
+      <p class="dim small-note">Premium is a badge too — toggled on the Verification tab. Teacher's Pet is awardable ONLY here (never earned automatically). Wearing a badge is always the user's own choice, and only VERIFIED accounts show it.</p>
+    </div>`,
+
+  relations: () => '',
+};
 
 // Account-scoped limiters for the user panel's limits table (IP-subject
 // limiters are app-wide only — the API rejects them per user). The verify/
@@ -281,6 +373,7 @@ function panelLimitsRows(ul) {
 let lastDiags = [];
 let lastUsers = [];
 let lastLimitsCfg = { limiters: [], userOverrides: [] };
+let lastBadgeDefs = [];
 
 function renderLimitsConfig(cfg) {
   lastLimitsCfg = cfg;
@@ -380,9 +473,10 @@ function renderOps(o) {
 
 async function refresh() {
   try {
-    const [users, limitsCfg, diags, branding, ops] = await Promise.all([
+    const [users, limitsCfg, badgeDefs, diags, branding, ops] = await Promise.all([
       api('/api/admin/users'),
       api('/api/admin/limits'),
+      api('/api/admin/badges'),
       api('/api/admin/diagnostics'),
       api('/api/admin/branding'),
       api('/api/admin/ops'),
@@ -391,7 +485,9 @@ async function refresh() {
     // the panel's account-limits table
     renderLimitsConfig(limitsCfg);
     renderTrafficState(limitsCfg);
+    lastBadgeDefs = badgeDefs.badges ?? [];
     renderUsers(users);
+    if (!$('user-panel').hidden && userTab === 'relations') loadRelations();
     renderDiags(diags);
     renderBranding(branding);
     renderOps(ops);
@@ -564,6 +660,18 @@ document.addEventListener('click', (e) => {
     if (!limit) return setStatus('Enter a limit of at least 1', 'error');
     return patchLimits({ name: luSet.dataset.luSet, user: luSet.dataset.luUser, value: { limit } });
   }
+  const award = e.target.closest?.('[data-award-badge]');
+  if (award) {
+    const { awardBadge, awardUl } = award.dataset;
+    return run(`Awarded ${awardBadge} to @${awardUl}`, () =>
+      api(`/api/admin/users/${encodeURIComponent(awardUl)}/badge`, { method: 'PUT', body: JSON.stringify({ id: awardBadge }) }));
+  }
+  const revoke = e.target.closest?.('[data-revoke-badge]');
+  if (revoke) {
+    const { revokeBadge, revokeUl } = revoke.dataset;
+    return run(`Revoked ${revokeBadge} from @${revokeUl}`, () =>
+      api(`/api/admin/users/${encodeURIComponent(revokeUl)}/badge/${encodeURIComponent(revokeBadge)}`, { method: 'DELETE' }));
+  }
   const luClear = e.target.closest?.('[data-lu-clear]');
   if (luClear) {
     return patchLimits({ name: luClear.dataset.luClear, user: luClear.dataset.luUser, value: null });
@@ -663,7 +771,25 @@ document.addEventListener('click', (e) => {
 });
 
 // ---- identity verification controls ----
+document.addEventListener('click', (e) => {
+  const tab = e.target.closest?.('[data-uptab]')?.dataset.uptab;
+  if (tab) { showUserTab(tab); return; }
+  // 'auto' clears the override → cap returns to the premium/verified policy
+  const auto = e.target.closest?.('[data-max-auto]')?.dataset.maxAuto;
+  if (auto) {
+    return run(`@${auto} device cap back to policy`, () =>
+      api(`/api/admin/users/${encodeURIComponent(auto)}/max-devices`, { method: 'PATCH', body: JSON.stringify({ maxDevices: null }) }));
+  }
+});
+
 document.addEventListener('change', (e) => {
+  const premUl = e.target.closest?.('.premium-toggle')?.dataset.premium;
+  if (premUl) {
+    const on = e.target.checked === true;
+    run(`@${premUl} ${on ? 'PREMIUM on' : 'premium off'}`, () =>
+      api(`/api/admin/users/${encodeURIComponent(premUl)}/premium`, { method: 'PUT', body: JSON.stringify({ premium: on }) }));
+    return;
+  }
   const ul = e.target.closest?.('.verify-toggle')?.dataset.verify;
   if (!ul) return;
   const on = e.target.checked === true;

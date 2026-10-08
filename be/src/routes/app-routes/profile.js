@@ -2,6 +2,7 @@ import { fail, requireAuth, limited } from '../shared.js';
 import { rateLimit } from '../../lib/rateLimit.js';
 import { USERNAME_RE } from '../../lib/username.js';
 import { createNotifier } from '../../lib/notify.js';
+import { badgesFor, badgeScore, validDisplayBadge, visibleDisplayBadge } from '../../lib/badges.js';
 import { effectiveLimit } from '../../lib/limits.js';
 
 // Profiles: a short bio (≤ PROFILE_BIO_MAX_LEN) + a tiny avatar
@@ -31,9 +32,12 @@ export default async function profileRoutes(app, { users, redis, config, profile
     const denied = requireAuth(request, reply);
     if (denied) return denied;
     const me = await profiles.findOne({ ul: request.auth.sub }, { projection: { _id: 0, bio: 1, avatar: 1, updatedAt: 1 } });
+    const userDoc = await users.findOne({ ul: request.auth.sub }, { projection: { premium: 1, premiumAt: 1, awards: 1, verified: 1, displayBadge: 1 } });
     return {
       u: request.auth.sub,
       bio: me?.bio ?? '',
+      badges: badgesFor(userDoc ?? {}),
+      displayBadge: userDoc?.displayBadge ?? null,
       updatedAt: me?.updatedAt ?? null,
       // owner always sees their own photo
       avatar: me?.avatar ? me.avatar.toString('base64') : null,
@@ -50,6 +54,7 @@ export default async function profileRoutes(app, { users, redis, config, profile
 
     const { bio, avatar, clearAvatar } = request.body ?? {};
     const set = {};
+    let displayBadgeSet = null; let haveDisplay = false;
     if (bio !== undefined) {
       if (typeof bio !== 'string') return fail(reply, 'invalid_request', 'bio must be a string', 400);
       const trimmed = bio.trim();
@@ -69,13 +74,31 @@ export default async function profileRoutes(app, { users, redis, config, profile
       set.avatar = buf;
       set.avatarType = 'image/jpeg';
     }
-    if (!Object.keys(set).length) return fail(reply, 'invalid_request', 'nothing to update', 400);
+    if (request.body?.displayBadge !== undefined) {
+      const wanted = request.body.displayBadge;
+      if (wanted !== null && (typeof wanted !== 'string' || (wanted !== '' && !/^\w+$/.test(wanted)))) {
+        return fail(reply, 'invalid_request', 'displayBadge must be a string or null', 400);
+      }
+      const owner = await users.findOne({ ul }, { projection: { premium: 1, premiumAt: 1, awards: 1, displayBadge: 1 } });
+      if (!validDisplayBadge(owner ?? {}, wanted)) {
+        return fail(reply, 'badge_not_held', 'You can only display a badge you have earned', 400);
+      }
+      displayBadgeSet = wanted === null ? '' : wanted; // '' persists "none"
+      haveDisplay = true;
+    }
+    if (!Object.keys(set).length && !haveDisplay) return fail(reply, 'invalid_request', 'nothing to update', 400);
 
-    await profiles.updateOne({ ul }, { $set: { ...set, ul, updatedAt: new Date() } }, { upsert: true });
+    if (Object.keys(set).length) {
+      await profiles.updateOne({ ul }, { $set: { ...set, ul, updatedAt: new Date() } }, { upsert: true });
+    }
+    if (haveDisplay) {
+      // the name-chip choice lives on the account (badges engine reads it)
+      await users.updateOne({ ul }, { $set: { displayBadge: displayBadgeSet } });
+    }
     // peers cache bios/avatars (day-ish priming): nudge everyone who added
     // this account so the new photo/bio lands immediately (lib/notify.js)
     await createNotifier({ redis, users }).notifyPeers(ul, 'profile');
-    return { updated: true, bio: set.bio };
+    return { updated: true, bio: set.bio, displayBadge: haveDisplay ? displayBadgeSet : undefined };
   });
 
   // --- viewing someone else: bio public, avatar only on mutual add ---
@@ -91,7 +114,7 @@ export default async function profileRoutes(app, { users, redis, config, profile
       return fail(reply, 'invalid_username', 'Malformed username', 400);
     }
     const ul = username.toLowerCase();
-    const targetDoc = await users.findOne({ ul }, { projection: { _id: 1, verified: 1 } });
+    const targetDoc = await users.findOne({ ul }, { projection: { _id: 1, verified: 1, premium: 1, premiumAt: 1, awards: 1, displayBadge: 1 } });
     if (!targetDoc) return fail(reply, 'unknown_account', 'No such user', 404);
 
     const [prof, viewerDoc, targetUserDoc] = await Promise.all([
@@ -103,8 +126,14 @@ export default async function profileRoutes(app, { users, redis, config, profile
     // photos require BOTH mutual-add and the target's ID verification
     const maySeePhoto = ul === viewer || (mutual && targetDoc.verified === true);
 
+    const targetBadges = badgesFor(targetDoc ?? {});
     return {
       u: ul,
+      // badges are as public as the certificate they replace: name chips and
+      // the profile sheet render straight from this
+      premium: targetDoc.premium === true,
+      badges: targetBadges,
+      displayBadge: visibleDisplayBadge(targetDoc),
       bio: prof?.bio ?? '',
       // non-eligible viewers get no photo AT ALL (not even a "hidden" flag —
       // photo presence stays unobservable until trust conditions are met)

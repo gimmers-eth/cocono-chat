@@ -3,6 +3,7 @@ import { canonical } from '../../lib/canon.js';
 import { importRawPublicKey, importRawX25519PublicKey, verifySignature } from '../../lib/ed25519.js';
 import { rateLimit } from '../../lib/rateLimit.js';
 import { isValidUsername, isValidDeviceId, isReserved } from '../../lib/username.js';
+import { evaluateBadges } from '../../lib/badges.js';
 import { fail, limited, isReplayedSignature, payloadTooOld } from '../shared.js';
 import { effectiveLimit } from '../../lib/limits.js';
 
@@ -82,6 +83,10 @@ export default async function signupRoutes(app, { users, redis, config, settings
       throw err;
     }
 
+    // Badge eligibility evaluated the moment the account exists — queued
+    // serially so the ten OG seats / 1000 early-bird seats can never be
+    // double-booked. Never blocks or fails the signup itself.
+    evaluateBadges(users, config, ul).catch(() => {});
     return reply.code(201).send({ u: ul });
   });
 }

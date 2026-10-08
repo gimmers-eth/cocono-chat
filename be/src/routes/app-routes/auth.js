@@ -6,6 +6,7 @@ import { rateLimit } from '../../lib/rateLimit.js';
 import { isValidDeviceId, isValidUsername } from '../../lib/username.js';
 import { fail, limited } from '../shared.js';
 import { effectiveLimit } from '../../lib/limits.js';
+import { evaluateBadges } from '../../lib/badges.js';
 
 // POST /api/auth/challenge + POST /api/auth/verify — passwordless login.
 export default async function authRoutes(app, { users, redis, config, settings }) {
@@ -73,6 +74,9 @@ export default async function authRoutes(app, { users, redis, config, settings }
       { $set: { 'devices.$.lastSeenAt': new Date() } },
     );
 
+    // login is the second badge checkpoint: accounts predating a new badge
+    // get evaluated the moment they next sign in (queued, cap-safe, no await)
+    evaluateBadges(users, config, ul).catch(() => {});
     const token = signJwt({ sub: ul, u: user.u, d }, config.jwtSecret, config.jwtExpiresInSec);
     return { token };
   });

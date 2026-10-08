@@ -2,6 +2,7 @@ import { rateLimit } from '../../lib/rateLimit.js';
 import { isValidUsername } from '../../lib/username.js';
 import { fail, limited, requireAuth } from '../shared.js';
 import { cocoScore } from '../../lib/cocoScore.js';
+import { badgesFor, badgeScore } from '../../lib/badges.js';
 import { effectiveLimit } from '../../lib/limits.js';
 
 // GET /api/users/:username/stats — COUNTS ONLY (never who), about a
@@ -24,7 +25,7 @@ export default async function userStatsRoutes(app, { users, redis, config, setti
     const username = request.params.username;
     if (!isValidUsername(username)) return fail(reply, 'invalid_username', 'Malformed username', 400);
     const ul = username.toLowerCase();
-    const target = await users.findOne({ ul }, { projection: { _id: 1, createdAt: 1 } });
+    const target = await users.findOne({ ul });
     if (!target) return fail(reply, 'unknown_account', 'No such user', 404);
 
     const [addedBy, verifiedBy, trustedBy] = await Promise.all([
@@ -33,7 +34,10 @@ export default async function userStatsRoutes(app, { users, redis, config, setti
       users.countDocuments({ friends: { $elemMatch: { u: ul, t: true } } }),
     ]);
     // score + Social verdict from the shared calculation module
-    const { score, trusted } = cocoScore({ verifiedBy, trustedBy }, target.createdAt);
-    return { u: ul, addedBy, verifiedBy, trustedBy, coco: score, socialTrusted: trusted };
+    const { score, trusted } = cocoScore(
+      { verifiedBy, trustedBy, badgePoints: badgeScore(badgesFor(target), config) },
+      target.createdAt,
+    );
+    return { u: ul, addedBy, verifiedBy, trustedBy, coco: score, socialTrusted: trusted, premium: target.premium === true };
   });
 }

@@ -85,7 +85,15 @@ export const config = {
   // names may not START with these either (brand impersonation): covers the
   // app name 'CoCoNo' in its dashed domain spelling too
   reservedUsernamePrefixes: listOf(env.RESERVED_USERNAME_PREFIXES, ['cocono', 'co-co-no']),
-  maxDevicesDefault: numOf(env.MAX_DEVICES, 3),
+  maxDevicesDefault: numOf(env.MAX_DEVICES, 3), // legacy seed value; enforcement uses lib/devicePolicy.js
+
+  // Device-cap policy by account state (see lib/devicePolicy.js): unverified
+  // devices are a spam/abuse surface, so the free tier is one device, a
+  // human-verified account two, premium five. Admin can pin any number via
+  // the per-user override.
+  deviceLimitUnverified: numOf(env.DEVICE_LIMIT_UNVERIFIED, 1),
+  deviceLimitVerified: numOf(env.DEVICE_LIMIT_VERIFIED, 2),
+  deviceLimitPremium: numOf(env.DEVICE_LIMIT_PREMIUM, 5),
 
   signupIpLimit: numOf(env.SIGNUP_IP_LIMIT, 20),
   signupIpWindowSec: numOf(env.SIGNUP_IP_WINDOW_SEC, IP_TIME_WINDOW),
@@ -182,6 +190,13 @@ export const config = {
   cocoTrustMinAgeDays: numOf(env.COCO_TRUST_MIN_AGE_DAYS, 30),
   // distinct trusted vouches required for Social: Trusted (1 is not a network)
   cocoTrustMinVouchers: numOf(env.COCO_TRUST_MIN_VOUCHERS, 2),
+  // flat reputation gift for PREMIUM subscribers (gold certificate)
+  cocoPremiumBonus: numOf(env.COCO_PREMIUM_BONUS, 5),
+  // accounts created before this instant are Early-Bird eligible (capped)
+  earlyBirdDeadline: env.EARLY_BIRD_DEADLINE || '2026-12-31T23:59:59Z',
+  // badge caps (seat counts) — config so ops/tests can shrink them
+  ogBadgeCap: numOf(env.OG_BADGE_CAP, 10),
+  earlyBirdCap: numOf(env.EARLY_BIRD_CAP, 1000),
 
   // Profiles: short bio + tiny avatar image (clients resize before upload;
   // the server enforces anyway). Avatars are delivered ONLY when viewer

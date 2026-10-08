@@ -173,6 +173,9 @@ test('admin: list flags, verify toggle, view + delete ID photo', async () => {
 // --- vouching gate + reputation stats (feature adds) ---
 
 const LIMITS = {
+  // badge awards would shift CoCo numbers — these files test the vouch math
+  earlyBirdDeadline: '2000-01-01T00:00:00Z',
+  ogBadgeCap: 0, // badge points would shift the vouch math under test
   signupIpLimit: 1000, challengeIpLimit: 1000, verifyAccountLimit: 1000, verifyIpLimit: 1000,
   friendsIpLimit: 1000, friendsChangeIpLimit: 1000, idDocIpLimit: 50, idDocAccountLimit: 50,
   userKeysIpLimit: 1000,
@@ -270,13 +273,13 @@ test('user stats: vouch counts are EXCLUSIVE stage buckets', async () => {
 
     const stats = await app.inject({ method: 'GET', url: '/api/users/carol/stats', headers: hB });
     assert.equal(stats.statusCode, 200);
-    assert.deepEqual(stats.json(), { u: 'carol', addedBy: 0, verifiedBy: 0, trustedBy: 1, coco: 3, socialTrusted: false });
+    assert.deepEqual(stats.json(), { u: 'carol', addedBy: 0, verifiedBy: 0, trustedBy: 1, coco: 3, socialTrusted: false, premium: false });
 
     // carol's own token works too, and stages stay exclusive when a second
     // vouch sits mid-ladder (alice adds+verifies dave… use carol as voucher)
     await trustAndVerifyTargetStep2(app, tC, hB);
     const bStats = await app.inject({ method: 'GET', url: '/api/users/bobby/stats', headers: { authorization: `Bearer ${tC}` } });
-    assert.deepEqual(bStats.json(), { u: 'bobby', addedBy: 0, verifiedBy: 1, trustedBy: 0, coco: 1, socialTrusted: false });
+    assert.deepEqual(bStats.json(), { u: 'bobby', addedBy: 0, verifiedBy: 1, trustedBy: 0, coco: 1, socialTrusted: false, premium: false });
 
     // unknown -> 404, counts never expose WHO
     assert.equal((await app.inject({ method: 'GET', url: '/api/users/nosuchuser/stats', headers: hB })).statusCode, 404);

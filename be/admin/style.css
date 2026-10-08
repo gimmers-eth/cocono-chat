@@ -101,13 +101,33 @@ details.diag summary { display: flex; gap: 0.6rem; align-items: center; flex-wra
 #user-overlay[hidden] { display: none; }
 #user-panel {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 41;
-  width: 26rem; max-width: 92vw; overflow-y: auto;
+  width: 44rem; max-width: 94vw; overflow-y: auto;
   background: var(--panel); border-left: 1px solid var(--line);
   padding: 1rem 1.25rem 2rem;
   box-shadow: -12px 0 32px rgba(0, 0, 0, 0.45);
 }
 #user-panel[hidden] { display: none; }
-.pu-bar { display: flex; align-items: center; justify-content: space-between; margin: 0 0 .5rem; }
+.pu-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: .75rem;
+  margin: 0 0 .5rem; position: sticky; top: 0; background: var(--panel); z-index: 2;
+  padding: .35rem 0; border-bottom: 1px solid var(--line);
+}
+.pu-bar-left { display: flex; align-items: center; gap: .9rem; min-width: 0; flex-wrap: wrap; }
+#user-panel-title { margin: 0; white-space: nowrap; }
+/* Tabs styled after the client's settings drawer strip */
+.up-tabs {
+  display: flex; gap: .25rem; border-bottom: 1px solid var(--line);
+  overflow-x: auto; scrollbar-width: none; margin: 0;
+}
+.up-tabs::-webkit-scrollbar { display: none; }
+.uptab {
+  background: none; border: 0; border-bottom: 2px solid transparent;
+  color: var(--dim); font: inherit; font-size: .85rem; cursor: pointer;
+  padding: .45rem .65rem; white-space: nowrap; border-radius: 8px 8px 0 0;
+}
+.uptab:hover { color: var(--text); background: rgba(255, 255, 255, 0.045); }
+.uptab.active { color: var(--text); border-bottom-color: var(--accent); }
+.pu-bio { margin: .1rem 0 0; white-space: pre-wrap; }
 .pu-bar h2 { margin: 0; font-size: 1rem; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
 .pu-id strong { font-size: 1.05rem; }
 #user-panel .sec { border-top: 1px solid var(--line); padding: .85rem 0; }
@@ -169,6 +189,9 @@ details.diag summary { display: flex; gap: 0.6rem; align-items: center; flex-wra
   display: block; background: rgba(239, 105, 117, 0.14); border: 1px solid var(--danger);
   color: #f2a5a5; border-radius: 8px; padding: .6rem .8rem; margin-bottom: .75rem; font-size: .88rem;
 }
+/* display:block beats the UA [hidden] rule — without this the OFF banner
+   shows regardless of state (the exact bug reported) */
+.rl-banner[hidden] { display: none; }
 
 /* Per-device IP-flap meter on the user panel device rows */
 .flap-meter {
@@ -178,3 +201,17 @@ details.diag summary { display: flex; gap: 0.6rem; align-items: center; flex-wra
 .flap-meter:hover { color: var(--text); border-color: var(--accent); }
 .flap-blocked { color: #f2a5a5; border-color: var(--danger); font-weight: 600; }
 .flap-cap { width: 4.2rem; padding: .12rem .4rem; font-size: .8rem; }
+
+/* Premium gold certificate + relationships (admin) */
+.badge.gold-badge {
+  background: rgba(240, 192, 74, 0.16); color: #f0c04a; border: 1px solid rgba(240, 192, 74, 0.5);
+  font-weight: 600;
+}
+.rel-table { width: 100%; font-size: .85rem; }
+.rel-table th { color: var(--dim); font-weight: 500; font-size: .74rem; text-transform: uppercase; text-align: left; }
+.rel-table td { padding: .35rem .5rem; border-bottom: 1px solid var(--line); }
+.rel-table button.linkish { background: none; border: 0; color: var(--accent); cursor: pointer; font: inherit; padding: 0; }
+.rel-table button.linkish:hover { text-decoration: underline; }
+.rel-yes { color: #6fbf73; font-weight: 700; }
+#user-relations { padding-top: .25rem; }
+#user-relations h3 { margin: .2rem 0 .5rem; font-size: .8rem; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }

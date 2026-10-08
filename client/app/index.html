@@ -92,7 +92,7 @@
           <img id="me-avatar-img" class="avatar avatar-img" alt="" hidden />
           <span id="me-avatar" class="avatar" aria-hidden="true"></span>
           <span class="me-text">
-            <span class="me-line"><span id="me-name" class="me-name"></span><span id="me-verify-badge"></span></span>
+            <span class="me-line"><span id="me-name" class="me-name"></span><span id="me-premium-badge" class="badge-slot"></span><span id="me-verify-badge"></span></span>
             <button id="btn-self-verify" class="linkish verify-link" hidden title="Verify your identity">Get verified</button>
           </span>
         </div>
@@ -149,7 +149,7 @@
             <img id="chat-peer-avatar" class="chat-avatar" alt="" hidden />
             <span id="chat-peer-initial" class="avatar chat-avatar" aria-hidden="true"></span>
             <span class="chat-peer-text">
-              <span class="chat-peer-name"><span id="chat-peer-status" class="peer-status"></span><span id="chat-peer"></span><span id="chat-peer-badge" class="badge-slot"></span></span>
+              <span class="chat-peer-name"><span id="chat-peer-status" class="peer-status"></span><span id="chat-peer"></span><span id="chat-peer-premium" class="badge-slot"></span><span id="chat-peer-badge" class="badge-slot"></span></span>
               <span id="chat-sub" class="muted small sub-preview"></span>
             </span>
           </button>
@@ -215,7 +215,7 @@
           <img id="profile-own-avatar" class="avatar own-avatar" alt="" hidden />
           <span id="profile-own-initial" class="avatar own-avatar" aria-hidden="true"></span>
           <span class="profile-idtext">
-            <span class="profile-nameline"><span id="profile-own-name"></span></span>
+            <span class="profile-nameline"><span id="profile-own-name"></span><span id="profile-own-premium" class="badge-slot"></span></span>
           </span>
         </div>
         <input id="profile-avatar-input" type="file" accept="image/png,image/jpeg" hidden />
@@ -230,6 +230,13 @@
         <p class="muted small bio-meta"><span id="profile-bio-count">0</span>/250</p>
         <p class="muted small bio-meta">Photos and text save automatically — changes are yours to tweak, the chip confirms each one.</p>
         <p class="muted small bio-meta">Your photo is only shown to users you have added <em>and</em> who have added you back — unfriending hides it both ways immediately.</p>
+        <h3 class="profile-h3">Badges</h3>
+        <div id="own-badges" class="badge-row badge-row-pick"></div>
+        <p id="own-badges-none" class="muted small bio-meta">No badges earned yet — badges come from being early, being first, and supporting the platform.</p>
+        <div class="row-actions profile-actions">
+          <button id="btn-badge-none" class="btn btn-small">Show no badge</button>
+        </div>
+        <p class="muted small bio-meta">Tap a badge to wear it next to your name.</p>
         <div class="row-actions profile-actions profile-preview-row">
           <button id="btn-profile-preview" class="btn btn-small" data-icon="profile">Preview my profile</button>
         </div>
@@ -421,7 +428,7 @@
         <img id="profile-avatar-img" alt="" hidden />
         <span id="profile-avatar" class="avatar" aria-hidden="true"></span>
         <span class="profile-idtext">
-          <span class="profile-nameline"><span id="profile-status-icon" class="peer-status"></span><span id="profile-name"></span></span>
+          <span class="profile-nameline"><span id="profile-status-icon" class="peer-status"></span><span id="profile-name"></span><span id="profile-premium" class="badge-slot"></span></span>
           <span id="profile-coco" class="coco coco-hero" hidden></span>
         </span>
       </div>
@@ -429,6 +436,13 @@
       <section class="profile-section" id="profile-bio-section" hidden>
         <h3>Bio</h3>
         <p id="profile-peer-bio" class="bio-text"></p>
+      </section>
+
+      <section class="profile-section" id="profile-badges-section">
+        <h3>Badges</h3>
+        <div id="profile-badges" class="badge-row"></div>
+        <p id="profile-badges-dates" class="muted small badge-dates" hidden></p>
+        <p id="profile-badges-none" class="muted small" hidden>This user hasn't earned any badges yet.</p>
       </section>
 
       <section class="profile-section">
@@ -445,6 +459,25 @@
       </section>
     </div>
   </aside>
+
+  <!-- Premium certificate explainer: opened by clicking the gold badge on
+       any profile sheet. -->
+  <div id="premium-overlay" class="overlay" hidden></div>
+  <section id="premium-modal" class="diag-modal" role="dialog" aria-modal="true" aria-labelledby="premium-title" hidden>
+    <header class="drawer-head">
+      <h2 id="premium-title">Premium</h2>
+      <button id="btn-premium-close" class="icon-btn" title="Close" data-icon="close"></button>
+    </header>
+    <p class="premium-hero" id="premium-modal-hero"></p>
+    <p id="premium-modal-text" class="muted"></p>
+    <p id="premium-modal-desc" class="muted small"></p>
+    <p id="premium-modal-awarded" class="muted small"></p>
+    <p class="premium-points" id="premium-modal-points">+ 5 CoCo</p>
+    <div class="row-actions" id="badge-wear-row" hidden>
+      <button id="btn-badge-wear" class="btn btn-small btn-primary">Wear it next to my name</button>
+      <button id="btn-badge-nowear" class="linkish">No thanks</button>
+    </div>
+  </section>
 
   <!-- Forward dialog: plaintext preview of the message being forwarded.
        Sends the SAME text to another peer through the normal E2EE path. -->

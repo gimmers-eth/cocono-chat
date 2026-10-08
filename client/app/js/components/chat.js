@@ -12,8 +12,9 @@
 import { $, setStatus, setChatOpen, fmtTime, confirmModal, toast } from '../ui.js';
 import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
-import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl } from './peername.js';
+import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl, premiumBadgeEl } from './peername.js';
 import { safetyNumber } from '../identity.js';
+import { BADGE_UI, nameChipEl } from '../badges.js';
 import { errorText, humanError } from '../errors.js';
 import {
   saveMessage, updateMessage, messagesWith, markRead, allMessages,
@@ -111,6 +112,14 @@ export function createChat({ client, onHomeRefresh }) {
   // admin-checked real-person flag of the open peer; KNOWN only when a
   // key lookup actually succeeded (offline/ghost chats show no badge)
   let peerIdentityVerified = false;
+  let peerIdentityPremium = false; // gold certificate tier of the open peer
+  let peerDisplay = null;        // peer's chosen name badge (from keys/profile)
+  let profileSubject = null;       // ul whose profile sheet is currently open
+  let profileBadges = [];          // held badges [{id, at}] of the sheet owner
+  let profileDisplay = null;       // their chosen name badge
+  let sheetPremium = false;        // premium flag of the sheet owner (fallback chip)
+  const badgeModalQueue = [];      // new-award modals waiting their turn
+  let badgeModalOpen = null;       // badge id currently shown
   let peerJoinedAt = null; // "joined" date from the live key lookup
   let peerIdentityKnown = false;
 
@@ -120,11 +129,46 @@ export function createChat({ client, onHomeRefresh }) {
     badgeEl.replaceChildren(...(peerIdentityKnown && !peerIdentityVerified ? [unverifiedBadgeEl()] : []));
   }
 
+  // Refresh a peer's public data (avatar + PREMIUM). Unthrottled on purpose:
+  // opening a chat and opening the profile sheet both demand the freshest
+  // certificate — @premium-1's status must not hide behind a 5-minute cache.
+  // The avatar write fires AVATARS_EVENT, which repaints the sidebar's badges.
   function primePeerProfile(peer) {
     if (!peer) return;
     client.viewProfile(peer)
-      .then((prof) => rememberPeerAvatar(peer, prof.avatar))
+      .then((prof) => {
+        rememberPeerAvatar(peer, prof.avatar);
+        rememberPeerVerified(peer, undefined, prof.premium);
+        if (peer === currentPeer) {
+          peerIdentityPremium = !!prof.premium;
+          peerDisplay = prof.displayBadge ?? null;
+          renderPremiumMarks(); // chat head only; the sheet renders from its own fetch
+        }
+      })
       .catch(() => {});
+  }
+
+  function renderNameChip(el, badgeId, heroClass) {
+    if (!el) return;
+    el.replaceChildren();
+    if (!badgeId) return;
+    const chip = nameChipEl(badgeId);
+    if (chip && heroClass) chip.classList.add(heroClass);
+    if (chip) el.append(chip);
+  }
+
+  // Chat-head + open-sheet name chips follow the display badge together.
+  function renderPremiumMarks() {
+    renderNameChip($('chat-peer-premium'), peerDisplay);
+    const sheet = $('profile-premium');
+    if (sheet && !$('profile-modal').hidden && profileSubject) {
+      // '' is the explicit "no badge" choice; the premium fallback only
+      // serves peers whose view predates the displayBadge field
+      // '' is the explicit "no badge" choice; otherwise the worn badge, with
+      // the premium flag as the legacy fallback for both self and peers
+      const id = profileDisplay === '' ? null : (profileDisplay || (sheetPremium ? 'premium' : null));
+      renderNameChip(sheet, id, 'profile-premium-badge');
+    }
   }
 
   // chat-head avatar from the mutual-add cache (sidebar renders the same map)
@@ -672,6 +716,30 @@ export function createChat({ client, onHomeRefresh }) {
     [PS.TRUSTED]: ['ok', 'You: Trusted', 'You verified the number and trust this account — that trust counts as a public vouch in their reputation.'],
   };
 
+  function renderProfileBadges() {
+    const row = $('profile-badges');
+    const none = $('profile-badges-none');
+    if (!row) return;
+    row.replaceChildren();
+    const held = (profileBadges ?? []).filter((b) => BADGE_UI.has(b.id));
+    if (none) none.hidden = held.length > 0;
+    row.hidden = held.length === 0;
+    for (const b of held) {
+      const chip = BADGE_UI.get(b.id).chip();
+      chip.dataset.owner = profileSubject ?? currentPeer ?? '';
+      row.append(chip);
+    }
+    // awarded dates: bottom-left of the badge area, one quiet line
+    const dates = $('profile-badges-dates');
+    if (dates) {
+      const withDates = held.filter((b) => b.at);
+      dates.textContent = withDates.length
+        ? `Awarded ${withDates.map((b) => `${BADGE_UI.get(b.id).label} ${new Date(b.at).toLocaleDateString()}`).join(' · ')}`
+        : '';
+      dates.hidden = !withDates.length;
+    }
+  }
+
   async function renderProfileView() {
     if (!currentPeer) return;
     $('profile-name').textContent = currentPeer;
@@ -760,7 +828,7 @@ export function createChat({ client, onHomeRefresh }) {
           : 'Nobody vouches for this account yet. Be extra careful: trust must be earned here, not assumed.');
       rep.textContent = `Vouched by ${stats.addedBy} added · ${stats.verifiedBy} verified · ${stats.trustedBy} trusted`;
       rep.hidden = false;
-      coco.textContent = `CoCo No Social Score: ${stats.coco}`;
+      coco.textContent = `CoCo: ${stats.coco}`;
       coco.hidden = false;
     } else {
       setRow(socialState, socialNote, '', 'Social: Unknown', 'Reputation counts need a connection.');
@@ -774,9 +842,24 @@ export function createChat({ client, onHomeRefresh }) {
   async function openProfileView() {
     if (!currentPeer) return;
     closeChatOpts(); // the sheet replaces the menu, never stacks on it
+    profileSubject = currentPeer;
+    // one authoritative fetch for the sheet: photo policy, bio, badges, name
+    // chip — all fresh, exactly as this viewer is allowed to see them
+    try {
+      const prof = await client.viewProfile(currentPeer);
+      profileBadges = prof?.badges ?? [];
+      profileDisplay = prof?.displayBadge ?? null;
+      sheetPremium = !!prof?.premium;
+    } catch { profileBadges = []; }
+    primePeerProfile(currentPeer); // avatar/premium cache update stays
     await renderProfileView();
     $('profile-overlay').hidden = false;
     $('profile-modal').hidden = false;
+    // chips/badges draw AFTER the sheet is visible — renderPremiumMarks
+    // guards on visibility, so calling it earlier silently skipped the top
+    // name badge (the bug: selected badge missing on the profile header)
+    renderProfileBadges();
+    renderPremiumMarks(); // name chip = their chosen badge (premium fallback inside)
     $('profile-modal').focus?.();
   }
 
@@ -790,7 +873,12 @@ export function createChat({ client, onHomeRefresh }) {
     try { prof = await client.viewProfile(meUl); } catch { /* offline */ }
     if (prof) Promise.resolve(rememberPeerAvatar(meUl, prof.avatar ?? null)).catch(() => {});
     try { stats = await client.userStats(meUl); } catch { /* offline */ }
+    profileSubject = meUl;
+    profileBadges = prof?.badges ?? (me?.premium ? [{ id: 'premium', at: me?.premiumAt ?? null }] : []);
+    profileDisplay = prof?.displayBadge ?? me?.displayBadge ?? null;
+    sheetPremium = !!prof?.premium || !!me?.premium;
     $('profile-name').textContent = meUl;
+    renderProfileBadges();
     // No me.verified gate here: the profile endpoint already IS the policy
     // (owner always sees their own photo; others only on mutual+verified),
     // and stacking a second fetch's result over it made the photo vanish
@@ -835,7 +923,7 @@ export function createChat({ client, onHomeRefresh }) {
       $('profile-reputation').textContent =
         `Vouched by ${stats.addedBy} added · ${stats.verifiedBy} verified · ${stats.trustedBy} trusted`;
       $('profile-reputation').hidden = false;
-      $('profile-coco').textContent = `CoCo No Social Score: ${stats.coco}`;
+      $('profile-coco').textContent = `CoCo: ${stats.coco}`;
       $('profile-coco').hidden = false;
     } else {
       setRow($('profile-social-state'), $('profile-social-note'), '', 'Social: unknown',
@@ -850,6 +938,67 @@ export function createChat({ client, onHomeRefresh }) {
     $('profile-modal').hidden = false;
     $('profile-modal').focus?.();
   }
+
+  // Badge detail modal — the premium modal's layout, now for ANY badge:
+  // big animated hero, the owner line, when it was awarded, and the CoCo
+  // points. Queued: if a badge modal is already open (a burst of new awards
+  // from one poll), the next shows once the current one is dismissed.
+  function showBadgeModal(id, { at = null, owner = '', offerWear = false } = {}) {
+    if (badgeModalOpen) { badgeModalQueue.push({ id, at, owner, offerWear }); return; }
+    const def = BADGE_UI.get(id);
+    const el = $('premium-modal');
+    if (!def || !el) return;
+    badgeModalOpen = id;
+    $('premium-title').textContent = def.label;
+    const hero = $('premium-modal-hero');
+    hero.replaceChildren();
+    const art = def.icon(96);
+    if (def.animated) {
+      const wrap = document.createElement('span');
+      wrap.className = 'badge-hero badge-hero-og';
+      art.classList?.add('badge-hero-art');
+      art.style?.removeProperty?.('width'); // hero sizes via CSS
+      art.setAttribute('width', '96');
+      art.setAttribute('height', '96');
+      wrap.append(art);
+      hero.append(wrap);
+    } else {
+      hero.append(art);
+    }
+    $('premium-modal-text').textContent = owner
+      ? `@${owner} earned the ${def.label} badge.`
+      : `You earned the ${def.label} badge!`;
+    $('premium-modal-awarded').textContent = at
+      ? `Awarded ${new Date(at).toLocaleString()}`
+      : '';
+    $('premium-modal-points').textContent = `+ ${def.points} CoCo`;
+    const wearRow = $('badge-wear-row');
+    if (wearRow) wearRow.hidden = !offerWear;
+    $('premium-modal-desc') && ($('premium-modal-desc').textContent = def.blurb ?? '');
+    $('premium-overlay').hidden = false;
+    el.hidden = false;
+  }
+
+  function closeBadgeModal() {
+    badgeModalOpen = null;
+    $('premium-modal').hidden = true;
+    $('premium-overlay').hidden = true;
+    $('badge-wear-row')?.setAttribute('hidden', '');
+    const next = badgeModalQueue.shift();
+    if (next) showBadgeModal(next.id, next);
+  }
+
+  // the earned-badge modal doubles as the opt-in: "wear it next to my name"
+  $('btn-badge-wear')?.addEventListener('click', async () => {
+    const id = badgeModalOpen;
+    closeBadgeModal();
+    if (!id) return;
+    try {
+      await client.setProfile({ displayBadge: id });
+      window.dispatchEvent(new CustomEvent('cocono:badges-changed'));
+    } catch { /* offline — poll/picker will resync */ }
+  });
+  $('btn-badge-nowear')?.addEventListener('click', closeBadgeModal);
 
   function closeProfileView() {
     $('profile-overlay').hidden = true;
@@ -1055,9 +1204,12 @@ export function createChat({ client, onHomeRefresh }) {
     peerIdentityKnown = !!peer;
     peerJoinedAt = peer?.joinedAt ?? null;
     peerIdentityVerified = !!peer?.verified;
+    peerIdentityPremium = !!peer?.premium;
+    peerDisplay = peer?.displayBadge ?? null;
     $('chat-sub').replaceChildren(...chatSubNodes(peer));
     renderIdentityBadge($('chat-peer-badge'));
-    if (peer) await rememberPeerVerified(currentPeer, peerIdentityVerified);
+    renderPremiumMarks();
+    if (peer) await rememberPeerVerified(currentPeer, peerIdentityVerified, peerIdentityPremium);
   }
 
   // Record a security heads-up in the timeline + sync it to all our devices.
@@ -1185,7 +1337,7 @@ export function createChat({ client, onHomeRefresh }) {
       goneApplied = false;
       goneAnnounced = false;
       try {
-        peer = await client.peerKeys(username); // validates existence, caches
+        peer = await client.peerKeys(username, { refresh: true }); // validates existence, refreshes the cached flags (premium!)
       } catch (err) {
         // Deleted account (last device removed => account deleted):
         // enter read-only ghost mode over the local transcript instead of
@@ -1323,6 +1475,7 @@ export function createChat({ client, onHomeRefresh }) {
       if (e.key !== 'Escape') return;
       if (!$('lightbox-overlay')?.hidden) { closeLightbox(); return; }
       if (forwardOpen()) { closeForward(); return; }
+      if (!$('premium-modal')?.hidden) { closeBadgeModal(); return; }
       if (!$('profile-modal')?.hidden) { closeProfileView(); return; }
       if (msgModalOpen()) { closeMsgModal(); return; }
       if (!$('chatopts-modal').hidden) { closeChatOpts(); return; }
@@ -1378,6 +1531,36 @@ export function createChat({ client, onHomeRefresh }) {
     });
     $('btn-profile-close')?.addEventListener('click', closeProfileView);
     $('profile-overlay')?.addEventListener('click', closeProfileView);
+    // clicking a name chip or any badge chip opens its detail modal
+    $('profile-premium')?.addEventListener('click', () => {
+      if (!profileDisplay && !peerIdentityPremium) return;
+      showBadgeModal(profileDisplay ?? 'premium', { owner: profileSubject ?? currentPeer ?? '' });
+    });
+    $('profile-badges')?.addEventListener('click', (e) => {
+      const chip = e.target.closest?.('.badge-chip');
+      if (!chip) return;
+      const held = profileBadges.find((b) => b.id === chip.dataset.badge);
+      showBadgeModal(chip.dataset.badge, { at: held?.at ?? null, owner: chip.dataset.owner || profileSubject || currentPeer || '' });
+    });
+    $('btn-premium-close')?.addEventListener('click', closeBadgeModal);
+    $('premium-overlay')?.addEventListener('click', closeBadgeModal);
+    // fresh awards from the main.js poll → one modal per badge, queued;
+    // plus an OS notification (best-effort: permission/standalone dependent)
+    window.addEventListener('cocono:newbadges', (e) => {
+      const owner = String(client.username ?? '');
+      for (const b of (e.detail ?? [])) {
+        showBadgeModal(b.id, { at: b.at, owner, offerWear: true });
+        const def = BADGE_UI.get(b.id);
+        if (def && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          try {
+            new Notification(`New badge: ${def.label}`, {
+              body: `+${def.points} CoCo — tap to see it. ${def.blurb ?? ''}`.slice(0, 180),
+              tag: `badge-${b.id}`,
+            });
+          } catch { /* notification rejected — the modal still fires */ }
+        }
+      }
+    });
     window.addEventListener(FRIENDS_EVENT, () => { updateTrustUI(); });
     window.addEventListener(AVATARS_EVENT, () => { renderChatAvatar(); });
     $('btn-chat-clear').addEventListener('click', async () => {

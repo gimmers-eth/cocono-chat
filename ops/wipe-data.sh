@@ -30,7 +30,15 @@ export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:/usr/local/bin:/bin:/usr/bin
 REPO="$HOME/cocono-chat"
 
 # Collections that are NOT user data (kept across wipes):
-KEEP='["settings"]'   # 'settings' = admin branding (app name)
+KEEP='["settings"]'   # 'settings' holds app config — but see KEEP_DOCS below
+# Inside settings, only branding is app-level config. Every OTHER settings
+# doc is ops/user-derived state that a wipe must reset:
+#   'limits'  → per-user limit overrides (keyed by username / user:device)
+#   'traffic' → the server-wide rate-limit KILL SWITCH (must not survive
+#               wiped, or a wiped box keeps running with no limits!)
+# Future features: put durable app config under a new KEEP_DOCS id, or it
+# gets wiped (safe by default).
+KEEP_DOCS='["branding"]'
 
 url_from_env() { # $1 = KEY, $2 = default
   local v
@@ -52,6 +60,9 @@ if [ "${1:-}" != "confirm" ]; then
       const n = db.getCollection(c).countDocuments();
       print('   ' + (keep.has(c) ? 'KEEP' : 'DROP') + '  ' + c + '  (' + n + ' docs)');
     }
+    const prune = db.settings.find({ _id: { \$nin: JSON.parse('$KEEP_DOCS') } }, { _id: 1 })
+      .toArray().map(d => d._id);
+    if (prune.length) print('   PRUNE settings docs: ' + prune.join(', ') + ' (per-user limit overrides, rate-limit kill switch -> defaults)');
   "
   echo "   redis: FLUSHDB $REDIS_URL"
   echo "   then:  systemctl --user restart cocono-be cocono-admin"
@@ -66,7 +77,13 @@ mongosh "$MONGO_URL" --quiet --eval "
   const keep = new Set(JSON.parse('$KEEP'));
   for (const c of db.getCollectionNames()) {
     if (c.startsWith('system.')) continue;
-    if (keep.has(c)) { print('   kept   ' + c); continue; }
+    if (keep.has(c)) {
+      if (c === 'settings') {
+        const r = db.settings.deleteMany({ _id: { \$nin: JSON.parse('$KEEP_DOCS') } });
+        print('   pruned   settings (' + r.deletedCount + ' docs removed; kept: ' + JSON.parse('$KEEP_DOCS').join(',') + ')');
+      } else print('   kept   ' + c);
+      continue;
+    }
     db.getCollection(c).drop();
     print('   dropped  ' + c);
   }
@@ -93,7 +110,9 @@ mongosh "$MONGO_URL" --quiet --eval "
     total += n;
     print('   ' + c + ': ' + n);
   }
-  if (total > 0) { print('   !! non-KEEP collections still hold documents'); quit(1); }
-  print('   user data: none left');
+  const strays = db.settings.find({ _id: { \$nin: JSON.parse('$KEEP_DOCS') } }).toArray().map(d => d._id);
+  if (strays.length) { print('   !! settings docs survived: ' + strays.join(',')); quit(1); }
+  if (total > JSON.parse('$KEEP_DOCS').length) { print('   !! non-KEEP collections still hold documents'); quit(1); }
+  print('   user data: none left (badges/awards went with users; limits & kill switch reset to defaults)');
 "
 echo "done — devbox user data wiped (backups + secrets untouched)."

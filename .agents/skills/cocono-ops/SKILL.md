@@ -62,16 +62,21 @@ literal argument `confirm`:
 
 It takes a fresh `ops/backup.sh hourly` first (aborts the wipe if the backup
 fails — restore would be `ops/restore.sh <archive>`), then drops **every
-auto-discovered Mongo collection** except the script's `KEEP` list
-(currently `settings` = admin branding, not user data), `FLUSHDB`s only the
-app's Redis db (never FLUSHALL — db 15 is the test suite's), and restarts
-`cocono-be` + `cocono-admin`.
+auto-discovered Mongo collection** except the script's `KEEP` list,
+`FLUSHDB`s only the app's Redis db (never FLUSHALL — db 15 is the test
+suite's), and restarts `cocono-be` + `cocono-admin`.
+The `settings` collection survives as a collection but is PRUNED BY DOC:
+only `KEEP_DOCS` ids (currently just `branding`) remain. User-keyed config
+(`limits` per-user/per-device overrides) and the rate-limit kill switch
+(`traffic`) are wiped back to defaults — a wiped box must never stay
+un-throttled, and user-keyed config IS user data.
 
 MAINTENANCE CONTRACT (update as we add features): new features that store
 per-user data in Mongo/Redis are covered automatically — **no script edit
-needed** — because collections are auto-discovered and the whole app Redis
-DB is flushed. Edit `KEEP` in the script only when a NEW collection is NOT
-user data (config-ish like branding) and must survive. Client-side state
+needed** — because collections are auto-discovered, settings docs default to
+wiped, and the whole app Redis DB is flushed. Edit `KEEP` only when a NEW
+collection is NOT user data and must survive; add a `KEEP_DOCS` id only for
+durable app config inside `settings`. Client-side state
 (IndexedDB transcripts/identities in users' browsers) is NOT reachable from
 here — the wiped server simply refuses old identities and devices re-pair.
 

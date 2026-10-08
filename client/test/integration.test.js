@@ -33,7 +33,7 @@ test('sdk: register -> me -> devices -> logout -> login', async (t) => {
   const { devices, maxDevices } = await alice.devices();
   assert.equal(devices.length, 1);
   assert.equal(devices[0].current, true); // devices have no roles — only the viewer marker
-  assert.equal(maxDevices, 3);
+  assert.equal(maxDevices, 5); // unverified policy tier (test harness relaxes it to 5)
 
   alice.logout();
   assert.equal(alice.token, null);

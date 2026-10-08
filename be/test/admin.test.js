@@ -50,14 +50,17 @@ test('PATCH max-devices updates the account cap', async () => {
       payload: { maxDevices: 7 },
     });
     assert.equal(res.statusCode, 200);
-    assert.deepEqual(res.json(), { ul: 'alice', maxDevices: 7 });
+    assert.deepEqual(res.json(), { ul: 'alice', maxDevicesOverride: 7 });
 
+    // the PATCH writes the OVERRIDE (policy tiers stay intact underneath)
     const doc = await users.findOne({ ul: 'alice' });
-    assert.equal(doc.maxDevices, 7);
+    assert.equal(doc.maxDevicesOverride, 7);
 
     // The users listing reflects the new cap.
     const list = await admin.inject({ method: 'GET', url: '/api/admin/users' });
-    assert.equal(list.json().find((u) => u.ul === 'alice').maxDevices, 7);
+    const row = list.json().find((u) => u.ul === 'alice');
+    assert.equal(row.maxDevices, 7);
+    assert.equal(row.maxDevicesOverride, 7);
   } finally {
     await teardown();
   }
@@ -72,7 +75,7 @@ test('PATCH max-devices is case-insensitive on the username', async () => {
       payload: { maxDevices: 5 },
     });
     assert.equal(res.statusCode, 200);
-    assert.equal((await users.findOne({ ul: 'alice' })).maxDevices, 5);
+    assert.equal((await users.findOne({ ul: 'alice' })).maxDevicesOverride, 5);
   } finally {
     await teardown();
   }
@@ -81,7 +84,9 @@ test('PATCH max-devices is case-insensitive on the username', async () => {
 test('PATCH max-devices rejects invalid values', async () => {
   const { admin, users, teardown } = await setupAdmin();
   try {
-    for (const bad of [0, -1, 2.5, 1001, 'abc', null]) {
+    // null is now MEANINGFUL (clear the override → policy cap), so it is not
+    // in the reject set
+    for (const bad of [0, -1, 2.5, 1001, 'abc', '5']) {
       const res = await admin.inject({
         method: 'PATCH',
         url: '/api/admin/users/alice/max-devices',
@@ -96,8 +101,20 @@ test('PATCH max-devices rejects invalid values', async () => {
     });
     assert.equal(missing.statusCode, 400);
 
-    // Nothing changed.
-    assert.equal((await users.findOne({ ul: 'alice' })).maxDevices, 3);
+    // Nothing changed (the legacy stored field is untouched by the override
+    // PATCH; policy is what GET surfaces).
+    const doc = await users.findOne({ ul: 'alice' });
+    assert.equal(doc.maxDevicesOverride, undefined);
+    assert.equal(doc.maxDevices, 3);
+
+    // null CLEARS the override back to policy: set, clear, effective drops
+    await admin.inject({ method: 'PATCH', url: '/api/admin/users/alice/max-devices', payload: { maxDevices: 9 } });
+    const cleared = await admin.inject({
+      method: 'PATCH', url: '/api/admin/users/alice/max-devices', payload: { maxDevices: null },
+    });
+    assert.equal(cleared.statusCode, 200);
+    assert.deepEqual(cleared.json(), { ul: 'alice', maxDevicesOverride: null });
+    assert.equal((await users.findOne({ ul: 'alice' })).maxDevicesOverride, undefined);
   } finally {
     await teardown();
   }

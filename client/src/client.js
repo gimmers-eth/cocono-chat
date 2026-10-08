@@ -395,12 +395,18 @@ export class CoconoClient extends Emitter {
   }
 
   /** Update own bio and/or avatar (base64 JPEG, resized client-side first). */
-  async setProfile({ bio, avatar, clearAvatar } = {}) {
+  async setProfile({ bio, avatar, clearAvatar, displayBadge } = {}) {
     const patch = {};
     if (bio !== undefined) patch.bio = bio;
     if (avatar !== undefined) patch.avatar = avatar;
     if (clearAvatar) patch.clearAvatar = true;
+    if (displayBadge !== undefined) patch.displayBadge = displayBadge;
     return this.api.setProfile(this.#requireToken(), patch);
+  }
+
+  /** Badge poll: held list + unseen `new` awards (the read acks them). */
+  async pollBadges() {
+    return this.api.badges(this.#requireToken());
   }
 
   /** Peer profile: bio always, avatar ONLY on mutual add (server rule). */

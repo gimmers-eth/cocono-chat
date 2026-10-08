@@ -4,6 +4,10 @@ import { setupApp, makeClient, randomAesKey, nowEpoch } from './helpers.js';
 
 // Relaxed limits so the happy-path tests don't trip the limiter.
 const LIMITS = {
+  // multi-device transport tests ride a generous policy cap — the shipped
+  // default (unverified = 1 device) gets its own dedicated tests in
+  // premium.test.js
+  deviceLimitUnverified: 5,
   signupIpLimit: 1000,
   challengeIpLimit: 1000,
   verifyAccountLimit: 1000,
@@ -95,7 +99,7 @@ test('device flow: enroll -> approve -> second device logs in', async () => {
     });
     const body = listMain.json();
     assert.equal(body.devices.length, 2);
-    assert.equal(body.maxDevices, 3);
+    assert.equal(body.maxDevices, 5); // unverified policy tier (test LIMITS relax it to 5)
     const mainDev = body.devices.find((dev) => dev.id === dMain);
     const secondDev = body.devices.find((dev) => dev.id === dSecond);
     assert.ok(mainDev.current && !secondDev.current, 'only the viewer-marker remains — devices have no roles');
@@ -112,7 +116,8 @@ test('device flow: enroll -> approve -> second device logs in', async () => {
 });
 
 test('enroll rejects unknown accounts, bad signatures, duplicates and limits', async () => {
-  const { app, teardown } = await setupApp(LIMITS);
+  // cap pinned to 3 so the 'fill to limit then overflow' flow stays real
+  const { app, teardown } = await setupApp({ ...LIMITS, deviceLimitUnverified: 3 });
   try {
     const u = 'alice';
     const dMain = 'main-device-0001';

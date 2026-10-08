@@ -282,8 +282,36 @@ function notifyFriends() {
 // Filled whenever we resolve a peer's keys (chat open/send); the sidebar
 // renders badges from here without per-row network calls.
 
-export async function rememberPeerVerified(peer, verified) {
-  await withStore('readwrite', (s) => s.put({ peer: String(peer).toLowerCase(), verified: !!verified }), PEERS);
+// Patch-merge: endpoints that only know one fact (peerKeys → verified,
+// viewProfile → premium) update the record without clobbering the other.
+export async function rememberPeerVerified(peer, verified, premium) {
+  const ul = String(peer).toLowerCase();
+  const cur = (await withStore('readonly', (s) => s.get(ul), PEERS)) ?? { peer: ul };
+  const next = { ...cur };
+  if (verified !== undefined) next.verified = !!verified;
+  if (premium !== undefined) next.premium = !!premium;
+  await withStore('readwrite', (s) => s.put(next), PEERS);
+}
+
+// The badge a peer chose to wear next to their name (null = server fallback)
+export async function rememberPeerChip(peer, chip) {
+  const ul = String(peer).toLowerCase();
+  const cur = (await withStore('readonly', (s) => s.get(ul), PEERS)) ?? { peer: ul };
+  await withStore('readwrite', (st) => st.put({ ...cur, display: chip ?? null }), PEERS);
+}
+
+export async function loadPeerChips() {
+  const rows = await withStore('readonly', (s) => s.getAll(), PEERS);
+  const map = new Map();
+  for (const r of rows ?? []) if (r.display) map.set(r.peer, r.display);
+  return map;
+}
+
+export async function loadPeerPremiums() {
+  const rows = await withStore('readonly', (s) => s.getAll(), PEERS);
+  const map = new Map();
+  for (const r of rows ?? []) map.set(r.peer, !!r.premium);
+  return map;
 }
 
 // --- peer avatar cache (sidebar/chat-head photos without per-row fetches) ---

@@ -92,6 +92,11 @@ export class Api {
     return this.#request('/api/me/stage-limits', { token });
   }
 
+  // badge poll: held list + unseen `new` awards (the read acks them)
+  badges(token) {
+    return this.#request('/api/me/badges', { token });
+  }
+
   appInfo() {
     return this.#request('/api/app-info');
   }

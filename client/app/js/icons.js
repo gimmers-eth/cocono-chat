@@ -41,7 +41,7 @@ export const ICONS = {
   friendAdd: 'fa-user-shield',      // action: add as friend
   friendRemove: 'fa-user-minus',    // action: remove (red)
   identity: 'fa-fingerprint',       // safety-number panel
-  verifyBadge: 'fa-certificate',    // RESERVED for premium status — not ID verification
+  premium: 'fa-certificate',          // PREMIUM gold certificate (was long reserved for exactly this)
   identityAlert: 'fa-circle-exclamation', // peer is NOT identity-verified (red)
   // settings drawer tabs
   tabDevices: 'fa-mobile-screen-button',

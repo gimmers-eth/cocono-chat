@@ -28,8 +28,9 @@ import { Ratelimited } from './types/ratelimited.js';
 import { IPRatelimited } from './types/ipratelimited.js';
 import { IpFlapper } from './types/ipflapper.js';
 import { Friendly } from './types/friendly.js';
+import { Premium } from './types/premium.js';
 
-const TYPES = [Normal, Verified, Friendly, Diagnostic, Ratelimited, IPRatelimited, IpFlapper];
+const TYPES = [Normal, Verified, Premium, Friendly, Diagnostic, Ratelimited, IPRatelimited, IpFlapper];
 
 function parseArgs(argv) {
   const args = { count: 3, types: null, fresh: false, keepLimits: false };

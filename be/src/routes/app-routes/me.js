@@ -2,6 +2,7 @@ import { fail, requireAuth, limited } from '../shared.js';
 import { rateLimit } from '../../lib/rateLimit.js';
 import { b64uDecode } from '../../lib/b64u.js';
 import { effectiveLimit } from '../../lib/limits.js';
+import { badgesFor, evaluateBadges } from '../../lib/badges.js';
 
 const ID_DOC_TYPES = new Set(['image/png', 'image/jpeg']);
 const ID_DOC_MIN_BYTES = 128; // reject trivially-empty "photos"
@@ -48,8 +49,38 @@ export default async function meRoutes(app, { users, redis, config, idDocs, sett
       d: request.auth.d,
       createdAt: user.createdAt,
       verified: !!user.verified,
+      premium: !!user.premium,
+      badges: badgesFor(user),
+      displayBadge: user.displayBadge ?? null,
       idDoc,
       canUploadId,
+    };
+  });
+
+  // GET /api/me/badges — the client poll (login + every 60s while signed in)
+  // IS the dispatch channel: `new` carries badges the user has not seen in a
+  // modal yet; the read ACKs them (badgesSeen), so a badge nags exactly once
+  // across all their devices… a device that already showed it just sees [].
+  // The poll also nudges re-evaluation (new badges shipped since last login);
+  // the serial queue makes concurrent polls cheap no-ops.
+  app.get('/api/me/badges', async (request, reply) => {
+    const denied = requireAuth(request, reply);
+    if (denied) return denied;
+    const ul = request.auth.sub;
+    let user = await users.findOne({ ul });
+    if (!user) return fail(reply, 'unknown_account', 'No such user', 404);
+    await evaluateBadges(users, config, ul);
+    user = await users.findOne({ ul }); // re-read: eval may have just awarded
+    const held = badgesFor(user);
+    const seen = new Set(user.badgesSeen ?? []);
+    const fresh = held.filter((b) => !seen.has(b.id));
+    if (fresh.length) {
+      await users.updateOne({ ul }, { $set: { badgesSeen: held.map((b) => b.id) } });
+    }
+    return {
+      badges: held,
+      new: fresh,
+      displayBadge: user.displayBadge ?? null,
     };
   });
 
