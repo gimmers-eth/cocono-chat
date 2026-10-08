@@ -50,6 +50,31 @@ A `cocono-be` restart is invisible to users beyond a brief WS reconnect, but
 **restart mongo/redis loses in-flight state** (queues live in Redis!) - prefer
 letting them run.
 
+## Wiping all user data (dev reset)
+
+`./ops/wipe-data.sh` — DRY RUNS by default; actually wipes only with the
+literal argument `confirm`:
+
+```bash
+./ops/wipe-data.sh            # show what would drop (collection + doc counts)
+./ops/wipe-data.sh confirm    # backup -> drop -> flush -> restart
+```
+
+It takes a fresh `ops/backup.sh hourly` first (aborts the wipe if the backup
+fails — restore would be `ops/restore.sh <archive>`), then drops **every
+auto-discovered Mongo collection** except the script's `KEEP` list
+(currently `settings` = admin branding, not user data), `FLUSHDB`s only the
+app's Redis db (never FLUSHALL — db 15 is the test suite's), and restarts
+`cocono-be` + `cocono-admin`.
+
+MAINTENANCE CONTRACT (update as we add features): new features that store
+per-user data in Mongo/Redis are covered automatically — **no script edit
+needed** — because collections are auto-discovered and the whole app Redis
+DB is flushed. Edit `KEEP` in the script only when a NEW collection is NOT
+user data (config-ish like branding) and must survive. Client-side state
+(IndexedDB transcripts/identities in users' browsers) is NOT reachable from
+here — the wiped server simply refuses old identities and devices re-pair.
+
 ## Deploying updates
 
 **Use `./update.sh`** — it IS the deploy flow: fetch → fast-forward →
