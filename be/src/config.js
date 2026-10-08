@@ -98,7 +98,9 @@ export const config = {
 
   // Messaging (milestone 3)
   msgAccountLimit: numOf(env.MSG_ACCOUNT_LIMIT, 120),
-  msgAccountWindowSec: numOf(env.MSG_ACCOUNT_WINDOW_SEC, DEFAULT_TIME_WINDOW),
+  // Message send (per account) shares the tight 5-minute window too
+  // (2026-10 policy) — env MSG_ACCOUNT_WINDOW_SEC still overrides.
+  msgAccountWindowSec: numOf(env.MSG_ACCOUNT_WINDOW_SEC, 300),
   msgIpLimit: numOf(env.MSG_IP_LIMIT, 480),
   // Retention: how long PULLED copies stay server-side (expireAt = pulledAt +
   // this) for re-delivery via 'resync'. Never-pulled copies stay queued.
