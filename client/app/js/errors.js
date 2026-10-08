@@ -54,6 +54,7 @@ export const ERROR_TEXT = {
   friends_full: 'Friends list is full.',
   not_friends: 'Add them first.',
   stage_required: 'Verify the safety number first.',
+  not_mutual: 'They must add you back first — verification needs a mutual add.',
 
   // --- identity verification / ID photo ---
   already_verified: 'Already verified.',

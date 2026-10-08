@@ -365,6 +365,9 @@ img.own-avatar { border-radius: 50%; }
 .linkish i { margin-right: .45em; }
 .icon-danger { color: var(--danger) !important; }
 .icon-warn { color: var(--warning) !important; }
+/* safety-number panel: the "they must add you back" gate, same amber tier */
+.identity-mutual-note { color: var(--warning); font-size: .85rem; margin: .35rem 0 0; }
+.identity-mutual-note i { margin-right: .35em; }
 .icon-friend { color: var(--success) !important; }
 .icon-trust { color: var(--info) !important; }
 

@@ -236,15 +236,25 @@ test('friends: verify + trust stages gate each other; rebind resets both', async
     const alice = makeClient();
     const bobby = makeClient();
     const a = await signupUser(app, alice, 'alice');
-    await signupUser(app, bobby, 'bobby');
+    const b = await signupUser(app, bobby, 'bobby');
     const tokenA = await getToken(app, alice, 'alice', a.d);
     const authA = { authorization: `Bearer ${tokenA}` };
+    const tokenB = await getToken(app, bobby, 'bobby', b.d);
+    const authB = { authorization: `Bearer ${tokenB}` };
 
     // stages need the add first
     assert.equal((await app.inject({ method: 'PUT', url: '/api/me/friends/bobby/verify',
       headers: authA, payload: { verified: true } })).statusCode, 404);
 
     await app.inject({ method: 'PUT', url: '/api/me/friends/bobby', headers: authA });
+
+    // verification is a MUTUAL relation: a one-sided SET is rejected…
+    const oneSided = await app.inject({ method: 'PUT', url: '/api/me/friends/bobby/verify',
+      headers: authA, payload: { verified: true } });
+    assert.equal(oneSided.statusCode, 409);
+    assert.equal(oneSided.json().error, 'not_mutual');
+    // …until bobby adds alice back
+    await app.inject({ method: 'PUT', url: '/api/me/friends/alice', headers: authB });
 
     // trust requires verify (stage ladder is enforced server-side too)
     const earlyTrust = await app.inject({ method: 'PUT', url: '/api/me/friends/bobby/trust',

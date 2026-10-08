@@ -1,5 +1,6 @@
 import { fail } from '../shared.js';
 import { cleanupAccountState, purgeFriendReferences } from '../../lib/accountState.js';
+import { createNotifier } from '../../lib/notify.js';
 
 // Per-account device cap: 1..MAX_DEVICES_CAP. Raising it lets a user enroll
 // more devices; lowering it below the current device count is allowed (the
@@ -9,6 +10,9 @@ const MAX_DEVICES_CAP = 1000;
 // GET /api/admin/users, PATCH max-devices, DELETE user, DELETE device,
 // PUT verified (identity-verification toggle), GET/DELETE id-doc (review).
 export default async function usersRoutes(app, { users, redis, messages, idDocs, profiles }) {
+  // account-review outcomes are invisible to the reviewed user otherwise —
+  // content-free 'identity' nudges (lib/notify.js) make the app re-pull
+  const { notify: notifyAccount, notifyPeers } = createNotifier({ redis, users });
   app.get('/api/admin/users', async () => {
     const docs = await users.find({}, { projection: { _id: 0 } }).sort({ ul: 1 }).toArray();
     const metas = await idDocs.find({}, { projection: { ul: 1, contentType: 1, uploadedAt: 1, _id: 0 } }).toArray();
@@ -48,6 +52,9 @@ export default async function usersRoutes(app, { users, redis, messages, idDocs,
     // Revoking verification also removes the profile photo: it was shown to
     // others under a trust state the admin has just withdrawn.
     if (!verified) await profiles.updateOne({ ul }, { $set: { avatar: null } });
+    await notifyAccount(ul, 'identity');
+    // the avatar vanished from under everyone who follows this account
+    if (!verified) await notifyPeers(ul, 'profile');
     return { ul, verified };
   });
 
@@ -97,7 +104,7 @@ export default async function usersRoutes(app, { users, redis, messages, idDocs,
     await idDocs.deleteOne({ ul }); // never orphan an ID photo
     await profiles.deleteOne({ ul });
     await cleanupAccountState(redis, ul);
-    await purgeFriendReferences(users, ul);
+    await purgeFriendReferences(users, ul, redis);
     if (messages) {
       await messages.deleteMany({ $or: [{ 'to.ul': ul }, { 'from.ul': ul }] });
     }
@@ -127,7 +134,7 @@ export default async function usersRoutes(app, { users, redis, messages, idDocs,
       await idDocs.deleteOne({ ul }); // never orphan an ID photo
       await profiles.deleteOne({ ul });
       await cleanupAccountState(redis, ul);
-      await purgeFriendReferences(users, ul);
+      await purgeFriendReferences(users, ul, redis);
       if (messages) await messages.deleteMany({ $or: [{ 'to.ul': ul }, { 'from.ul': ul }] });
       return { removed: deviceId, devices: 0, accountDeleted: true };
     }

@@ -291,6 +291,16 @@ export function createHome({ client, chat, onLogout }) {
     }
   }
 
+  // NUDGE RESPONDERS (main.js 'notice' router, taxonomy in lib/notify.js):
+  // both just re-run the normal authoritative reads — a 'profile' nudge
+  // means there IS fresh news, so the priming cooldown is dropped once.
+  function refreshPeerProfiles() {
+    avatarPriming.clear();
+    primeProfiles(lastPeers); // also re-primes SELF (adds itself inside)
+    renderConversationList().catch(() => {});
+    paintOwnHeadAvatar().catch(() => {});
+  }
+
   function paintConnection(state) {
     const dot = $('ws-dot');
     dot.className = 'dot ' + (state === 'open' ? 'dot-on' : state === 'connecting' ? 'dot-busy' : 'dot-off');
@@ -299,6 +309,7 @@ export function createHome({ client, chat, onLogout }) {
 
   // ---- avatar plumbing: cached (mutual-add) photos everywhere ----
   const avatarPriming = new Map(); // peer -> last attempt ts (failure cooldown)
+  let lastPeers = []; // current sidebar peers — remembered for profile-nudge re-priming
   function peerAvatarEl(peer, avatars, cls = '') {
     const rec = avatars.get(peer);
     if (rec && rec.avatar) {
@@ -370,6 +381,7 @@ export function createHome({ client, chat, onLogout }) {
       const kb = recency(b[0], b[1]);
       return ka !== kb ? kb - ka : a[0].localeCompare(b[0]);
     });
+    lastPeers = entries.map(([peer]) => peer);
     const frag = document.createDocumentFragment();
     for (const [peer, last] of entries) {
       const li = document.createElement('li');
@@ -754,5 +766,5 @@ export function createHome({ client, chat, onLogout }) {
     wireApproveCode();
   }
 
-  return { wire, paintMe, paintConnection, renderConversationList, renderDevices };
+  return { wire, paintMe, paintConnection, renderConversationList, renderDevices, refreshIdentity: renderIdentity, refreshPeerProfiles };
 }

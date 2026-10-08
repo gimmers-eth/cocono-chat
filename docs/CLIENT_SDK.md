@@ -152,6 +152,7 @@ All on the client itself (`client.on(type, fn)` → returns an `off()` function;
 | `message` | `{mid, peer, from, fromDeviceId, text, ts, self}` | Decrypted incoming message. `ts` is the **server-assigned** receive time (ms epoch) — use it for ordering, never client clocks. `self: true` for a message from another device of your own account (e.g. the other half of a self-chat). |
 | `ack` | `{cid, localId, ok, error?}` | Server accepted/rejected one envelope. A fan-out send to a 2-device peer yields 2 acks with the same `localId`. |
 | `delivered` | `{cid, localId, to}` | A recipient device pulled that copy. Expect one per recipient device. |
+| `notice` | `{what}` | Content-free server nudge: a slice of server-authoritative state this account caches moved because of **someone else** (`what`: `friends`, `gone`, `profile`, `identity` — taxonomy in `be/src/lib/notify.js`). Re-pull that data yourself; never trust the frame for content. Offline = missed; reconcile-on-entry covers it. |
 | `error` | `{error: Error}` | Server error frame or decrypt failure. |
 
 Wire-level error codes on failed acks (`error.code` … see envelope checks in

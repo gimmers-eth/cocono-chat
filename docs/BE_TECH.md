@@ -232,6 +232,7 @@ Wire protocol (JSON frames):
 | s → c | `{type:'msg', id, ts, env}` | incoming message |
 | s → c | `{type:'ack', cid, ok, error?}` | server accepted/rejected an envelope |
 | s → c | `{type:'delivered', cid, to}` | a recipient device pulled your message |
+| s → c | `{type:'notice', what}` | content-free nudge: re-pull a slice of YOUR server truth (`what` = `friends` / `gone` / `profile` / `identity`; taxonomy + rationale in `be/src/lib/notify.js`) |
 
 Flow: the sender builds an envelope (E2EE ciphertext per recipient device + HMAC `h`
 keyed with the sender's transport AES key), the server validates structure, freshness,

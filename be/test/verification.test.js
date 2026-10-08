@@ -178,9 +178,12 @@ const LIMITS = {
   userKeysIpLimit: 1000,
 };
 
-async function trustAndVerifyTarget(app, target, token) {
+// Vouching rides the verify/trust stages, which REQUIRE a mutual add:
+// actor lists target, target lists actor back, then actor verifies (+trusts).
+async function trustAndVerifyTarget(app, actorUl, token, target, backHeaders) {
   const h = { authorization: `Bearer ${token}` };
   await app.inject({ method: 'PUT', url: `/api/me/friends/${target}`, headers: h });
+  await app.inject({ method: 'PUT', url: `/api/me/friends/${actorUl}`, headers: backHeaders });
   await app.inject({ method: 'PUT', url: `/api/me/friends/${target}/verify`, headers: h, payload: { verified: true } });
   return app.inject({ method: 'PUT', url: `/api/me/friends/${target}/trust`, headers: h, payload: { trust: true } });
 }
@@ -225,7 +228,7 @@ test('ID upload requires a VERIFIED user to trust you first (vouching gate)', as
     assert.equal(me.json().canUploadId, false);
 
     // 2) bob trusts alice but is NOT verified himself -> still locked
-    await trustAndVerifyTarget(app, 'alice', tB);
+    await trustAndVerifyTarget(app, 'bobby', tB, 'alice', hA);
     me = await app.inject({ method: 'GET', url: '/api/me', headers: hA });
     assert.equal(me.json().canUploadId, false, 'unverified vouch must not unlock');
 
@@ -240,11 +243,12 @@ test('ID upload requires a VERIFIED user to trust you first (vouching gate)', as
   }
 });
 
-async function trustAndVerifyTargetStep2(app, carolToken) {
+async function trustAndVerifyTargetStep2(app, carolToken, backHeaders) {
   // carol vouches for bobby and verifies (but does NOT trust) -> bobby's
-  // verifiedBy bucket gets exactly 1
+  // verifiedBy bucket gets exactly 1 — on a mutual add
   const h = { authorization: `Bearer ${carolToken}` };
   await app.inject({ method: 'PUT', url: '/api/me/friends/bobby', headers: h });
+  await app.inject({ method: 'PUT', url: '/api/me/friends/carol', headers: backHeaders });
   await app.inject({ method: 'PUT', url: '/api/me/friends/bobby/verify', headers: h, payload: { verified: true } });
 }
 
@@ -258,10 +262,11 @@ test('user stats: vouch counts are EXCLUSIVE stage buckets', async () => {
     const tB = await getToken(app, bob, 'bobby', b.d);
     const tC = await getToken(app, carol, 'carol', c.d);
     const hB = { authorization: `Bearer ${tB}` };
+    const hC = { authorization: `Bearer ${tC}` };
 
     // bob adds + verifies + trusts carol: he alone is ONE trusted vouch,
     // not one of each
-    await trustAndVerifyTarget(app, 'carol', tB);
+    await trustAndVerifyTarget(app, 'bobby', tB, 'carol', hC);
 
     const stats = await app.inject({ method: 'GET', url: '/api/users/carol/stats', headers: hB });
     assert.equal(stats.statusCode, 200);
@@ -269,7 +274,7 @@ test('user stats: vouch counts are EXCLUSIVE stage buckets', async () => {
 
     // carol's own token works too, and stages stay exclusive when a second
     // vouch sits mid-ladder (alice adds+verifies dave… use carol as voucher)
-    await trustAndVerifyTargetStep2(app, tC);
+    await trustAndVerifyTargetStep2(app, tC, hB);
     const bStats = await app.inject({ method: 'GET', url: '/api/users/bobby/stats', headers: { authorization: `Bearer ${tC}` } });
     assert.deepEqual(bStats.json(), { u: 'bobby', addedBy: 0, verifiedBy: 1, trustedBy: 0, coco: 1, socialTrusted: false });
 

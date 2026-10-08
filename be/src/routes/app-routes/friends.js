@@ -1,6 +1,7 @@
 import { fail, requireAuth, limited } from '../shared.js';
 import { rateLimit } from '../../lib/rateLimit.js';
 import { USERNAME_RE } from '../../lib/username.js';
+import { createNotifier } from '../../lib/notify.js';
 
 // Friends: a per-account, ONE-WAY trust list ANCHORED TO IDENTITY KEYS.
 //
@@ -24,6 +25,13 @@ import { USERNAME_RE } from '../../lib/username.js';
 // the server, and broadcast an E2EE friend- system message to their own
 // account (client SDK) — so every device of every holder converges.
 //
+// VERIFICATION IS A MUTUAL RELATION: the v (verified) stage may only be SET
+// once both accounts have added each other, and verified/trust are gated on
+// that mutuality on EVERY read — the moment either side un-adds, the
+// confirmed state is dead on both ends. DELETE additionally REVOKES the
+// peer's stored v/t flags on me (their add survives as one-sided,
+// unconfirmed).
+//
 // Live sync between a user's OWN devices rides E2EE system messages from
 // the acting device; the server list remains the source of truth that new
 // and offline devices reconcile against (GET /api/me/friends on app entry).
@@ -42,6 +50,12 @@ export default async function friendsRoutes(app, { users, redis, config }) {
     return USERNAME_RE.test(ul) ? ul : null;
   }
 
+  // Real-time relationship changes ride the shared control-nudge pattern
+  // (see lib/notify.js): when MY list gains/loses a peer, the PEER's own
+  // view flips too (their addedBack of me unlocks/revokes the verification
+  // gate), so their devices get a content-free 'friends' nudge and re-pull.
+  const { notify: notifyAccount } = createNotifier({ redis, users });
+
   const normalize = (list) => (list ?? []).map((f) => (
     typeof f === 'string'
       ? { u: f, p: null, v: false, t: false }
@@ -57,12 +71,21 @@ export default async function friendsRoutes(app, { users, redis, config }) {
     if (names.length) {
       const docs = await users.find(
         { ul: { $in: names } },
-        { projection: { ul: 1, identity: 1, devices: 1 } },
+        { projection: { ul: 1, identity: 1, devices: 1, friends: 1 } },
       ).toArray();
-      for (const doc of docs) live.set(doc.ul, doc.identity?.p ?? doc.devices?.[0]?.pub ?? null);
+      for (const doc of docs) {
+        live.set(doc.ul, {
+          idp: doc.identity?.p ?? doc.devices?.[0]?.pub ?? null,
+          // did they add ME back? verification is a relation BETWEEN two
+          // accounts — a one-sided list entry has nothing to confirm
+          addedBack: normalize(doc.friends).some((f) => f.u === ul),
+        });
+      }
     }
     return entries.map((e) => {
-      const idp = live.get(e.u) ?? null;
+      const info = live.get(e.u);
+      const idp = info?.idp ?? null;
+      const addedBack = info?.addedBack ?? false;
       const trusted = idp !== null && e.p !== null && e.p === idp;
       return {
         u: e.u,
@@ -70,12 +93,15 @@ export default async function friendsRoutes(app, { users, redis, config }) {
         gone: idp === null,
         changed: idp !== null && e.p !== null && e.p !== idp,
         trusted,
+        addedBack,
         // verification AND the trust stage live HERE (server) so they
         // propagate to every device of this account (sys messages for live
         // ones, reconcile-on-entry for the rest). Both only count while the
-        // binding itself is valid; re-binding (new key) resets them.
-        verified: trusted && e.v === true,
-        trust: trusted && e.v === true && e.t === true,
+        // binding itself is valid; re-binding (new key) resets them — and
+        // both REQUIRE the mutual add (see header): an un-add on EITHER
+        // side silently voids the flags until both re-add and re-compare.
+        verified: trusted && addedBack && e.v === true,
+        trust: trusted && addedBack && e.v === true && e.t === true,
       };
     });
   }
@@ -115,6 +141,8 @@ export default async function friendsRoutes(app, { users, redis, config }) {
       list.push({ u: target, p: idp, v: false, t: false });
     }
     await users.updateOne({ ul }, { $set: { friends: list.sort((a, b) => a.u.localeCompare(b.u)) } });
+    // the peer's view of THIS relation just moved (addedBack) — nudge
+    await notifyAccount(target, 'friends');
     return { friends: await enriched(ul) };
   });
 
@@ -140,7 +168,26 @@ export default async function friendsRoutes(app, { users, redis, config }) {
   }
 
   // PUT /api/me/friends/:ul/verify — "we compared the safety numbers".
-  app.put('/api/me/friends/:ul/verify', (request, reply) => setFlag(request, reply, 'v', 'verified', null));
+  // SETTING requires the MUTUAL add: a stranger list is exactly the surface
+  // a MITM would target, and there is no two-way relationship to confirm a
+  // key inside. Undo is always allowed. (The "add this user first" 404 keeps
+  // priority: no entry at all → not_friends, not not_mutual.)
+  app.put('/api/me/friends/:ul/verify', async (request, reply) => {
+    if (request.body?.verified === true) {
+      const target = targetOf(request);
+      if (!target) return fail(reply, 'bad_username', 'Invalid username', 400);
+      const ul = String(request.auth.sub ?? '').toLowerCase();
+      const meDoc = await users.findOne({ ul }, { projection: { friends: 1 } });
+      if (normalize(meDoc?.friends).some((f) => f.u === target)) {
+        const tDoc = await users.findOne({ ul: target }, { projection: { friends: 1 } });
+        const back = tDoc ? normalize(tDoc.friends).some((f) => f.u === ul) : false;
+        if (!back) {
+          return fail(reply, 'not_mutual', `${target} has not added you back — verification unlocks once both of you have added each other`, 409);
+        }
+      }
+    }
+    return setFlag(request, reply, 'v', 'verified', null);
+  });
 
   // PUT /api/me/friends/:ul/trust — third stage: "I know this person".
   // Requires the verify stage (a key you never confirmed cannot be trusted).
@@ -153,12 +200,28 @@ export default async function friendsRoutes(app, { users, redis, config }) {
     if (!target) return fail(reply, 'bad_username', 'Invalid username', 400);
     // read-modify-write (same pattern as PUT): removes BOTH legacy string
     // entries and bound {u,p} objects without $pull query gymnastics
-    const user = await users.findOne({ ul: request.auth.sub }, { projection: { friends: 1 } });
+    const ul = String(request.auth.sub ?? '').toLowerCase();
+    const user = await users.findOne({ ul }, { projection: { friends: 1 } });
     const kept = normalize(user?.friends).filter((f) => f.u !== target);
     await users.updateOne(
-      { ul: request.auth.sub },
+      { ul },
       { $set: { friends: kept.sort((a, b) => a.u.localeCompare(b.u)) } },
     );
-    return { friends: await enriched(request.auth.sub) };
+    // un-adding breaks the verification BOTH ways: my entry is gone (above)
+    // and their v/t flags on me are revoked server-side — their add survives
+    // one-sided and unconfirmed until both re-add and re-compare numbers.
+    const tDoc = await users.findOne({ ul: target }, { projection: { friends: 1 } });
+    if (tDoc) {
+      const their = normalize(tDoc.friends);
+      const mine = their.find((f) => f.u === ul);
+      if (mine && (mine.v || mine.t)) {
+        mine.v = false;
+        mine.t = false;
+        await users.updateOne({ ul: target }, { $set: { friends: their } });
+      }
+    }
+    // their side flipped twice (entry removed + flags revoked) — nudge
+    await notifyAccount(target, 'friends');
+    return { friends: await enriched(ul) };
   });
 }

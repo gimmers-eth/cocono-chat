@@ -9,7 +9,7 @@ import { startSingleTabGuard } from './components/blocked.js';
 import { createAuth } from './components/auth.js';
 import { createHome } from './components/home.js';
 import { createChat } from './components/chat.js';
-import { setScope, setFriends } from './store.js';
+import { setScope, setFriends, loadFriends } from './store.js';
 import { initKeyboardFit } from './keyboard.js';
 import { mountDiagnostics } from './diag.js';
 import { applyIcons } from './icons.js';
@@ -104,6 +104,26 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+// Re-pull the SERVER friends list (the source of truth) into the local
+// mirror — and detect vanishings on the way: an entry that was in our
+// mirror but is NOT in the fresh list means the account behind it was
+// DELETED (the deletion purges holders' lists and sends the 'gone' nudge)
+// — or we removed them from another device while this one slept. The
+// former must be surfaced as deleted (chat.handleGonePeer); if the account
+// actually still exists, a later live contact clears the flag (openChat
+// marks not-gone), so the rare false positive self-heals.
+async function reconcileFriends() {
+  let before = [];
+  try { before = await loadFriends(); } catch { /* no mirror yet */ }
+  const list = await client.listFriends();
+  await setFriends(list);
+  const now = new Set((list ?? []).map((e) => String(typeof e === 'string' ? e : e.u ?? e.peer ?? '').toLowerCase()));
+  for (const ent of before) {
+    const ul = String(ent.peer ?? '').toLowerCase();
+    if (ul && !now.has(ul)) chat.handleGonePeer?.(ul).catch(() => {});
+  }
+}
+
 async function enterApp({ gesture = false, offline = false } = {}) {
   // Durability: ask the browser to keep our IndexedDB (identity + message
   // store) out of eviction under storage pressure. Best-effort: Chrome/
@@ -123,13 +143,12 @@ async function enterApp({ gesture = false, offline = false } = {}) {
   if (!offline) client.connect(); // offline mode: browse the local store only
   await home.renderConversationList();
 
-  // Friends mirror: the SERVER list is the source of truth — reconcile it on
-  // every entry (catches events missed while offline; new devices get the
-  // full list here). Live changes arrive via E2EE system messages.
+  // Friends mirror: the SERVER list is the source of truth — reconcile on
+  // every entry (catches events missed while offline, including accounts
+  // that were deleted and purged from our list; new devices get the full
+  // list here). Live changes arrive via control nudges (client.on('notice')).
   if (!offline) {
-    client.listFriends().then((list) => setFriends(list)).then(() => {
-      home.renderConversationList().catch(() => {});
-    }).catch(() => { /* stays on the local mirror */ });
+    reconcileFriends().catch(() => { /* stays on the local mirror */ });
   }
 
   // A notification click that cold-booted the app parked the peer in the
@@ -221,6 +240,32 @@ chat.connectEvents();
 home.wire();
 auth.wire();
 client.on('state', ({ state }) => home.paintConnection(state));
+// CONTROL NUDGES (be/src/lib/notify.js): the server says a slice of
+// authoritative state THIS account caches moved because of someone else.
+// Frames are content-free on purpose — the response is ALWAYS "re-read my
+// own data", never "trust this payload". Each 'what' maps to one re-pull;
+// the events those re-pulls fire (FRIENDS_EVENT / AVATARS_EVENT / store
+// updates) do the actual repaints, so nudges share the refresh path of
+// normal use instead of inventing one.
+client.on('notice', ({ what }) => {
+  if (!client.token) return;
+  if (what === 'friends' || what === 'gone') {
+    // add / remove / un-add-revoke ('friends') and account-deletion purge
+    // ('gone'): re-pull the list; reconcileFriends() turns vanished entries
+    // into the proper deleted-icon + timeline warning (chat.handleGonePeer),
+    // and setFriends fires FRIENDS_EVENT which repaints sidebar, trust
+    // strip and the verification gate.
+    reconcileFriends().catch(() => { /* next entry reconciles */ });
+  } else if (what === 'identity') {
+    // admin reviewed my account: re-read /api/me (badge, Profile-tab gate)
+    home.refreshIdentity?.().catch?.(() => {});
+  } else if (what === 'profile') {
+    // someone I follow edited their bio/photo: re-prime the peer caches
+    home.refreshPeerProfiles?.();
+  } else {
+    client.logger.debug('notice: unhandled what', JSON.stringify(what));
+  }
+});
 // Permanent WS rejection (detached device / deleted account): surface it —
 // without this the open app looks alive but deaf.
 client.on('authFailed', ({ error }) => {

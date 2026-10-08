@@ -698,6 +698,13 @@ export class CoconoClient extends Emitter {
       }
       case 'hello':
         break;
+      case 'notice':
+        // Content-free server nudge (be/src/lib/notify.js taxonomy): some
+        // authoritative state THIS account caches moved because of someone
+        // else — re-pull it. The SDK just surfaces the event; deciding what
+        // 'friends'/'identity'/'profile' re-reads is app-level.
+        this.emit('notice', { what: typeof frame.what === 'string' ? frame.what : '' });
+        break;
       case 'error':
         this.emit('error', { error: new CoconoError(frame.error ?? 'server error', 'server_error') });
         break;

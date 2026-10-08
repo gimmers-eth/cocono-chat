@@ -19,7 +19,7 @@ import {
   saveMessage, updateMessage, messagesWith, markRead, allMessages,
   getMessage, deleteMessage, clearMessages,
   loadPeerAvatars, rememberPeerAvatar, AVATARS_EVENT,
-  loadFriends, friendAdd, friendDel, friendMarkFlags, FRIENDS_EVENT,
+  loadFriends, friendAdd, friendDel, friendMarkFlags, setFriends, FRIENDS_EVENT,
   getPin, recordPinSeen, markPeerGone, rememberPeerVerified,
 } from '../store.js';
 
@@ -478,27 +478,36 @@ export function createChat({ client, onHomeRefresh }) {
       [PS.GONE]: ['danger', 'userGone', peerHadHistory
         ? 'This account was deleted. Your saved messages stay readable, but you can’t send new ones.'
         : `${currentPeer} doesn’t exist — no account with this name was found.`],
-      [PS.STRANGER]: ['danger', 'notFriend', `You haven’t added ${currentPeer} yet. Messages are private, but anyone can sign up with a name — add them, then verify, to be sure it’s really them.`],
+      [PS.STRANGER]: ['danger', 'notFriend', `You haven’t added ${currentPeer} yet. Messages are private, but anyone can sign up with a name — add them, and ask them to add you back, then verify to be sure it’s really them.`],
       [PS.UNVERIFIED]: ['warn', 'friend', `You’ve added ${currentPeer}, but haven’t verified them. Read the safety number aloud together (a call works) — when both screens match, nobody is in between. Open ⋮ and tap “Verify user”.`],
       [PS.VERIFIED]: ['warn', 'friendVerified', `You’ve verified ${currentPeer}’s key, but haven’t trusted them yet. Only trust accounts you actually know in person — open ⋮ and tap “Trust user” when you’re sure.`],
     };
+    // one-sided add: verification is a MUTUAL relation, so the plain ladder
+    // copy would promise a step that cannot happen — say what actually
+    // unlocks it: THEM adding YOU.
+    const WAITING_BACK = ['warn', 'friend', `You’ve added ${currentPeer}, but they haven’t added you back — verification only unlocks once both of you have added each other. Ask them to add you, then compare the safety number in ⋮ → “Verify user”.`];
     let tier;
+    let iconKey;
     let text;
     if (conflictAlert(ent, pin)) {
       tier = 'danger';
+      iconKey = 'notFriend';
       text = `Heads up: the key this device remembers for ${currentPeer} doesn’t match the server’s. Until you’ve checked the number together, treat this chat with suspicion.`;
     } else if (pinState === 'changed' && !gone) {
       tier = 'danger';
+      iconKey = 'identityAlert';
       text = `Heads up: ${currentPeer}’s identity key changed on this device. If they reinstalled or re-created their account that can be normal — but verify them again before trusting new messages.`;
+    } else if (state === PS.UNVERIFIED && !ent?.addedBack) {
+      [tier, iconKey, text] = WAITING_BACK;
     } else {
-      [tier, , text] = MSG[state] ?? [];
+      [tier, iconKey, text] = MSG[state] ?? [];
     }
     warn.classList.toggle('danger', tier === 'danger');
     warn.classList.toggle('warn', tier === 'warn');
     warn.hidden = !text;
     if (text) {
       warn.replaceChildren(
-        iconEl(MSG[state]?.[1] ?? 'notFriend', tier === 'danger' ? 'icon-danger' : 'icon-warn'),
+        iconEl(iconKey ?? 'notFriend', tier === 'danger' ? 'icon-danger' : 'icon-warn'),
         document.createTextNode(` ${text}`),
       );
     }
@@ -560,7 +569,7 @@ export function createChat({ client, onHomeRefresh }) {
         await updateTrustUI();
         return;
       }
-      await friendAdd(currentPeer, entry?.p ?? '');
+      await friendAdd(currentPeer, entry?.p ?? '', { addedBack: !!entry?.addedBack });
       if (entry?.p) await recordPinSeen(currentPeer, entry.p);
       primePeerProfile(currentPeer); // photo eligibility just changed — refresh now
       toast(`${currentPeer} added — now verify the safety number to be sure it’s really them.`);
@@ -889,13 +898,27 @@ export function createChat({ client, onHomeRefresh }) {
     numEl.textContent = await safetyNumber(myKey, peerKey);
     const ent = await friendEntryFor(currentPeer);
     const verified = !!ent?.verified;
+    const mutual = !!ent?.addedBack;
     statusIcon.replaceChildren(peerStateIcon(trustState(ent, pin)));
     $('identity-since').textContent = pin
       ? `Key remembered on this device since ${new Date(pin.firstSeenAt).toLocaleString()}`
         + (pin.changedAt ? ` — it changed ${new Date(pin.changedAt).toLocaleString()}, verification was reset` : '')
       : 'This device has not seen the key directly yet.';
     const vb = $('btn-identity-verify');
-    vb.disabled = !ent?.trusted; // verification needs a live binding
+    // verification is a MUTUAL relation: it only unlocks once both sides
+    // have added each other (undo stays possible)
+    vb.disabled = !ent?.trusted || (!mutual && !verified);
+    const mutualNote = $('identity-mutual-note');
+    if (mutualNote) {
+      const blocked = !mutual && ent?.trusted && !verified;
+      mutualNote.hidden = !blocked;
+      if (blocked) {
+        mutualNote.replaceChildren(
+          iconEl('friend', 'icon-warn'),
+          document.createTextNode(` ${currentPeer} has not added you back yet — you can only verify each other once BOTH of you have added one another. Ask them, then come back.`),
+        );
+      }
+    }
     vb.replaceChildren(
       iconEl(verified ? 'friendRemove' : 'friendVerify'),
       document.createTextNode(verified ? ' Undo verification' : ' We compared — mark verified'),
@@ -934,6 +957,11 @@ export function createChat({ client, onHomeRefresh }) {
     if (!currentPeer) return;
     const ent = await friendEntryFor(currentPeer);
     if (!ent?.trusted) return;
+    // server enforces this too (409 not_mutual) — say it plainly BEFORE the
+    // tap becomes an error toast, and never offer it on a one-sided add
+    if (!ent.addedBack && !ent.verified) {
+      return toast(`${currentPeer} has not added you back — you can only verify each other once both of you have added one another.`, 'error');
+    }
     try {
       await client.setFriendVerified(currentPeer, !ent.verified);
       await friendMarkFlags(currentPeer, { verified: !ent.verified, trust: false });
@@ -1104,6 +1132,51 @@ export function createChat({ client, onHomeRefresh }) {
     }
   }
 
+  // A friend's ACCOUNT was deleted, learned from the server side: the
+  // deletion purged our list entry and a 'gone' nudge landed (or an
+  // entry-reconcile noticed the disappearance). Surface it the way the
+  // discovery paths (chat-open 404, send rejection) do — deleted icon +
+  // read-only chat + timeline pill — never the red 'stranger/not added'
+  // icon, which would silently bury the trust warning. Deduped on the pin
+  // record: whoever learns the fact first emits it once.
+  async function handleGonePeer(ul) {
+    const peer = String(ul ?? '').toLowerCase();
+    if (!peer) return;
+    const pin = await getPin(peer);
+    if (pin?.gone) return;
+    // The pill is PERMANENT — confirm before crying wolf. A vanished entry
+    // that still resolves means the removal was benign (we unfriended them
+    // from another device while this one slept and the friend- sys copy
+    // raced the reconcile): drop quietly, no gone flag, no pill. A
+    // transient lookup failure likewise waits — the next chat-open or
+    // nudge re-runs the verdict.
+    try {
+      // refresh:true — the cached copy says 'alive' happily while the
+      // account it remembers has already been deleted; the verdict needs
+      // the live lookup.
+      await client.peerKeys(peer, { refresh: true });
+      return; // account alive — not a deletion
+    } catch (err) {
+      if (!(err?.code === 'unknown_account' || err?.status === 404)) return;
+    }
+    await markPeerGone(peer, true);
+    const hadHistory = (await messagesWith(peer)).length > 0;
+    if (peer === currentPeer) {
+      peerGone = true;
+      goneApplied = true;
+      goneAnnounced = true; // this very path IS the announcement
+      setComposerEnabled(false);
+      await applyPeerFacts(null);
+    }
+    await announceNotice(peer, hadHistory ? 'account-deleted' : 'user-gone');
+    if (peer === currentPeer) {
+      toast(hadHistory
+        ? `${peer}'s account was deleted — history is read-only now.`
+        : `${peer} doesn’t exist anymore.`, 'error');
+      await updateTrustUI();
+    }
+  }
+
   async function openChat(username) {
     const status = $('home-status');
     try {
@@ -1124,6 +1197,13 @@ export function createChat({ client, onHomeRefresh }) {
       }
       currentPeer = (peer?.u ?? username).toLowerCase();
       $('chat-peer').textContent = `${currentPeer}`;
+      // The SERVER list is ground truth for flags that can move WITHOUT any
+      // action of ours — a peer un-adding us breaks the verification on BOTH
+      // sides, and nothing else refreshes our mirror mid-session. Reconcile
+      // before anything below reads it.
+      if (client.token && !peerGone) {
+        try { await setFriends(await client.listFriends()); } catch { /* offline: keep the local mirror */ }
+      }
       await applyPeerFacts(peer);
       setComposerEnabled(!peerGone);
       $('chat-empty').hidden = true;
@@ -1355,5 +1435,5 @@ export function createChat({ client, onHomeRefresh }) {
     $('chat-messages').addEventListener('click', catchUp);
   }
 
-  return { wire, connectEvents, openChat, render, openSelfProfile };
+  return { wire, connectEvents, openChat, render, openSelfProfile, handleGonePeer };
 }

@@ -220,7 +220,7 @@ export default async function deviceRoutes(app, { users, redis, config, messages
     if (user.devices.length === 0) {
       await users.deleteOne({ ul });
       await cleanupAccountState(redis, ul);
-      await purgeFriendReferences(users, ul);
+      await purgeFriendReferences(users, ul, redis);
       if (profiles) await profiles.deleteOne({ ul }); // bio + avatar die too
       await messages.deleteMany({ $or: [{ 'to.ul': ul }, { 'from.ul': ul }] });
       return { removed: deviceId, devices: 0, accountDeleted: true };

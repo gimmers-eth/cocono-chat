@@ -15,6 +15,10 @@
 //                     { type: 'msg', id, ts, env }
 //                     { type: 'ack', cid, ok, error? }
 //                     { type: 'delivered', cid, to }
+//                     { type: 'notice', what }  server nudge: re-pull the
+//                          named slice of YOUR authoritative data (content-
+//                          free by design — the taxonomy and the whole
+//                          pattern live in lib/notify.js)
 //
 // Envelope: { m: { d, u, dv, f, fd, cid, t, h }, s? }
 //   d   E2EE ciphertext (AES-GCM, b64u iv||ct) for the destination device

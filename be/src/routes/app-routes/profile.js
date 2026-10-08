@@ -1,6 +1,7 @@
 import { fail, requireAuth, limited } from '../shared.js';
 import { rateLimit } from '../../lib/rateLimit.js';
 import { USERNAME_RE } from '../../lib/username.js';
+import { createNotifier } from '../../lib/notify.js';
 
 // Profiles: a short bio (≤ PROFILE_BIO_MAX_LEN) + a tiny avatar
 // (≤ PROFILE_AVATAR_MAX_BYTES, JPEG only — clients resize on-canvas before
@@ -69,6 +70,9 @@ export default async function profileRoutes(app, { users, redis, config, profile
     if (!Object.keys(set).length) return fail(reply, 'invalid_request', 'nothing to update', 400);
 
     await profiles.updateOne({ ul }, { $set: { ...set, ul, updatedAt: new Date() } }, { upsert: true });
+    // peers cache bios/avatars (day-ish priming): nudge everyone who added
+    // this account so the new photo/bio lands immediately (lib/notify.js)
+    await createNotifier({ redis, users }).notifyPeers(ul, 'profile');
     return { updated: true, bio: set.bio };
   });
 

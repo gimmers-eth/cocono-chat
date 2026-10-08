@@ -189,22 +189,26 @@ export function markRead(peer, ts = Date.now()) {
 export const isUnread = (peer, ts) => (ts ?? 0) > (reads()[String(peer).toLowerCase()] ?? 0);
 
 // --- friends (local mirror of the server list; see header comment) ---
-// record: { peer, pub, gone, changed, trusted, verified, trust, at } — pub
-// is the identity-key binding the SERVER recorded; trusted only when it
-// matches the live account. Legacy/unbound entries are NOT trusted (strict
-// policy). `at` = last friend-STATE activity on this device (add / verify /
-// trust / gone transitions): device-local only, never synced — the sidebar
-// floats freshly-acted-upon peers up even when there are zero messages.
+// record: { peer, pub, gone, changed, trusted, verified, trust, addedBack,
+// at } — pub is the identity-key binding the SERVER recorded; trusted only
+// when it matches the live account. Legacy/unbound entries are NOT trusted
+// (strict policy). addedBack = they added US too: verification only works
+// (and only MEANS something) on a mutual add. `at` = last friend-STATE
+// activity on this device (add / verify / trust / gone transitions):
+// device-local only, never synced — the sidebar floats freshly-acted-upon
+// peers up even when there are zero messages.
 
 export function loadFriends() {
   return withStore('readonly', (s) => s.getAll(), FRIENDS);
 }
 
-export async function friendAdd(peer, pub = '') {
+export async function friendAdd(peer, pub = '', extra = {}) {
   await withStore('readwrite', (s) => s.put({
     peer: String(peer).toLowerCase(), pub,
     gone: false, changed: false, trusted: !!pub, verified: false, trust: false,
+    addedBack: false,
     at: Date.now(),
+    ...extra,
   }), FRIENDS);
   notifyFriends();
 }
@@ -251,6 +255,7 @@ export async function setFriends(entries) {
         trusted: !!rec.trusted,
         verified: !!rec.verified, // server-account-level: propagates to all devices
         trust: !!rec.trust,       // third stage: "I know this person"
+        addedBack: !!rec.addedBack, // mutual? verification is impossible one-sided
       };
       const old = prev.get(ul);
       let at = old?.at ?? 0;
