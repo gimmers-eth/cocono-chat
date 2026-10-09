@@ -323,8 +323,8 @@ img.own-avatar { border-radius: 50%; }
     from { transform: none; opacity: 1; }
     to   { transform: translateX(-26%); opacity: .45; }
   }
-  .chat-view.entering { animation-duration: .28s; }
-  .chat-view.closing { animation-duration: .24s; }
+  .chat-view.entering { animation-duration: .33s; }
+  .chat-view.closing { animation-duration: .285s; }
 }
 
 .chat-head {
