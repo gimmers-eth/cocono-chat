@@ -440,6 +440,8 @@ export function createChat({ client, onHomeRefresh }) {
 
   function closeMsgModal() {
     msgId = null;
+    forwardId = null;
+    $('msg-panes').classList.remove('showing-fwd'); // always reopen on pane A
     $('msg-overlay').hidden = true;
     $('msg-modal').hidden = true;
   }
@@ -1258,8 +1260,9 @@ export function createChat({ client, onHomeRefresh }) {
     setStatus($('forward-status'), '');
     $('forward-username').value = '';
     $('btn-forward-send').classList.remove('ready');
-    $('forward-overlay').hidden = false;
-    $('forward-modal').hidden = false;
+    // same panel, second pane: the track slides LEFT, options enter from the
+    // right — message text stays visible through the transition
+    $('msg-panes').classList.add('showing-fwd');
     await forwardSuggestions.refresh(); // local users, filtered as you type
     // Autofocus on DESKTOP only. On a touch device it does nothing useful
     // (iOS raises no keyboard for programmatic focus — device trace proved
@@ -1271,12 +1274,12 @@ export function createChat({ client, onHomeRefresh }) {
 
   function closeForward() {
     forwardId = null;
-    $('forward-overlay').hidden = true;
-    $('forward-modal').hidden = true;
+    // cancel slides the forward pane back out to the RIGHT
+    $('msg-panes').classList.remove('showing-fwd');
   }
 
   function forwardOpen() {
-    return !$('forward-modal').hidden;
+    return $('msg-panes')?.classList.contains('showing-fwd');
   }
 
   async function sendForward(targetArg) {
@@ -1757,7 +1760,6 @@ export function createChat({ client, onHomeRefresh }) {
       input.focus?.();
     });
     $('btn-forward-cancel').addEventListener('click', closeForward);
-    $('forward-overlay').addEventListener('click', closeForward);
     $('btn-forward-send').addEventListener('click', () => sendForward());
     $('forward-username').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') sendForward();

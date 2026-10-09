@@ -902,6 +902,28 @@ body[data-view="blocked"] .page-footer { display: none; }
    visible while the settings drawer / profile sheets / modals (z 50) and the
    lightbox (z 70) are on screen — the toast is the status channel, so it
    floats above all of them (75). */
+/* ---- two-pane message panel (view <-> forward slide in ONE side menu) ----
+   Panes are side-by-side on a 200% track; showing forward slides the track
+   left by exactly one pane. Cancel slides it back right. */
+.msg-panes {
+  display: flex; width: 100%; height: 100%;
+  transition: transform .24s cubic-bezier(.2, .8, .3, 1);
+}
+.msg-panes.showing-fwd { transform: translateX(-100%); }
+.msg-pane { flex: none; width: 100%; min-width: 0; display: flex; flex-direction: column; gap: .35rem; }
+#msg-modal { display: flex; flex-direction: column; overflow: hidden; }
+#msg-modal .msg-panes { flex: 1; min-height: 0; }
+/* the message text scrolls and takes the rest of the page (pane A too) */
+#msg-modal .msg-modal-text { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.fwd-preview { flex: none; max-height: 22dvh; overflow-y: auto; }
+/* fixed 3-row floor, expands with the page; buttons below never shift */
+.fwd-results { flex: 1 1 auto; min-height: calc(3 * 44px); overflow-y: auto; }
+.fwd-actions {
+  flex: none; display: flex; justify-content: space-between; align-items: center;
+  gap: .6rem; padding-top: .4rem;
+  border-top: 1px solid var(--border); margin-top: .4rem;
+}
+
 .chat-view { position: relative; }
 .toast {
   position: fixed; left: 50%; bottom: calc(4.4rem + var(--sa-b));
