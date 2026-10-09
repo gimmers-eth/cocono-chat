@@ -25,20 +25,20 @@
 //     --app-h = vv.height (exact), --kb-h = the covered band, and
 //     --vv-top = vv.offsetTop. The cache learns the real keyboard height
 //     for the next pre-flight.
-//  3. SQUASH (and ride as the fallback): iOS still likes to start a reveal
-//     scroll computed from the PRE-shrink geometry even though pre-flight
-//     already made the field visible — and it animates that scroll back
-//     once it re-checks. Riding the round trip showed the user both legs
-//     (header: instant down, slow up). So any document scroll (scrollY)
-//     is reset to 0 on EVERY event — per-frame squashing means neither
-//     iOS's pan nor its restore ever accumulates visibly. Only an
-//     offsetTop-WITHOUT-scrollY pan (a genuine persistent visual-viewport
-//     displacement) is ridden via translateY(var(--vv-top)) on the body —
-//     the whole fixed layer cake shifts with it, header included.
-//     NOTE: window.scrollY must NOT ride along in the transform — a fixed
-//     body does not travel with document scroll; translating by scrollY
-//     pushed the app DOWN ("header ends up lower than it started").
-//     Desktop/Android: both channels are always 0 → all of it is a no-op.
+//  3. SQUASH + DEBOUNCED RIDE: iOS still likes to start a reveal scroll
+//     computed from the PRE-shrink geometry even though pre-flight already
+//     made the field visible — and cancels it ~16ms later, animating the
+//     restore itself. Document scroll (scrollY) is SQUASHED per frame
+//     (scrollTo(0,0), capped); a visual-viewport pan (offsetTop) is ridden
+//     via translateY(var(--vv-top)) on body.kb-fit ONLY if it PERSISTS
+//     (>120ms) — riding the transient ones snapped the body down and back
+//     (the reported "instant down, slow up" dip).
+//     The whole module is TOUCH-ONLY (pointer: coarse adds body.kb-fit):
+//     on desktop a pinch-zoom looks exactly like a keyboard to the old
+//     math (vv.height < innerHeight), the ride dragged the sidebar around
+//     on focus changes, and the body transform re-anchored the fixed
+//     settings drawer. Desktop now keeps pristine viewport-anchored
+//     fixed layers and the 100dvh fallback.
 
 // Ring buffer of keyboard-fit samples for the Diagnostics report — iOS
 // keyboard behaviour cannot be reproduced off-device, so the phone itself
@@ -80,8 +80,21 @@ const MIN_APP_H = 220;
 
 export function initKeyboardFit() {
   const vv = window.visualViewport;
-  if (!vv) return; // desktop/old engines: 100dvh fallback is already right
+  if (!vv) return; // ancient engines: 100dvh fallback is already right
+  // TOUCH DEVICES ONLY. Desktop never grows a soft keyboard, and the
+  // machinery is actively harmful there: a desktop pinch-zoom makes
+  // vv.height < innerHeight (cover > 0 — a phantom "keyboard"), the
+  // ride translates the body on every zoom-scroll (the whole sidebar
+  // visibly shifts when buttons are clicked), and the body transform
+  // re-anchors every fixed overlay (settings drawer included) to the
+  // body box. Gated out: desktop keeps pristine 100dvh, viewport-
+  // anchored fixed layers, zero listeners.
+  if (!window.matchMedia || !window.matchMedia('(pointer: coarse)').matches) return;
   const root = document.documentElement;
+  // Opt the body into the ride transform (CSS: body.kb-fit only) —
+  // desktop never gets the class, so its containing block stays the
+  // viewport.
+  document.body.classList.add('kb-fit');
   let raf = 0;
   t0 = performance.now();
 
@@ -98,6 +111,11 @@ export function initKeyboardFit() {
   // the field is genuinely covered and fighting it would only jitter.
   let squashCount = 0;
   const SQUASH_MAX = 8;
+
+  // Ride debounce: only an offset that PERSISTS this long is worth a
+  // visible correction (transient pans self-restore; see apply).
+  let rideTimer = 0;
+  const RIDE_DELAY = 120;
 
   // Resting layout-viewport height — the baseline for the keyboard math.
   // iOS lies about window.innerHeight WHILE the keyboard is up: the device
@@ -116,10 +134,13 @@ export function initKeyboardFit() {
     raf = requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; });
   }
 
-  function fit(appH, kbH, vvTop) {
+  function fit(appH, kbH) {
     root.style.setProperty('--app-h', `${Math.round(appH)}px`);
     root.style.setProperty('--kb-h', `${Math.max(0, Math.round(kbH))}px`);
-    root.style.setProperty('--vv-top', `${Math.max(0, Math.round(vvTop))}px`);
+  }
+
+  function setVvTop(px) {
+    root.style.setProperty('--vv-top', `${Math.max(0, Math.round(px))}px`);
   }
 
   function sample(src) {
@@ -142,19 +163,15 @@ export function initKeyboardFit() {
     // keyboard is up. With pre-flight in place the focused field is already
     // above the keys before iOS moves, so any document scroll iOS still
     // starts was computed from the PRE-shrink geometry and gets animated
-    // back once it re-checks — riding it showed the user the round trip
-    // (header: instant down with the pan, slow up with iOS's restore).
-    // Resetting per frame means neither animation accumulates visibly (with
-    // the fixed body this is an instant no-op snap, not the old
-    // scrollable-document tug-of-war).
+    // back once it re-checks. Resetting per frame means neither animation
+    // accumulates visibly (with the fixed body this is an instant no-op
+    // snap, not the old scrollable-document tug-of-war).
     const sy = Math.max(0, Math.round(window.scrollY));
     if (cover <= 80) squashCount = 0; // keyboard closed: fresh session next time
-    let squashing = false;
     if (sy !== 0) {
       if (squashCount < SQUASH_MAX) {
         window.scrollTo(0, 0);
         squashCount++;
-        squashing = true;
       } else if (squashCount === SQUASH_MAX) {
         // iOS insists (field genuinely covered — estimate came up short):
         // stop fighting or the per-frame reset becomes a visible jitter.
@@ -163,14 +180,38 @@ export function initKeyboardFit() {
         squashCount++;
       }
     }
-    // An offsetTop-only pan (no document-scroll channel) is a genuine
-    // persistent displacement — nothing else compensates it, so ride it.
-    const pan = sy > 0 && squashing ? 0 : vv.offsetTop;
     // At genuine rest (no keyboard, no scroll, no pan): relearn the
     // baseline so toolbar show/hide doesn't leave a stale restH.
     if (cover <= 80 && sy === 0 && vv.offsetTop === 0) restH = window.innerHeight;
-    fit(vv.height, cover, pan);
-    if (cover > 80 && Math.abs(cover - cachedKb) > 8) { // the keyboard revealed itself: learn it
+    fit(vv.height, cover);
+    // RIDE — DEBOUNCED. Device traces showed the remaining offsetTop pans
+    // are TRANSIENT overshoots: iOS pans (98/201px) computed from the
+    // pre-shrink geometry and cancels ~16ms later, animating the restore
+    // itself. Riding those instantly yanked the body DOWN (the reported
+    // "instant down, slow up" dip) — a second jerk stacked on iOS's own
+    // smooth animation. So: offset gone → drop the ride NOW; offset
+    // present → wait RIDE_DELAY; only a PERSISTENT pan (the original
+    // header-off-page bug) gets corrected, once, after the churn settles.
+    const t = Math.round(vv.offsetTop);
+    if (t <= 0) {
+      clearTimeout(rideTimer);
+      setVvTop(0);
+    } else {
+      clearTimeout(rideTimer);
+      rideTimer = setTimeout(() => {
+        const held = Math.round(vv.offsetTop);
+        if (held > 0) {
+          setVvTop(held);
+          sample(`ride:${held}`);
+        }
+      }, RIDE_DELAY);
+    }
+    // Learn the TALLEST keyboard seen, never a shorter one: the numeric
+    // pad (386) overwriting the letter keyboard (413) made the next
+    // pre-flight under-shrink — which is exactly what provoked iOS's
+    // reveal pan. Over-estimating is the safe direction: a brief gap that
+    // the mirror closes, header stable.
+    if (cover > 80 && cover > cachedKb) {
       cachedKb = cover;
       try { localStorage.setItem('cocono.kb-h', String(cover)); } catch { /* private mode */ }
     }
@@ -192,7 +233,8 @@ export function initKeyboardFit() {
     if (lastCover > 80) return;     // keyboard already up: nothing to pre-fit
     const est = cachedKb || DEFAULT_KB;
     const margin = cachedKb ? 0 : PRE_MARGIN; // learned cache = device truth, no slack
-    fit(Math.max(MIN_APP_H, restH - est - margin), est + margin, 0);
+    fit(Math.max(MIN_APP_H, restH - est - margin), est + margin);
+    setVvTop(0);
     el?.scrollIntoView?.({ block: 'nearest' });
     // Speculative shrink: if no keyboard actually arrives (focus stolen,
     // programmatic focus that iOS declines to honour), restore the true fit
