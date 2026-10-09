@@ -66,10 +66,12 @@ const IS_IOS =
 // run taller. Used only for the FIRST-EVER open (no measurement yet); the
 // localStorage cache takes over after one real keyboard.
 const DEFAULT_KB = 340;
-// Slack added to the cached height at pre-flight: the QuickType bar appears
-// and disappears per field/context, and a stale-low cache is exactly what
-// lets Safari start a pan. The mirror step re-fits to the exact height once
-// the keyboard settles, so the overshoot is a brief, header-stable resize.
+// Slack added to the keyboard estimate at pre-flight — but ONLY for the
+// first-ever open (DEFAULT_KB is a guess). A LEARNED cache is device truth:
+// overshooting it left a visible two-step (trace: appH 421 → 481, a 60px
+// gap under the composer that closed a beat later). Under-estimating (e.g.
+// QuickType bar reappearing) is now cheap: the per-frame squash in apply()
+// absorbs the reveal scroll iOS would animate.
 const PRE_MARGIN = 60;
 // Never pre-shrink the shell below this — a landscape phone minus a 400px
 // estimate would otherwise leave a useless sliver (and the mirror fixes
@@ -177,19 +179,27 @@ export function initKeyboardFit() {
   }
 
   // Pre-flight shrink — runs AFTER focus is granted, BEFORE the keyboard
-  // (and its pan decision) arrives.
+  // (and its pan decision) arrives. `el` is the focused field: once the
+  // shell fits the future keyboard, WE reveal the field inside its own
+  // scroller (the settings drawer, the auth view) synchronously — iOS only
+  // starts its animated reveal scroll (the shove that drags the header)
+  // when the field is still covered at its check; finding it already in
+  // view, it has nothing to animate. 'nearest' keeps the nudge minimal and
+  // can never scroll the window (the document has nothing to scroll).
   let revertTimer = 0;
-  function preflight() {
+  function preflight(el) {
     if (!IS_IOS) return;            // Android resizes itself; desktop has no soft keyboard
     if (lastCover > 80) return;     // keyboard already up: nothing to pre-fit
     const est = cachedKb || DEFAULT_KB;
-    fit(Math.max(MIN_APP_H, restH - est - PRE_MARGIN), est + PRE_MARGIN, 0);
+    const margin = cachedKb ? 0 : PRE_MARGIN; // learned cache = device truth, no slack
+    fit(Math.max(MIN_APP_H, restH - est - margin), est + margin, 0);
+    el?.scrollIntoView?.({ block: 'nearest' });
     // Speculative shrink: if no keyboard actually arrives (focus stolen,
     // programmatic focus that iOS declines to honour), restore the true fit
     // instead of leaving the shell stranded mid-screen.
     clearTimeout(revertTimer);
     revertTimer = setTimeout(() => { if (lastCover <= 80) apply('revert'); }, 600);
-    sample('preflight');
+    sample(`preflight${el ? `:${el.id || el.tagName}` : ''}`);
   }
 
   // Tap bookkeeping: a pointerdown on an INPUT/TEXTAREA anywhere (delegated
@@ -211,7 +221,7 @@ export function initKeyboardFit() {
   }, { capture: true, passive: true });
   document.addEventListener('focusin', (e) => {
     sample(`focusin:${e.target?.id || e.target?.tagName}${e.target === tapTarget ? '' : ' (no-tap)'}`);
-    if (e.target === tapTarget && performance.now() - tapAt < 700) preflight();
+    if (e.target === tapTarget && performance.now() - tapAt < 700) preflight(e.target);
     tapTarget = null;
   });
 
