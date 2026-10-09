@@ -636,6 +636,19 @@ img.own-avatar { border-radius: 50%; }
   padding-top: calc(.4rem + env(safe-area-inset-top));
   animation: sheet-down .22s cubic-bezier(.2, .8, .3, 1);
 }
+/* EXIT mirrors of the sheet/scrim entries — applied via .closing while the
+   element stays visible; JS flips `hidden` only when the exit lands (same
+   defer-the-paint pattern as the chat pane) */
+@keyframes overlay-out { from { opacity: 1; } to { opacity: 0; } }
+.overlay.closing { animation: overlay-out .18s ease-in both; }
+@keyframes sheet-up {
+  from { transform: translate(-50%, 0); opacity: 1; }
+  to   { transform: translate(-50%, -100%); opacity: .85; }
+}
+.side-sheet.closing { animation: sheet-up .2s cubic-bezier(.4, 0, .85, .35) both; }
+@keyframes side-menu-out { from { transform: none; } to { transform: translateX(100%); } }
+.side-menu.closing { animation: side-menu-out .2s cubic-bezier(.4, 0, .85, .35) both; }
+
 @keyframes sheet-down {
   from { transform: translate(-50%, -100%); }
   to   { transform: translate(-50%, 0); }

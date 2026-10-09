@@ -43,6 +43,29 @@ export function toast(message, kind = '') {
   toastTimer = setTimeout(() => { el.hidden = true; }, 4500);
 }
 
+/**
+ * Animate a sheet + its scrim OUT, then flip `hidden` when the exit lands.
+ * Logic stays synchronous (callers flip their own open-flags immediately);
+ * only the hide is deferred. reopenCheck() lets a fast re-open cancel the
+ * hide (the sheet was never display-toggled during the exit).
+ */
+export function animateSheetClose(sheet, overlay, { ms = 260, reopenCheck = () => false } = {}) {
+  const done = () => {
+    sheet.classList.remove('closing');
+    if (overlay) overlay.classList.remove('closing');
+    if (reopenCheck()) return;
+    sheet.hidden = true;
+    if (overlay) overlay.hidden = true;
+  };
+  if (sheet.hidden || !window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches) { done(); return; }
+  let settled = false;
+  const once = () => { if (!settled) { settled = true; done(); } };
+  sheet.addEventListener('animationend', once, { once: true });
+  setTimeout(once, ms); // failsafe (backgrounded tabs can stall animations)
+  if (overlay) overlay.classList.add('closing');
+  sheet.classList.add('closing');
+}
+
 export function setBusy(busy) {
   for (const btn of document.querySelectorAll('button')) btn.disabled = busy;
 }

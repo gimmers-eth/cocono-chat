@@ -2,7 +2,7 @@
 // list, new-chat launcher and the devices panel (list + approve pairing +
 // theme picker).
 
-import { $, setStatus, fmtTime, confirmModal, openLightbox, toast } from '../ui.js';
+import { $, setStatus, fmtTime, confirmModal, openLightbox, toast, animateSheetClose } from '../ui.js';
 import { humanError } from '../errors.js';
 import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
@@ -177,6 +177,7 @@ export function createHome({ client, chat, onLogout }) {
     if (settingsOpen && want) selectSettingsTab(want);
     if (!settingsOpen) {
       settingsOpen = true;
+      for (const el of [$('drawer-overlay'), $('settings-drawer')]) el.classList.remove('closing');
       $('drawer-overlay').hidden = false;
       $('settings-drawer').hidden = false;
       renderDevices();
@@ -193,9 +194,10 @@ export function createHome({ client, chat, onLogout }) {
 
   function closeSettings() {
     if (!settingsOpen) return;
-    settingsOpen = false;
-    $('settings-drawer').hidden = true;
-    $('drawer-overlay').hidden = true;
+    settingsOpen = false; // state flips now; the paint waits for the exit
+    animateSheetClose($('settings-drawer'), $('drawer-overlay'), {
+      reopenCheck: () => settingsOpen,
+    });
   }
 
   function paintMe(username) {

@@ -9,7 +9,7 @@
 // touches — unlike the earlier "focus class on a bubble" attempt, which the
 // click-triggered catchUp re-render wiped within the same gesture.
 
-import { $, setStatus, setChatOpen, fmtTime, confirmModal, toast } from '../ui.js';
+import { $, setStatus, setChatOpen, fmtTime, confirmModal, toast, animateSheetClose } from '../ui.js';
 import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
 import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl, premiumBadgeEl } from './peername.js';
@@ -938,6 +938,9 @@ export function createChat({ client, onHomeRefresh }) {
     } catch { profileBadges = []; }
     primePeerProfile(currentPeer); // avatar/premium cache update stays
     await renderProfileView();
+    profileSheetOpen = true;
+    $('profile-modal').classList.remove('closing');
+    $('profile-overlay').classList.remove('closing');
     $('profile-overlay').hidden = false;
     $('profile-modal').hidden = false;
     // chips/badges draw AFTER the sheet is visible (name-line component)
@@ -1019,6 +1022,9 @@ export function createChat({ client, onHomeRefresh }) {
     setRow($('profile-you-state'), $('profile-you-note'), 'trust ok', 'You: Trusted',
       'This is your public profile — exactly what mutually-added contacts see.');
 
+    profileSheetOpen = true;
+    $('profile-modal').classList.remove('closing');
+    $('profile-overlay').classList.remove('closing');
     $('profile-overlay').hidden = false;
     $('profile-modal').hidden = false;
     $('profile-modal').focus?.();
@@ -1088,9 +1094,13 @@ export function createChat({ client, onHomeRefresh }) {
   });
   $('btn-badge-nowear')?.addEventListener('click', closeBadgeModal);
 
+  let profileSheetOpen = false; // sync state flag; the exit paint is deferred
   function closeProfileView() {
-    $('profile-overlay').hidden = true;
-    $('profile-modal').hidden = true;
+    if (!profileSheetOpen && $('profile-modal').hidden) return;
+    profileSheetOpen = false;
+    animateSheetClose($('profile-modal'), $('profile-overlay'), {
+      reopenCheck: () => profileSheetOpen,
+    });
   }
 
   // Shared "back to menu": re-render the ladder row (it may have advanced
