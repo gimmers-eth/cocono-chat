@@ -295,6 +295,15 @@ img.own-avatar { border-radius: 50%; }
 @media (prefers-reduced-motion: no-preference) {
   .chat-view:not([hidden]) { animation: chat-slide-in .16s cubic-bezier(.22, .9, .3, 1) both; }
 }
+/* swipe/back close: the reverse hop — accelerated ease-IN so it leaves
+   quickly and never feels like it's being dragged away */
+@keyframes chat-slide-out {
+  from { transform: none; opacity: 1; }
+  to   { transform: translateX(18%); opacity: .55; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .chat-view.closing { animation: chat-slide-out .14s cubic-bezier(.4, 0, .85, .35) both; }
+}
 
 .chat-head {
   height: var(--head-h); flex: none; display: flex; align-items: center; gap: .6rem;

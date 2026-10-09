@@ -1418,6 +1418,7 @@ export function createChat({ client, onHomeRefresh }) {
       setComposerEnabled(!peerGone);
       $('chat-empty').hidden = true;
       $('chat-view').hidden = false;
+      $('chat-view').classList.remove('closing'); // opened mid-slide-out: cancel the leave
       setChatOpen(true);
       const last = await render();
       // history = a real conversation existed at open: something received,
@@ -1492,15 +1493,36 @@ export function createChat({ client, onHomeRefresh }) {
       if (peer) openChat(peer);
     });
 
+    // Closing is animated (slide back out to the right) but the LOGIC is
+    // immediate: currentPeer, body class and the modals drop synchronously,
+    // only the pane's `hidden` waits for the animation. Guards therefore
+    // test the .closing CLASS as well as hidden — the synthetic click a
+    // swipe leaves behind lands inside this ~140ms window.
+    const paneClosing = () => $('chat-view').classList.contains('closing');
     const closeChatPane = () => {
       currentPeer = null;
       closeProfileView();
       setChatOpen(false);
-      $('chat-view').hidden = true;
-      $('chat-empty').hidden = false;
       closeMsgModal();
       closeChatOpts();
       closeForward();
+      const view = $('chat-view');
+      $('chat-empty').hidden = false;
+      const finish = () => {
+        view.classList.remove('closing');
+        // never stomp a chat opened while the slide-out was still running
+        if (currentPeer) return;
+        view.hidden = true;
+      };
+      if (window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches && !view.hidden) {
+        let settled = false;
+        const done = () => { if (!settled) { settled = true; finish(); } };
+        view.addEventListener('animationend', done, { once: true });
+        setTimeout(done, 240); // failsafe: tab-hidden animations can stall
+        view.classList.add('closing');
+      } else {
+        finish();
+      }
       onHomeRefresh?.();
     };
     $('btn-chat-back').addEventListener('click', closeChatPane);
@@ -1545,7 +1567,7 @@ export function createChat({ client, onHomeRefresh }) {
     // the synthetic click a swipe-close leaves behind: once the pane is
     // hidden, taps must not pop the modal over the empty sidebar.
     $('chat-messages').addEventListener('click', (e) => {
-      if ($('chat-view').hidden) return;
+      if ($('chat-view').hidden || paneClosing()) return;
       const li = e.target.closest('li.msg');
       if (!li) return;
       getMessage(li.dataset.id).then((rec) => {
