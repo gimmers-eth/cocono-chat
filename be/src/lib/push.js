@@ -56,6 +56,29 @@ const topicFor = (type, senderUl = '') => {
  *   never transmitted). @returns {'sent'|'gone'|'no-subscription'|'skipped'|'error'}
  *   'gone'  => subscription expired at the push service; caller should clear it.
  */
+/**
+ * Blind 'badge' push for every push-subscribed device of an account that is
+ * NOT currently holding a live WS. Admin awards are the offline case (login
+ * -time awards land while the user is connected — the dm nudge + poll cover
+ * those). Repeated offline awards coalesce per RFC-8030 topic ('badge'),
+ * and the client poll dispatches ALL unseen grants in one modal queue when
+ * the app next opens — one push is all it takes.
+ */
+export async function pushBadgeHint(users, redis, config, ul) {
+  if (!pushEnabled(config)) return 'disabled';
+  let user = null;
+  try { user = await users.findOne({ ul }, { projection: { devices: 1 } }); } catch { return 'error'; }
+  let sent = 0;
+  for (const dev of user?.devices ?? []) {
+    if (!dev.push?.endpoint) continue;
+    try {
+      if (await redis.exists(presenceKey(ul, dev.id))) continue; // live device: nudge got it
+      if (await sendBlindPush(config, dev.push, 'badge') === 'sent') sent++;
+    } catch { /* best effort per device */ }
+  }
+  return sent ? 'sent' : 'none';
+}
+
 export async function sendBlindPush(config, subscription, type, senderUl = '') {
   if (!pushEnabled(config)) return 'skipped';
   if (!subscription?.endpoint) return 'no-subscription';

@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import { fail } from '../shared.js';
 import { cleanupAccountState, purgeFriendReferences } from '../../lib/accountState.js';
 import { createNotifier } from '../../lib/notify.js';
+import { pushBadgeHint } from '../../lib/push.js';
 import { effectiveLimit, readLimitsDoc } from '../../lib/limits.js';
 import { effectiveMaxDevices } from '../../lib/devicePolicy.js';
 import { badgeById, badgesFor, badgeOverview, evaluateBadges } from '../../lib/badges.js';
@@ -120,6 +122,7 @@ export default async function usersRoutes(app, { users, redis, config, messages,
     const res = await users.updateOne({ ul }, { $set: set });
     if (!res.matchedCount) return fail(reply, 'unknown_account', 'No such user', 404);
     await notifyAccount(ul, 'identity'); // the badge + cap changed; re-pull
+    if (premium) await pushBadgeHint(users, redis, config, ul); // new badge → offline hint
     return { ul, premium };
   });
 
@@ -149,10 +152,15 @@ export default async function usersRoutes(app, { users, redis, config, messages,
     const user = await users.findOne({ ul });
     if (user.awards?.[badge.id]) return { awarded: false, held: true, id: badge.id };
     const now = new Date().toISOString();
+    const gid = randomUUID();
     // awarding never auto-wears — wearing is the user's own choice
-    await users.updateOne({ ul }, { $set: { [`awards.${badge.id}`]: now } });
+    await users.updateOne({ ul }, { $set: { [`awards.${badge.id}`]: { at: now, gid } } });
+    // wake the client NOW (poll dispatch) instead of waiting for its 60s
+    // tick — and blind-push the devices that are NOT connected at all
+    await notifyAccount(ul, 'badges');
+    await pushBadgeHint(users, redis, config, ul);
     request.log.info(`[admin] awarded ${badge.id} to ${ul}`);
-    return { awarded: true, id: badge.id, at: now };
+    return { awarded: true, id: badge.id, gid, at: now };
   });
 
   // DELETE /api/admin/users/:username/badge/:id — revoke a CAPPED badge
@@ -166,13 +174,24 @@ export default async function usersRoutes(app, { users, redis, config, messages,
     }
     const user = await users.findOne({ ul }, { projection: { awards: 1, displayBadge: 1 } });
     if (!user) return fail(reply, 'unknown_account', 'No such user', 404);
+    const grant = user.awards?.[badge.id];
     const set = {};
     const unset = {};
-    if (user.awards?.[badge.id]) unset[`awards.${badge.id}`] = '';
+    const pull = {};
+    if (grant) {
+      unset[`awards.${badge.id}`] = '';
+      // CLEAR THE SEEN MARK too: legacy bare-id acks and the grant's own gid
+      // (a re-award after this must re-dispatch the modal on one device)
+      pull.badgesSeen = { $in: [badge.id, typeof grant === 'string' ? `${badge.id}:${grant}` : grant.gid] };
+    }
     if (user.displayBadge === badge.id) set.displayBadge = null;
     if (!Object.keys(unset).length && !Object.keys(set).length) return { revoked: false };
-    await users.updateOne({ ul }, { ...(Object.keys(unset).length ? { $unset: unset } : {}), ...(Object.keys(set).length ? { $set: set } : {}) });
-    await notifyAccount(ul, 'identity'); // client re-pulls /api/me: chip + row update live
+    await users.updateOne({ ul }, {
+      ...(Object.keys(unset).length ? { $unset: unset } : {}),
+      ...(Object.keys(pull).length ? { $pull: pull } : {}),
+      ...(Object.keys(set).length ? { $set: set } : {}),
+    });
+    await notifyAccount(ul, 'badges'); // client re-pulls: list, chip + picker update live
     return { revoked: true, id: badge.id };
   });
 

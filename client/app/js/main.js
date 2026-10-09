@@ -277,6 +277,11 @@ client.on('notice', ({ what }) => {
   } else if (what === 'profile') {
     // someone I follow edited their bio/photo: re-prime the peer caches
     home.refreshPeerProfiles?.();
+  } else if (what === 'badges') {
+    // admin awarded/revoked a badge on MY account: skip the 60s wait —
+    // poll now (dispatches any unseen-grant modal on whichever device wins
+    // the ack race) and resync the picker/chip
+    pollBadges().then(() => window.dispatchEvent(new Event('cocono:badges-changed'))).catch(() => {});
   } else {
     client.logger.debug('notice: unhandled what', JSON.stringify(what));
   }

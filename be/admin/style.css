@@ -215,3 +215,24 @@ details.diag summary { display: flex; gap: 0.6rem; align-items: center; flex-wra
 .rel-yes { color: #6fbf73; font-weight: 700; }
 #user-relations { padding-top: .25rem; }
 #user-relations h3 { margin: .2rem 0 .5rem; font-size: .8rem; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
+
+/* Badge images + info modal */
+.badge-info {
+  display: inline-flex; align-items: center; gap: .4rem;
+  background: none; border: 0; color: inherit; font: inherit; font-size: .88rem;
+  cursor: pointer; padding: .15rem .3rem; border-radius: 8px; text-align: left;
+}
+.badge-info:hover { background: rgba(255, 255, 255, 0.05); }
+.badge-info svg { flex: none; border-radius: 6px; }
+.badge-row { display: flex; flex-wrap: wrap; gap: .4rem; margin: .3rem 0; }
+#badge-overlay { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.6); }
+#badge-overlay[hidden] { display: none; }
+#badge-modal {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 61;
+  width: 24rem; max-width: 92vw; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 12px; padding: 1rem 1.25rem; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+#badge-modal[hidden] { display: none; }
+.badge-hero-art { text-align: center; margin: .3rem 0 .6rem; }
+.badge-modal-blurb { line-height: 1.45; }
+.badge-modal-facts { margin: .2rem 0 .4rem; align-items: center; }

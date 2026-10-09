@@ -216,6 +216,7 @@ function renderPanel() {
 const accountHead = (u) => `
   <div class="sec">
     <div class="pu-id"><strong>@${esc(u.u)}</strong>${u.premium ? ' <span class="badge gold-badge">★ premium</span>' : ''} <span class="dim mono">${esc(u.ul)}</span></div>
+    ${(u.badges ?? []).length ? `<div class="badge-row">${u.badges.map((b) => `<button class="badge-info" data-badge-info="${esc(b.id)}" title="badge details">${badgeArt(b.id, 20)} <span>${esc(badgeDef(b.id)?.label ?? b.id)}</span></button>`).join('')}</div>` : ''}
     <div class="dim">created ${fmtDate(u.createdAt)}</div>
   </div>`;
 
@@ -325,7 +326,7 @@ const PANEL_SECTIONS = {
           const held = (u.badges ?? []).find((b) => b.id === d.id);
           const awardable = d.awardable !== false && !held;
           return `<tr>
-            <td><strong>${esc(d.label)}</strong><br /><span class="dim mono">${esc(d.id)}</span></td>
+            <td><button class="badge-info" data-badge-info="${esc(d.id)}" title="badge details">${badgeArt(d.id, 26)} <span><strong>${esc(d.label)}</strong><br /><span class="dim mono">${esc(d.id)}</span></span></button></td>
             <td class="mono">+${d.score}</td>
             <td class="mono">${d.holders}${d.cap != null ? ` / ${d.cap}` : ''}${d.full ? ' <span class="badge no-badge">full</span>' : ''}</td>
             <td>${held ? `<span class="rel-yes">✓</span> <span class="dim">${esc(held.at ? new Date(held.at).toLocaleDateString() : '')}</span>` : '<span class="dim">—</span>'}</td>
@@ -369,6 +370,19 @@ function panelLimitsRows(ul) {
     .join('');
   return rows || '<tr><td colspan="5" class="dim">none applicable</td></tr>';
 }
+
+// ---- badge artwork for the admin panel ----
+// Mirrors client/app/js/badges.js (SVGs as strings since admin renders via
+// innerHTML). Labels/blurbs/scores/caps come from the SERVER catalog
+// (GET /api/admin/badges) — art is the only duplication, by design.
+const BADGE_ART = {
+  og: (px) => `<svg viewBox="0 0 100 100" width="${px}" height="${px}"><defs><linearGradient id="ogGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8f7ff0"/><stop offset="1" stop-color="#4b3fa8"/></linearGradient></defs><rect x="4" y="4" width="92" height="92" rx="24" fill="url(#ogGrad)"/><g fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round"><path d="M 51 36 A 15 15 0 1 0 51 62"/><path d="M 73 36 A 15 15 0 1 1 73 62"/></g><text x="50" y="88" text-anchor="middle" fill="#ffe9a8" font-size="20" font-weight="800" font-family="system-ui, sans-serif">OG</text></svg>`,
+  earlybird: (px) => `<svg viewBox="0 0 100 100" width="${px}" height="${px}"><rect x="4" y="4" width="92" height="92" rx="24" fill="#243a4d"/><path d="M18 62 L52 48 L84 24 L60 52 L88 60 L44 70 Z" fill="#7fd4ff"/><circle cx="74" cy="70" r="7" fill="#ffd76a"/></svg>`,
+  premium: (px) => `<svg viewBox="0 0 100 100" width="${px}" height="${px}"><rect x="4" y="4" width="92" height="92" rx="24" fill="#3a2f14"/><circle cx="50" cy="42" r="26" fill="#f0c04a"/><path d="M50 26 L54 36 L65 36 L56 42 L59 50 L50 45 L41 50 L44 42 L35 36 L46 36 Z" fill="#3a2f14"/><path d="M38 62 L32 88 L50 76 L68 88 L62 62" fill="#c79a2e"/></svg>`,
+  teacherspet: (px) => `<svg viewBox="0 0 100 100" width="${px}" height="${px}"><rect x="4" y="4" width="92" height="92" rx="24" fill="#2c3324"/><path d="M50 40 C64 30 82 40 80 58 C78 74 64 84 50 78 C36 84 22 74 20 58 C18 40 36 30 50 40 Z" fill="#d05252"/><path d="M52 36 C56 24 68 22 74 24 C70 34 60 38 52 36 Z" fill="#4c8a4f"/><path d="M50 8 L54 18 L64 18 L56 24 L59 34 L50 28 L41 34 L44 24 L36 18 L46 18 Z" fill="#f0c04a"/></svg>`,
+};
+const badgeArt = (id, px) => (BADGE_ART[id] ? BADGE_ART[id](px) : `<span class="dim">?</span>`);
+const badgeDef = (id) => (lastBadgeDefs ?? []).find((d) => d.id === id);
 
 let lastDiags = [];
 let lastUsers = [];
@@ -512,6 +526,36 @@ async function run(description, fn) {
 }
 
 $('btn-refresh').addEventListener('click', refresh);
+
+// ---- badge info modal (art + server-catalog facts + held context) ----
+function openBadgeInfo(id) {
+  const def = badgeDef(id);
+  const u = lastUsers.find((x) => x.ul === selectedUl);
+  const held = (u?.badges ?? []).find((b) => b.id === id);
+  $('badge-modal-title').textContent = def?.label ?? id;
+  const seat = def
+    ? (def.cap != null ? `${def.holders} of ${def.cap} seats taken`
+      : def.mode === 'derived' ? 'Follows the premium flag'
+      : 'Uncapped')
+    : '';
+  $('badge-modal-body').innerHTML = `
+    <div class="badge-hero-art">${badgeArt(id, 84)}</div>
+    <p class="badge-modal-blurb">${esc(def?.blurb ?? 'No description available.')}</p>
+    <p class="row badge-modal-facts">
+      ${def ? `<span class="badge gold-badge">+${def.score} CoCo</span>` : ''}
+      <span class="dim">${esc(seat)}</span>
+    </p>
+    <p class="dim small-text">${def?.auto ? 'Earned automatically when eligible — or granted from here.' : def && def.mode !== 'derived' ? 'Admin-granted only; never awarded automatically.' : ''}</p>
+    ${held ? `<p class="dim small-text">Awarded to @${esc(selectedUl)} on ${esc(new Date(held.at).toLocaleDateString())}</p>` : `<p class="dim small-text">@${esc(selectedUl ?? '')} does not hold this badge.</p>`}`;
+  $('badge-overlay').hidden = false;
+  $('badge-modal').hidden = false;
+}
+function closeBadgeInfo() {
+  $('badge-modal').hidden = true;
+  $('badge-overlay').hidden = true;
+}
+$('btn-badge-modal-close').addEventListener('click', closeBadgeInfo);
+$('badge-overlay').addEventListener('click', closeBadgeInfo);
 
 // ---- users page: search + pager ----
 $('users-search').addEventListener('input', () => {
@@ -772,6 +816,8 @@ document.addEventListener('click', (e) => {
 
 // ---- identity verification controls ----
 document.addEventListener('click', (e) => {
+  const info = e.target.closest?.('[data-badge-info]')?.dataset.badgeInfo;
+  if (info) { openBadgeInfo(info); return; }
   const tab = e.target.closest?.('[data-uptab]')?.dataset.uptab;
   if (tab) { showUserTab(tab); return; }
   // 'auto' clears the override → cap returns to the premium/verified policy
@@ -803,7 +849,9 @@ document.addEventListener('change', (e) => {
 $('btn-user-close').addEventListener('click', closePanel);
 $('user-overlay').addEventListener('click', closePanel);
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !$('user-panel').hidden) closePanel();
+  if (e.key !== 'Escape') return;
+  if (!$('badge-modal').hidden) { closeBadgeInfo(); return; }
+  if (!$('user-panel').hidden) closePanel();
 });
 
 // ---- photo lightbox (click a profile thumbnail to enlarge) ----

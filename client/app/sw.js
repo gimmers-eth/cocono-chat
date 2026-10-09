@@ -177,7 +177,10 @@ self.addEventListener('push', (event) => {
   const type = data.t || 'activity';
 
   if (type !== 'msg') {
-    event.waitUntil(showNotification(cachedTitle, 'New activity — open to see', type));
+    // type is the ONLY signal (blind push); deliberately generic —
+    // no badge name, points or any detail ever leaves the wire
+    const body = type === 'badge' ? 'You have a new badge' : 'New activity — open to see';
+    event.waitUntil(showNotification(cachedTitle, body, type));
     return;
   }
 

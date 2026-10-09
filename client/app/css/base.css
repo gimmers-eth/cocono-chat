@@ -773,8 +773,12 @@ body[data-view="blocked"] .page-footer { display: none; }
 #premium-overlay { z-index: 60; }
 #premium-modal { text-align: left; overflow: visible; z-index: 61; }
 #premium-modal .muted { line-height: 1.45; }
+.badge-modal-foot {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: .6rem; margin-top: .8rem; min-height: 1.2rem;
+}
 #premium-modal .premium-points {
-  text-align: right; margin: .8rem 0 0;
+  text-align: right; margin: 0;
   color: var(--accent); font-weight: 800; font-size: 1.02rem;
   text-shadow: 0 0 12px rgb(from var(--accent) r g b / .4);
 }
@@ -833,4 +837,8 @@ body[data-view="blocked"] .page-footer { display: none; }
 .badge-table th { text-align: left; color: var(--muted); font-weight: 500; font-size: .74rem; text-transform: uppercase; letter-spacing: .05em; padding: .2rem .4rem; }
 .badge-table td { padding: .35rem .4rem; border-top: 1px solid var(--divider); vertical-align: middle; }
 .badge-table td:first-child { display: flex; align-items: center; gap: .35rem; font-weight: 600; }
-.badge-dates { margin: .15rem 0 0; text-align: left; }
+
+/* Badge modal hero: guaranteed square, image-first (all badge types) */
+.premium-hero svg { width: 96px; height: 96px; display: inline-block; border-radius: 18px; }
+.premium-hero .badge-ic-premium { display: inline-flex; align-items: center; justify-content: center; }
+.badge-hero { line-height: 0; }

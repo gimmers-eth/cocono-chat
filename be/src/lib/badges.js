@@ -12,6 +12,7 @@
 // the same queue step, so two near-simultaneous signups can never both take
 // the 10th OG slot. Awards happen AFTER signup (the user signs up, logs in,
 // then their client's badge poll picks the award up).
+import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 
 export class Badge {
@@ -22,6 +23,7 @@ export class Badge {
   // must never read the module singleton directly.
   scoreOf(_config) { return 0; }
   capOf(_config) { return null; } // null = uncapped
+  blurb = null; // the story the modals tell — one source for admin + app
   // 'auto'    — queued eligibility (signup/login/poll)
   // 'admin'   — awardable ONLY from the admin panel (Teacher's Pet)
   // 'derived' — never stored; read off an account flag (premium)
@@ -36,6 +38,7 @@ export class OgBadge extends Badge {
   id = 'og';
   mode = 'auto';
   label = 'OG';
+  blurb = 'One of the first ten accounts on CoCoNo. This seat is gone forever once ten are claimed.';
   scoreOf() { return 10; }
   capOf(cfg) { return cfg.ogBadgeCap ?? 10; }
   async eligible(user, ctx) {
@@ -53,6 +56,7 @@ export class EarlyBirdBadge extends Badge {
   id = 'earlybird';
   mode = 'auto';
   label = 'Early Bird';
+  blurb = 'Joined CoCoNo before the end of 2026 — one of the first 1,000 accounts to get the word out.';
   scoreOf() { return 3; }
   capOf(cfg) { return cfg.earlyBirdCap ?? 1000; }
   async eligible(user, ctx) {
@@ -68,6 +72,7 @@ class PremiumBadge extends Badge {
   id = 'premium';
   mode = 'derived';
   label = 'Premium';
+  blurb = 'A premium subscriber. The gold certificate funds the platform and lifts CoCo reputation.';
   scoreOf(cfg) { return cfg.cocoPremiumBonus ?? 5; }
   async eligible(user) { return user.premium === true; }
 }
@@ -79,18 +84,32 @@ class TeachersPetBadge extends Badge {
   label = "Teacher's Pet";
   scoreOf() { return 1; }
   mode = 'admin';
+  blurb = "Hand-picked by the platform staff — a small apple for the teacher's pet. Awarded only from the admin panel.";
 }
 
 export const BADGES = [new OgBadge(), new EarlyBirdBadge(), new PremiumBadge(), new TeachersPetBadge()];
 export const badgeById = new Map(BADGES.map((b) => [b.id, b]));
 
 /** The unified held list, award dates included. Pure — no ctx needed. */
+/**
+ * The unified held list, grant-unique. Awards are stored as
+ *   awards.<badgeId> = { at, gid }        (gid = unique per grant)
+ * with legacy bare ISO strings normalized on read (gid = `${id}:${at}`).
+ * Premium is derived from its flag. The gid is what the client's seen-ack
+ * records — so a REVOKED-then-RE-AWARDED badge is a brand-new grant, gets a
+ * new gid, and dispatches a fresh modal/notification (the bug this fixes).
+ */
 export function badgesFor(user) {
   const out = [];
-  for (const [id, at] of Object.entries(user.awards ?? {})) {
-    if (badgeById.has(id)) out.push({ id, at });
+  for (const [id, grant] of Object.entries(user.awards ?? {})) {
+    if (!badgeById.has(id)) continue;
+    if (typeof grant === 'string') out.push({ id, at: grant, gid: `${id}:${grant}` });
+    else if (grant) out.push({ id, at: grant.at ?? null, gid: grant.gid || `${id}:${grant.at ?? ''}` });
   }
-  if (user.premium === true) out.push({ id: 'premium', at: user.premiumAt ?? null });
+  if (user.premium === true) {
+    const at = user.premiumAt ?? null;
+    out.push({ id: 'premium', at, gid: `premium:${at ?? 'now'}` });
+  }
   return out.sort((a, b) => (badgeById.get(b.id).score - badgeById.get(a.id).score) || a.id.localeCompare(b.id));
 }
 
@@ -143,9 +162,9 @@ export function evaluateBadges(users, config, ul) {
         const holders = await users.countDocuments({ [`awards.${badge.id}`]: { $exists: true } });
         if (holders >= badge.capOf(config)) continue; // hard cap (belt to eligible's braces)
         const now = new Date().toISOString();
-        // all users have NO badge worn by default — wearing is a choice the
-        // user makes (the award modal offers it), never a side effect
-        await users.updateOne({ ul }, { $set: { [`awards.${badge.id}`]: now } });
+        // award = unique GRANT (gid): revoking and re-awarding later must
+        // re-dispatch, so seen-acks key on gid, not badge id
+        await users.updateOne({ ul }, { $set: { [`awards.${badge.id}`]: { at: now, gid: randomUUID() } } });
         user.awards = { ...(user.awards ?? {}), [badge.id]: now };
       }
     })
@@ -164,6 +183,7 @@ export async function badgeOverview(users, config) {
     rows.push({
       id: badge.id,
       label: badge.label,
+      blurb: badge.blurb,
       score: badge.scoreOf(config),
       cap,
       holders,

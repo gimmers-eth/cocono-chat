@@ -35,6 +35,8 @@
 //               peer-profile cache (photos/bios of others).
 //   'identity' YOUR account's identity-review state changed (admin
 //               verified/unverified you): re-read GET /api/me.
+//   'badges'   YOUR badge set changed (admin award/revoke): poll
+//               GET /api/me/badges immediately instead of the 60s tick.
 export function createNotifier({ redis, users }) {
   async function publish(ul, dv, what) {
     try {

@@ -729,15 +729,7 @@ export function createChat({ client, onHomeRefresh }) {
       chip.dataset.owner = profileSubject ?? currentPeer ?? '';
       row.append(chip);
     }
-    // awarded dates: bottom-left of the badge area, one quiet line
-    const dates = $('profile-badges-dates');
-    if (dates) {
-      const withDates = held.filter((b) => b.at);
-      dates.textContent = withDates.length
-        ? `Awarded ${withDates.map((b) => `${BADGE_UI.get(b.id).label} ${new Date(b.at).toLocaleDateString()}`).join(' · ')}`
-        : '';
-      dates.hidden = !withDates.length;
-    }
+    // the awarded DATE lives in the badge modal only — the row is pure chips
   }
 
   async function renderProfileView() {
@@ -968,9 +960,8 @@ export function createChat({ client, onHomeRefresh }) {
     $('premium-modal-text').textContent = owner
       ? `@${owner} earned the ${def.label} badge.`
       : `You earned the ${def.label} badge!`;
-    $('premium-modal-awarded').textContent = at
-      ? `Awarded ${new Date(at).toLocaleString()}`
-      : '';
+    // date only, in the viewer's locale — the time was noise
+    $('premium-modal-awarded').textContent = at ? `Awarded ${new Date(at).toLocaleDateString()}` : '';
     $('premium-modal-points').textContent = `+ ${def.points} CoCo`;
     const wearRow = $('badge-wear-row');
     if (wearRow) wearRow.hidden = !offerWear;
@@ -1550,13 +1541,12 @@ export function createChat({ client, onHomeRefresh }) {
       const owner = String(client.username ?? '');
       for (const b of (e.detail ?? [])) {
         showBadgeModal(b.id, { at: b.at, owner, offerWear: true });
-        const def = BADGE_UI.get(b.id);
-        if (def && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        // generic on purpose: the notification says only THAT a badge
+        // arrived — which badge, its points and blurb appear solely in the
+        // modal (the tag is an invisible de-dupe key, never displayed)
+        if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
           try {
-            new Notification(`New badge: ${def.label}`, {
-              body: `+${def.points} CoCo — tap to see it. ${def.blurb ?? ''}`.slice(0, 180),
-              tag: `badge-${b.id}`,
-            });
+            new Notification('You have a new badge', { tag: `badge-${b.id}` });
           } catch { /* notification rejected — the modal still fires */ }
         }
       }

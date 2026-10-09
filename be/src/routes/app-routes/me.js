@@ -73,9 +73,11 @@ export default async function meRoutes(app, { users, redis, config, idDocs, sett
     user = await users.findOne({ ul }); // re-read: eval may have just awarded
     const held = badgesFor(user);
     const seen = new Set(user.badgesSeen ?? []);
-    const fresh = held.filter((b) => !seen.has(b.id));
+    // unseen = its GRANT id not acked yet; a bare legacy id in seen (old
+    // scheme acked by badge id) still suppresses one-time re-notification
+    const fresh = held.filter((b) => !seen.has(b.gid) && !seen.has(b.id));
     if (fresh.length) {
-      await users.updateOne({ ul }, { $set: { badgesSeen: held.map((b) => b.id) } });
+      await users.updateOne({ ul }, { $addToSet: { badgesSeen: { $each: fresh.map((b) => b.gid) } } });
     }
     return {
       badges: held,

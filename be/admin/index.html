@@ -183,6 +183,15 @@
     <div id="user-panel-body"></div>
     <div id="user-relations" hidden></div>
   </aside>
+  <!-- Badge info modal: opened by clicking any badge image in the panel. -->
+  <div id="badge-overlay" hidden></div>
+  <aside id="badge-modal" hidden aria-label="Badge details">
+    <header class="pu-bar">
+      <h2 id="badge-modal-title">Badge</h2>
+      <button id="btn-badge-modal-close" class="tiny">close</button>
+    </header>
+    <div id="badge-modal-body"></div>
+  </aside>
   <div id="lightbox" hidden><img id="lightbox-img" alt="profile photo, enlarged" /></div>
   <script type="module" src="/app.js"></script>
 </body>

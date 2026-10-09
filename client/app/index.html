@@ -441,7 +441,6 @@
       <section class="profile-section" id="profile-badges-section">
         <h3>Badges</h3>
         <div id="profile-badges" class="badge-row"></div>
-        <p id="profile-badges-dates" class="muted small badge-dates" hidden></p>
         <p id="profile-badges-none" class="muted small" hidden>This user hasn't earned any badges yet.</p>
       </section>
 
@@ -471,11 +470,14 @@
     <p class="premium-hero" id="premium-modal-hero"></p>
     <p id="premium-modal-text" class="muted"></p>
     <p id="premium-modal-desc" class="muted small"></p>
-    <p id="premium-modal-awarded" class="muted small"></p>
-    <p class="premium-points" id="premium-modal-points">+ 5 CoCo</p>
     <div class="row-actions" id="badge-wear-row" hidden>
       <button id="btn-badge-wear" class="btn btn-small btn-primary">Wear it next to my name</button>
       <button id="btn-badge-nowear" class="linkish">No thanks</button>
+    </div>
+    <!-- foot row: awarded date bottom-LEFT, CoCo points bottom-right -->
+    <div class="badge-modal-foot">
+      <span id="premium-modal-awarded" class="muted small"></span>
+      <span class="premium-points" id="premium-modal-points">+ 5 CoCo</span>
     </div>
   </section>
 
