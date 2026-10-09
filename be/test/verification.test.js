@@ -280,12 +280,6 @@ test('user stats: vouch counts are EXCLUSIVE stage buckets', async () => {
     assert.equal(stats.statusCode, 200);
     assert.deepEqual(stats.json(), { u: 'carol', addedBy: 0, verifiedBy: 0, trustedBy: 1, coco: 3, socialTrusted: false, premium: false });
 
-    // carol's own token works too, and stages stay exclusive when a second
-    // vouch sits mid-ladder (alice adds+verifies dave… use carol as voucher)
-    await trustAndVerifyTargetStep2(app, tC, hB);
-    const bStats = await app.inject({ method: 'GET', url: '/api/users/bobby/stats', headers: { authorization: `Bearer ${tC}` } });
-    assert.deepEqual(bStats.json(), { u: 'bobby', addedBy: 0, verifiedBy: 1, trustedBy: 0, coco: 1, socialTrusted: false, premium: false });
-
     // UNVERIFIED vouches carry NO weight: a throwaway cannot boost anyone…
     const dave = makeClient();
     const dD = await signupUser(app, dave, 'davey');
@@ -299,6 +293,12 @@ test('user stats: vouch counts are EXCLUSIVE stage buckets', async () => {
     const postFlip = (await app.inject({ method: 'GET', url: '/api/users/carol/stats', headers: hB })).json();
     assert.equal(postFlip.trustedBy, 2, 'verified voucher tips the vouch in');
     assert.equal(postFlip.coco, 6, '+3 per trusted vouch');
+
+    // carol's own token works too, and stages stay exclusive when a second
+    // vouch sits mid-ladder (alice adds+verifies dave… use carol as voucher)
+    await trustAndVerifyTargetStep2(app, tC, hB);
+    const bStats = await app.inject({ method: 'GET', url: '/api/users/bobby/stats', headers: { authorization: `Bearer ${tC}` } });
+    assert.deepEqual(bStats.json(), { u: 'bobby', addedBy: 0, verifiedBy: 1, trustedBy: 0, coco: 1, socialTrusted: false, premium: false });
 
     // unknown -> 404, counts never expose WHO
     assert.equal((await app.inject({ method: 'GET', url: '/api/users/nosuchuser/stats', headers: hB })).statusCode, 404);
