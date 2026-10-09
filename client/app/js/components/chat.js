@@ -1419,6 +1419,10 @@ export function createChat({ client, onHomeRefresh }) {
       $('chat-empty').hidden = true;
       $('chat-view').hidden = false;
       $('chat-view').classList.remove('closing'); // opened mid-slide-out: cancel the leave
+      // animate the (possibly already visible — chat SWITCH) pane entering.
+      // class + forced reflow restarts it every time; display-toggling alone
+      // would not fire when switching A -> B with the pane staying shown.
+      playChatEnter();
       setChatOpen(true);
       const last = await render();
       // history = a real conversation existed at open: something received,
@@ -1493,7 +1497,19 @@ export function createChat({ client, onHomeRefresh }) {
       if (peer) openChat(peer);
     });
 
-    // Closing is animated (slide back out to the right) but the LOGIC is
+    // Opening a chat slides the pane in from the left (see .chat-view.entering
+    // in base.css) — restartable by class, so SWITCHING chats re-animates.
+    function playChatEnter() {
+      const view = $('chat-view');
+      if (!window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches) return;
+      view.classList.remove('entering');
+      void view.offsetWidth; // restart the animation
+      view.classList.add('entering');
+      view.addEventListener('animationend', () => view.classList.remove('entering'), { once: true });
+    }
+
+    // Closing is animated (slide back out to the left, following the back
+    // arrow) but the LOGIC is
     // immediate: currentPeer, body class and the modals drop synchronously,
     // only the pane's `hidden` waits for the animation. Guards therefore
     // test the .closing CLASS as well as hidden — the synthetic click a

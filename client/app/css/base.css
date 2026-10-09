@@ -138,7 +138,7 @@ img.logo { object-fit: cover; background: none; }
    js/keyboard.js; 100dvh is the boot/no-VisualViewport fallback. Result:
    opening the keyboard shrinks the conversation between the header and the
    keys instead of pushing the header off-screen. */
-.app-shell { display: flex; height: var(--app-h, 100dvh); overflow: hidden; transition: height .18s ease-out; }
+.app-shell { display: flex; height: var(--app-h, 100dvh); overflow: hidden; }
 
 .sidebar {
   width: 100%; min-width: 0; display: flex; flex-direction: column;
@@ -292,20 +292,39 @@ img.own-avatar { border-radius: 50%; }
    restarts naturally because [hidden] (display:none) -> shown re-triggers it.
    Reduced-motion users get it instantly, no slide. */
 @keyframes chat-slide-in {
-  from { transform: translateX(18%); opacity: .55; }
+  from { transform: translateX(-18%); opacity: .55; }
   to   { transform: none; opacity: 1; }
 }
+/* class-driven (JS adds .entering) so SWITCHING chats — where the pane is
+   never display-toggled and a selector-based animation could not restart —
+   animates the new conversation in too */
 @media (prefers-reduced-motion: no-preference) {
-  .chat-view:not([hidden]) { animation: chat-slide-in .16s cubic-bezier(.22, .9, .3, 1) both; }
+  .chat-view.entering { animation: chat-slide-in .16s cubic-bezier(.22, .9, .3, 1) both; }
 }
 /* swipe/back close: the reverse hop — accelerated ease-IN so it leaves
    quickly and never feels like it's being dragged away */
 @keyframes chat-slide-out {
   from { transform: none; opacity: 1; }
-  to   { transform: translateX(18%); opacity: .55; }
+  to   { transform: translateX(-18%); opacity: .55; }
 }
 @media (prefers-reduced-motion: no-preference) {
   .chat-view.closing { animation: chat-slide-out .14s cubic-bezier(.4, 0, .85, .35) both; }
+}
+
+/* Mobile: 18% travel on a narrow pane covers few physical pixels, so the
+   identical duration reads as abrupt versus desktop. Phones get a slightly
+   slower, slightly longer glide — still quick, just legible. */
+@media (prefers-reduced-motion: no-preference) and (max-width: 720px) {
+  @keyframes chat-slide-in {
+    from { transform: translateX(-26%); opacity: .45; }
+    to   { transform: none; opacity: 1; }
+  }
+  @keyframes chat-slide-out {
+    from { transform: none; opacity: 1; }
+    to   { transform: translateX(-26%); opacity: .45; }
+  }
+  .chat-view.entering { animation-duration: .22s; }
+  .chat-view.closing { animation-duration: .19s; }
 }
 
 .chat-head {
