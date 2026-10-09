@@ -1387,6 +1387,19 @@ export function createChat({ client, onHomeRefresh }) {
     }
   }
 
+  // Opening a chat slides the pane in from the left (see .chat-view.entering
+  // in base.css). CLASS-driven with a forced-reflow restart, so SWITCHING
+  // chats — where the pane is never display-toggled — re-animates too.
+  // (Component scope: both openChat and the wire() close path can see it.)
+  function playChatEnter() {
+    const view = $('chat-view');
+    if (!window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches) return;
+    view.classList.remove('entering');
+    void view.offsetWidth; // restart the animation
+    view.classList.add('entering');
+    view.addEventListener('animationend', () => view.classList.remove('entering'), { once: true });
+  }
+
   async function openChat(username) {
     const status = $('home-status');
     try {
@@ -1496,17 +1509,6 @@ export function createChat({ client, onHomeRefresh }) {
       e.target.hidden = true;
       if (peer) openChat(peer);
     });
-
-    // Opening a chat slides the pane in from the left (see .chat-view.entering
-    // in base.css) — restartable by class, so SWITCHING chats re-animates.
-    function playChatEnter() {
-      const view = $('chat-view');
-      if (!window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches) return;
-      view.classList.remove('entering');
-      void view.offsetWidth; // restart the animation
-      view.classList.add('entering');
-      view.addEventListener('animationend', () => view.classList.remove('entering'), { once: true });
-    }
 
     // Closing is animated (slide back out to the left, following the back
     // arrow) but the LOGIC is
