@@ -550,10 +550,23 @@ export function createChat({ client, onHomeRefresh }) {
     warn.classList.toggle('warn', tier === 'warn');
     warn.hidden = !text;
     if (text) {
-      warn.replaceChildren(
+      const kids = [
         iconEl(iconKey ?? 'notFriend', tier === 'danger' ? 'icon-danger' : 'icon-warn'),
         document.createTextNode(` ${text}`),
-      );
+      ];
+      // STRANGER bar carries a direct Add button — the warning's whole
+      // message is "add them", so let the bar finish the job. Suppressed
+      // whenever a key conflict/change is on screen (never fast-track
+      // straight past a live security alert).
+      if (state === PS.STRANGER && !conflictAlert(ent, pin) && pinState !== 'changed') {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'warn-action';
+        btn.textContent = `Add ${currentPeer}`;
+        btn.addEventListener('click', () => { btn.disabled = true; addUser().finally(() => { btn.disabled = false; }); });
+        kids.push(btn);
+      }
+      warn.replaceChildren(...kids);
     }
   }
 

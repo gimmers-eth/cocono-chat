@@ -338,6 +338,21 @@ img.own-avatar { border-radius: 50%; }
 #msg-modal .msg-modal-text { flex: 1 1 auto; max-height: none; }
 .linkish.danger { color: var(--danger); }
 
+/* action pill inside the trust warning bars (e.g. "Add <user>") */
+.chat-warn .warn-action {
+  display: inline-block;
+  margin: 6px 0 0 2px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.chat-warn .warn-action:hover { background: rgba(255, 255, 255, 0.12); }
+
 /* drawer head: logout + close sit together as a pair */
 .drawer-actions { display: inline-flex; align-items: center; gap: 6px; }
 .icon-btn.danger { color: var(--danger); }

@@ -202,7 +202,7 @@ export default async function friendsRoutes(app, { users, redis, config, setting
     // the peer's view of THIS relation just moved — nudge. A brand-new add
     // gets its own kind so the client can raise a real OS notification
     // ("someone added you"); a re-bind is just ordinary list churn.
-    await notifyAccount(target, freshAdd ? 'request' : 'friends');
+    await notifyAccount(target, freshAdd ? 'request' : 'friends', { by: ul });
     return { friends: await enriched(ul) };
   });
 
@@ -227,7 +227,7 @@ export default async function friendsRoutes(app, { users, redis, config, setting
     // The peer's derived view moved too — and when someone CONFIRMS us
     // (verify) or EXTENDS trust, that is a headline event: dedicated nudge
     // kinds so the client always OS-notifies. Undoing is quiet churn.
-    if (on) await notifyAccount(target, field === 'v' ? 'verify' : 'trusts');
+    if (on) await notifyAccount(target, field === 'v' ? 'verify' : 'trusts', { by: ul });
     else await notifyAccount(target, 'friends');
     return { friends: await enriched(ul) };
   }

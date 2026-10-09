@@ -19,12 +19,17 @@ import { initBadgeNotify, osNotify } from './notify.js';
 // Generic lock-screen-safe copy for relationship headline notices — no names,
 // no counts: the notification surfaces on the lock screen and the push/OS
 // path is not E2EE. The app carries the detail once opened.
-const NOTICE_TEXT = {
-  request: 'Someone added you as a friend',
-  verify: 'A contact verified you',
-  trusts: 'A contact trusted you',
-  verified: 'Your account is verified!',
-};
+// Named where the nudge carries `by` (who acted): these notices render
+// locally over the authenticated WS — the name never crosses a push
+// surface, and the recipient's own friends-list read reveals it anyway.
+function noticeText(what, by) {
+  const who = by ? `@${by}` : 'A contact';
+  if (what === 'request') return by ? `${who} added you` : 'Someone added you';
+  if (what === 'verify') return `${who} verified you`;
+  if (what === 'trusts') return `${who} trusted you`;
+  if (what === 'verified') return 'Your account is verified!';
+  return '';
+}
 import { putAppTitle, takePendingChat } from './swkv.js';
 
 // Debug console logging: flip localStorage.setItem('cocono.debug','1') or use
@@ -168,6 +173,12 @@ async function enterApp({ gesture = false, offline = false } = {}) {
     if (peer) chat.openChat(peer).catch(() => {});
   }).catch(() => {});
 
+  // Page-fallback notifications (no active SW) carry their click as a window
+  // event — same destination as the SW path: straight into that chat.
+  window.addEventListener('cocono:open-chat', (e) => {
+    if (e.detail) chat.openChat(String(e.detail)).catch(() => {});
+  });
+
   // Shared chat link (?chat=<username>): consumed here so it survives the
   // auth screen — whoever lands logged in or signs up mid-session gets
   // exactly that conversation opened once there is an account to open it as.
@@ -263,7 +274,7 @@ auth.wire();
 // badge modal.
 const badgeNotify = initBadgeNotify({ client }); // poll loop + modal dispatch + OS-notification dedup in js/notify.js
 
-client.on('notice', ({ what }) => {
+client.on('notice', ({ what, by }) => {
   if (!client.token) return;
   if (what === 'friends' || what === 'gone') {
     // add / remove / un-add-revoke ('friends') and account-deletion purge
@@ -288,13 +299,14 @@ client.on('notice', ({ what }) => {
     // confirmed my safety number, or extended trust. Re-pull the graph AND
     // raise a clickable OS notification ALWAYS — foreground too, by explicit
     // request; these are rare enough to deserve the interruption.
-    osNotify(NOTICE_TEXT[what]);
+    // name the actor AND route the tap straight into their chat
+    osNotify(noticeText(what, by), `cocono-${what}`, by ?? '');
     reconcileFriends().catch(() => { /* next entry reconciles */ });
   } else if (what === 'verified') {
     // MY account just became Verified (admin decision): headline notice plus
     // the full resync — the Verified BADGE itself arrives through the badge
     // poll (modal), and offline devices get the server's badge push hint.
-    osNotify(NOTICE_TEXT.verified);
+    osNotify(noticeText('verified'), 'cocono-verified');
     home.refreshIdentity?.().catch?.(() => {});
     badgeNotify.poll().catch(() => {});
     reconcileFriends().catch(() => {});

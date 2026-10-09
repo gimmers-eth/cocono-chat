@@ -7,18 +7,26 @@
 // `text` must be generic (no peer names, no counts beyond "a contact"): the
 // notification may render on the lock screen, and the OS/notification service
 // is not E2EE. The app itself carries the detail once opened.
-export function osNotify(text, tag = 'cocono-activity') {
+// `peer` (optional): tapping the notice opens the chat with that user. It
+// rides only LOCAL plumbing — the SW's notification.data and the page
+// fallback's click handler — never a push service; the name is already on
+// screen in the notice body anyway.
+export function osNotify(text, tag = 'cocono-activity', peer = '') {
   if (typeof Notification !== 'undefined' && Notification.permission !== 'granted') return Promise.resolve();
+  const focusSelf = () => {
+    window.focus();
+    if (peer) window.dispatchEvent(new CustomEvent('cocono:open-chat', { detail: peer }));
+  };
   const page = () => {
     try {
       const n = new Notification(text, { tag });
-      n.onclick = () => { window.focus(); };
+      n.onclick = focusSelf;
     } catch { /* engine refused */ }
   };
   return (navigator.serviceWorker?.getRegistration?.() ?? Promise.resolve(null))
     .then((reg) => {
       if (!reg) { page(); return; }
-      try { reg.showNotification(text, { tag, data: { type: 'app' } }); }
+      try { reg.showNotification(text, { tag, data: { type: 'app', peer: peer || undefined } }); }
       catch { page(); }
     })
     .catch(page);

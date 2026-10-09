@@ -37,18 +37,33 @@
 //               verified/unverified you): re-read GET /api/me.
 //   'badges'   YOUR badge set changed (admin award/revoke): poll
 //               GET /api/me/badges immediately instead of the 60s tick.
+//   'request'  SOMEONE ADDED you as a contact. Carries `by` (their ul): the
+//               client OS-notifies "@by added you" and a tap opens the chat.
+//   'verify'   A contact CONFIRMED your safety number (their v-flag on you).
+//               Carries `by`. Headline event: always OS-notified.
+//   'trusts'   A contact EXTENDED TRUST to you (their t-flag on you).
+//               Carries `by`. Headline event: always OS-notified.
+//   'verified' YOUR account became Verified (admin decision): headline OS
+//               notice + the auto Verified badge arrives via 'badges'.
+//
+// `by` IS ALLOWED HERE although nudges are content-free by doctrine: it
+// names only a fact the recipient's own authenticated re-pull already
+// reveals (their friends list shows who added/flagged them). And these
+// notices render LOCALLY over the authenticated WS — never a blind push
+// surface. Push stays blind; do not route relationship nudges through it.
 export function createNotifier({ redis, users }) {
-  async function publish(ul, dv, what) {
+  async function publish(ul, dv, what, extra) {
     try {
-      await redis.publish(`dm:${ul}:${dv}`, JSON.stringify({ type: 'notice', what }));
+      await redis.publish(`dm:${ul}:${dv}`, JSON.stringify({ type: 'notice', what, ...(extra ?? {}) }));
     } catch { /* best-effort: a nudge must never fail a mutation */ }
   }
 
-  /** Nudge every device of one account. */
-  async function notify(ul, what) {
+  /** Nudge every device of one account. `extra` may carry `by` (see
+      taxonomy — only facts the recipient's own re-pull reveals). */
+  async function notify(ul, what, extra) {
     try {
       const doc = await users.findOne({ ul }, { projection: { 'devices.id': 1 } });
-      for (const dev of doc?.devices ?? []) await publish(ul, dev.id, what);
+      for (const dev of doc?.devices ?? []) await publish(ul, dev.id, what, extra);
     } catch { /* best-effort */ }
   }
 
