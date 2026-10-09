@@ -1044,31 +1044,68 @@ body[data-view="blocked"] .page-footer { display: none; }
    winning the tie on DOM order, letting its scrim close the sheet under an
    open premium modal). Also keep lightbox (>70) above this one. */
 #premium-overlay { z-index: 60; }
-#premium-modal { text-align: left; overflow: visible; z-index: 61; }
+/* ---- the badge modal's shine choreography -------------------------------
+   ONE custom property (--badge-glow, set per badge by showBadgeModal)
+   dresses the whole panel: the tinted wash behind the hero, the glowing
+   border, the halo ring spinning behind the artwork, the gradient title,
+   the points pill. The artwork's own gloss band and twinkles are animated
+   from here too (see .badge-glint / .badge-spark below). */
+#premium-modal {
+  --badge-glow: var(--accent);
+  text-align: left; overflow: visible; z-index: 61;
+  /* an award CARD, not a diagnostics sheet: narrow, centred, jewellery-first */
+  width: min(400px, calc(100% - 2rem));
+  padding-bottom: 1.1rem;
+}
+/* the sticky opaque header band was shearing the top wash off the card —
+   this modal's content is short, it neither sticks nor paints over */
+#premium-modal .drawer-head { position: static; background: transparent; }
+#premium-modal-text, #premium-modal-desc { text-align: center; }
+#premium-modal .row-actions { justify-content: center; }
+  background:
+    radial-gradient(120% 85% at 50% -12%, color-mix(in srgb, var(--badge-glow) 26%, transparent), transparent 62%),
+    var(--panel);
+  border-color: color-mix(in srgb, var(--badge-glow) 42%, var(--border));
+  box-shadow:
+    0 18px 60px rgb(0 0 0 / .55),
+    0 0 46px color-mix(in srgb, var(--badge-glow) 26%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / .09);
+  animation: badge-modal-in .45s cubic-bezier(.16, 1.3, .3, 1);
+}
+@keyframes badge-modal-in {
+  0% { transform: translate(-50%, -50%) scale(.86); opacity: 0; }
+  60% { transform: translate(-50%, -50%) scale(1.03); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+/* the title wears the badge colour with a slow shine sweep across it */
+#premium-title {
+  background: linear-gradient(100deg,
+    var(--text) 18%, color-mix(in srgb, var(--badge-glow) 80%, #fff) 38%, #fff 50%,
+    color-mix(in srgb, var(--badge-glow) 80%, #fff) 62%, var(--text) 82%);
+  background-size: 260% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent; -webkit-text-fill-color: transparent;
+  animation: badge-title-shine 4.5s linear infinite;
+}
+@keyframes badge-title-shine { 0% { background-position: -150% 0; } 100% { background-position: 150% 0; } }
 #premium-modal .muted { line-height: 1.45; }
 .badge-modal-foot {
-  display: flex; justify-content: space-between; align-items: baseline;
+  display: flex; justify-content: space-between; align-items: center;
   gap: .6rem; margin-top: .8rem; min-height: 1.2rem;
 }
+/* the CoCo points as a lit pill in the badge's own colour */
 #premium-modal .premium-points {
-  text-align: right; margin: 0;
-  color: var(--accent); font-weight: 800; font-size: 1.02rem;
-  text-shadow: 0 0 12px rgb(from var(--accent) r g b / .4);
-}
-.premium-hero i { font-size: 3rem; color: #f0c04a; animation: premium-glow 2.8s ease-in-out infinite; }
-@keyframes premium-glow {
-  0%, 100% {
-    text-shadow: 0 0 8px rgba(240, 192, 74, .30), 0 0 18px rgba(240, 192, 74, .22);
-  }
-  50% {
-    text-shadow:
-      0 0 14px rgba(240, 192, 74, .60),
-      0 0 32px rgba(240, 192, 74, .50),
-      0 0 58px rgba(240, 192, 74, .22);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .premium-hero i { animation: none; text-shadow: 0 0 14px rgba(240, 192, 74, .4); }
+  margin: 0; padding: .18rem .7rem; border-radius: 999px;
+  color: color-mix(in srgb, var(--badge-glow) 62%, #fff);
+  font-weight: 800; font-size: .95rem;
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--badge-glow) 34%, transparent),
+    color-mix(in srgb, var(--badge-glow) 10%, transparent));
+  border: 1px solid color-mix(in srgb, var(--badge-glow) 55%, transparent);
+  box-shadow:
+    0 0 16px color-mix(in srgb, var(--badge-glow) 30%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / .28);
+  text-shadow: 0 0 10px color-mix(in srgb, var(--badge-glow) 60%, transparent);
 }
 #profile-premium .premium-badge, #profile-premium i { cursor: pointer; }
 #profile-premium i { font-size: 1.05rem; }
@@ -1134,17 +1171,77 @@ body[data-view="blocked"] .page-footer { display: none; }
 
 .badge-name-chip, .name-chip-inline { display: inline-flex; vertical-align: -2px; margin-left: .3em; cursor: pointer; }
 #profile-badges .badge-chip { cursor: pointer; }
-.badge-hero { display: inline-block; }
-/* the OG badge breathes — float + violet halo, modal size only */
-@keyframes og-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
-@keyframes og-halo {
-  0%, 100% { filter: drop-shadow(0 0 5px rgba(143, 127, 240, .45)); }
-  50% { filter: drop-shadow(0 0 20px rgba(143, 127, 240, .95)); }
+/* chips lift a touch on hover so they read as the buttons they are */
+.badge-chip, .badge-name-chip, .name-chip-inline { transition: transform .12s ease, box-shadow .12s ease; }
+.badge-chip:hover, .badge-name-chip:hover, .name-chip-inline:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 12px rgb(0 0 0 / .35);
 }
-.badge-hero-og { animation: og-float 3.4s ease-in-out infinite; display: inline-block; }
-.badge-hero-og .badge-ic, .badge-hero-og svg { animation: og-halo 2.6s ease-in-out infinite; }
+.badge-hero { display: inline-block; line-height: 0; position: relative; z-index: 1; }
+/* ---- hero stage: breathing glow + a halo ring spinning behind the art --- */
+.premium-hero::before, .premium-hero::after {
+  content: ''; position: absolute; left: 50%; top: 50%;
+  translate: -50% -50%; border-radius: 50%; pointer-events: none;
+}
+.premium-hero::after {
+  width: 216px; height: 216px;
+  background: radial-gradient(circle,
+    color-mix(in srgb, var(--badge-glow, var(--accent)) 55%, transparent) 0%,
+    color-mix(in srgb, var(--badge-glow, var(--accent)) 18%, transparent) 42%,
+    transparent 68%);
+  filter: blur(10px);
+  animation: badge-breathe 3.2s ease-in-out infinite;
+}
+@keyframes badge-breathe { 0%, 100% { opacity: .55; scale: .94; } 50% { opacity: .95; scale: 1.06; } }
+.premium-hero::before {
+  width: 178px; height: 178px;
+  /* two opposed comets chasing each other round the badge */
+  background: conic-gradient(from 0deg,
+    transparent 0 18%,
+    color-mix(in srgb, var(--badge-glow, var(--accent)) 85%, #fff) 30%,
+    transparent 44% 68%,
+    color-mix(in srgb, var(--badge-glow, var(--accent)) 85%, #fff) 80%,
+    transparent 94% 100%);
+  -webkit-mask: radial-gradient(closest-side, transparent 56%, #000 66%, #000 78%, transparent 86%);
+  mask: radial-gradient(closest-side, transparent 56%, #000 66%, #000 78%, transparent 86%);
+  filter: blur(7px);
+  opacity: .6;
+  animation: badge-halo 5.5s linear infinite;
+}
+@keyframes badge-halo { to { rotate: 360deg; } }
+/* the hero itself floats gently, lit in the badge's colour */
+.premium-hero .badge-hero { animation: badge-float 3.8s ease-in-out infinite; }
+@keyframes badge-float { 0%, 100% { translate: 0 0; } 50% { translate: 0 -5px; } }
+/* the artwork's gloss band sweeps and its twinkles pop — HERE only; chips,
+   name chips and table rows keep the calm static sheen */
+.premium-hero .badge-glint {
+  transform-box: fill-box; transform-origin: center;
+  animation: badge-glint 3.6s ease-in-out .5s infinite;
+}
+@keyframes badge-glint {
+  0% { transform: rotate(24deg) translateX(-80px); opacity: 0; }
+  10% { opacity: .9; }
+  42%, 100% { transform: rotate(24deg) translateX(150px); opacity: 0; }
+}
+.premium-hero .badge-spark {
+  transform-box: fill-box; transform-origin: center;
+  animation: badge-spark 3.6s ease-in-out infinite;
+}
+.premium-hero .badge-spark-2 { animation-delay: 1.8s; }
+@keyframes badge-spark {
+  0%, 52%, 100% { opacity: 0; transform: scale(.15) rotate(0deg); }
+  64% { opacity: 1; transform: scale(1) rotate(90deg); }
+  78% { opacity: 0; transform: scale(.35) rotate(150deg); }
+}
 @media (prefers-reduced-motion: reduce) {
-  .badge-hero-og, .badge-hero-og svg, .badge-hero-og .badge-ic { animation: none; filter: none; }
+  #premium-modal, #premium-title,
+  .premium-hero::before, .premium-hero::after,
+  .premium-hero .badge-hero, .premium-hero .badge-glint, .premium-hero .badge-spark {
+    animation: none;
+  }
+  .premium-hero::before { opacity: .35; }
+  .premium-hero .badge-glint { opacity: 0; }
+  .premium-hero .badge-spark { opacity: .8; transform: none; }
 }
 
 /* Badge picker table + profile sheet dates */
@@ -1153,7 +1250,11 @@ body[data-view="blocked"] .page-footer { display: none; }
 .badge-table td { padding: .35rem .4rem; border-top: 1px solid var(--divider); vertical-align: middle; }
 .badge-table td:first-child { display: flex; align-items: center; gap: .35rem; font-weight: 600; }
 
-/* Badge modal hero: guaranteed square, image-first (all badge types) */
-.premium-hero svg { width: 96px; height: 96px; display: inline-block; border-radius: 18px; }
-.premium-hero .badge-ic-premium { display: inline-flex; align-items: center; justify-content: center; }
-.badge-hero { line-height: 0; }
+/* Badge modal hero: guaranteed square, image-first (all badge types),
+   lit from the badge's own glow colour */
+.premium-hero svg {
+  width: 96px; height: 96px; display: inline-block; border-radius: 22px;
+  filter:
+    drop-shadow(0 8px 22px color-mix(in srgb, var(--badge-glow, var(--accent)) 55%, transparent))
+    drop-shadow(0 2px 6px rgb(0 0 0 / .5));
+}

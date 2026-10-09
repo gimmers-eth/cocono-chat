@@ -18,7 +18,9 @@ export class BadgeDef {
   points = 0;
   cap = null;
   blurb = null;
-  animated = false;
+  // the shine colour the badge modal dresses itself in (halo, border,
+  // title gradient, points pill) — one custom property, --badge-glow
+  glow = null;
 
   /** @param {number} px square edge */
   icon(px) {
@@ -56,7 +58,7 @@ export class OgBadge extends BadgeDef {
   label = 'OG';
   points = 10;
   cap = 10;
-  animated = true;
+  glow = '#8f7ff0';
   blurb = 'One of the first ten accounts on CoCoNo.';
 
 }
@@ -66,6 +68,7 @@ export class EarlyBirdBadge extends BadgeDef {
   label = 'Early Bird';
   points = 3;
   cap = 1000;
+  glow = '#7fd4ff';
   blurb = 'Joined CoCoNo before the end of 2026 — one of the first 1,000 accounts to get the word out.';
 
 }
@@ -75,6 +78,7 @@ export class PremiumBadgeDef extends BadgeDef {
   label = 'Premium';
   points = 5; // mirror of config.cocoPremiumBonus — the server score is the truth
   cap = null;
+  glow = '#f0c04a';
   blurb = 'A premium subscriber. The gold certificate funds the platform and lifts CoCo reputation.';
 
   // NO bespoke icon() anymore: the certificate SVG (badges-art.js) is the
@@ -102,6 +106,7 @@ class MailBadge extends BadgeDef {
   label = "You've got mail";
   points = 2;
   cap = null;
+  glow = '#f5c261';
   blurb = 'Your first five messages went out into the world. The mailbox only fills up from here.';
 
 }
@@ -111,6 +116,7 @@ class TeachersPetBadge extends BadgeDef {
   label = "Teacher's Pet";
   points = 1;
   cap = null;
+  glow = '#ff8d7a';
   blurb = "Hand-picked by the platform staff — a small apple for the teacher's pet.";
 
 }

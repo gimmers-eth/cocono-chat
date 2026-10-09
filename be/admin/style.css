@@ -234,6 +234,32 @@ details.diag summary { display: flex; gap: 0.6rem; align-items: center; flex-wra
 }
 #badge-modal[hidden] { display: none; }
 .badge-hero-art { text-align: center; margin: .3rem 0 .6rem; }
+/* the shared artwork's shine, lit: gloss sweep + twinkles (same classes the
+   client modal animates; the art module is the single source for both) */
+#badge-modal .badge-hero-art svg {
+  border-radius: 20px;
+  filter: drop-shadow(0 6px 18px rgba(0, 0, 0, .55)) drop-shadow(0 0 24px rgba(240, 192, 74, .28));
+}
+#badge-modal .badge-glint {
+  transform-box: fill-box; transform-origin: center;
+  animation: badge-glint 3.6s ease-in-out .5s infinite;
+}
+@keyframes badge-glint {
+  0% { transform: rotate(24deg) translateX(-80px); opacity: 0; }
+  10% { opacity: .9; }
+  42%, 100% { transform: rotate(24deg) translateX(150px); opacity: 0; }
+}
+#badge-modal .badge-spark { transform-box: fill-box; transform-origin: center; animation: badge-spark 3.6s ease-in-out infinite; }
+#badge-modal .badge-spark-2 { animation-delay: 1.8s; }
+@keyframes badge-spark {
+  0%, 52%, 100% { opacity: 0; transform: scale(.15) rotate(0deg); }
+  64% { opacity: 1; transform: scale(1) rotate(90deg); }
+  78% { opacity: 0; transform: scale(.35) rotate(150deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #badge-modal .badge-glint, #badge-modal .badge-spark { animation: none; }
+  #badge-modal .badge-glint { opacity: 0; }
+}
 .badge-modal-blurb { line-height: 1.45; }
 .badge-modal-facts { margin: .2rem 0 .4rem; align-items: center; }
 

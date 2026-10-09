@@ -1088,22 +1088,24 @@ export function createChat({ client, onHomeRefresh }) {
     const el = $('premium-modal');
     if (!def || !el) return;
     badgeModalOpen = id;
+    // the badge's own glow colour drives the whole modal's shine (halo,
+    // border, title gradient, points pill) through one custom property
+    el.dataset.badge = id;
+    el.style.setProperty('--badge-glow', def.glow ?? 'var(--accent)');
     $('premium-title').textContent = def.label;
     const hero = $('premium-modal-hero');
     hero.replaceChildren();
-    const art = def.icon(96);
-    if (def.animated) {
-      const wrap = document.createElement('span');
-      wrap.className = 'badge-hero badge-hero-og';
-      art.classList?.add('badge-hero-art');
-      art.style?.removeProperty?.('width'); // hero sizes via CSS
-      art.setAttribute('width', '96');
-      art.setAttribute('height', '96');
-      wrap.append(art);
-      hero.append(wrap);
-    } else {
-      hero.append(art);
-    }
+    const art = def.icon(96); // 96 = the full-detail artwork
+    art.classList.add('badge-hero-art');
+    const wrap = document.createElement('span');
+    wrap.className = 'badge-hero';
+    wrap.append(art);
+    hero.append(wrap);
+    // re-run the entrance + shine choreography on every open (the panel's
+    // CSS animation otherwise played once, on first paint)
+    el.style.animation = 'none';
+    void el.offsetWidth;
+    el.style.animation = '';
     $('premium-modal-text').textContent = owner
       ? `@${owner} earned the ${def.label} badge.`
       : `You earned the ${def.label} badge!`;
