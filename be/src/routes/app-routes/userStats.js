@@ -30,8 +30,13 @@ export default async function userStatsRoutes(app, { users, redis, config, setti
 
     const [addedBy, verifiedBy, trustedBy] = await Promise.all([
       users.countDocuments({ friends: { $elemMatch: { u: ul, v: { $ne: true }, t: { $ne: true } } } }),
-      users.countDocuments({ friends: { $elemMatch: { u: ul, v: true, t: { $ne: true } } } }),
-      users.countDocuments({ friends: { $elemMatch: { u: ul, t: true } } }),
+      // CoCo from the vouch stages only counts VERIFIED voucher: an
+      // unverified account has not proven a known human stands behind its
+      // identity, so its 'verification' or 'trust' is self-service weight —
+      // throwaway-account boosting is exactly what this gate closes.
+      // (addedBy stays a plain visibility count: it carries no score.)
+      users.countDocuments({ verified: true, friends: { $elemMatch: { u: ul, v: true, t: { $ne: true } } } }),
+      users.countDocuments({ verified: true, friends: { $elemMatch: { u: ul, t: true } } }),
     ]);
     // score + Social verdict from the shared calculation module
     const { score, trusted } = cocoScore(

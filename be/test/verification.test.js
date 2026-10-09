@@ -267,6 +267,11 @@ test('user stats: vouch counts are EXCLUSIVE stage buckets', async () => {
     const hB = { authorization: `Bearer ${tB}` };
     const hC = { authorization: `Bearer ${tC}` };
 
+    // CoCo vouch stages only count VERIFIED voucher (a proven human behind
+    // the voucher's identity) — bob and carol earn the admin mark directly
+    await mongo.db.collection('users').updateOne({ ul: 'bobby' }, { $set: { verified: true } });
+    await mongo.db.collection('users').updateOne({ ul: 'carol' }, { $set: { verified: true } });
+
     // bob adds + verifies + trusts carol: he alone is ONE trusted vouch,
     // not one of each
     await trustAndVerifyTarget(app, 'bobby', tB, 'carol', hC);
@@ -280,6 +285,20 @@ test('user stats: vouch counts are EXCLUSIVE stage buckets', async () => {
     await trustAndVerifyTargetStep2(app, tC, hB);
     const bStats = await app.inject({ method: 'GET', url: '/api/users/bobby/stats', headers: { authorization: `Bearer ${tC}` } });
     assert.deepEqual(bStats.json(), { u: 'bobby', addedBy: 0, verifiedBy: 1, trustedBy: 0, coco: 1, socialTrusted: false, premium: false });
+
+    // UNVERIFIED vouches carry NO weight: a throwaway cannot boost anyone…
+    const dave = makeClient();
+    const dD = await signupUser(app, dave, 'davey');
+    await mongo.db.collection('users').updateOne({ ul: 'davey' },
+      { $push: { friends: { u: 'carol', p: 'x', v: true, t: true } } });
+    const preFlip = (await app.inject({ method: 'GET', url: '/api/users/carol/stats', headers: hB })).json();
+    assert.equal(preFlip.trustedBy, 1, 'davey unverified: still one counted vouch');
+    assert.equal(preFlip.coco, 3);
+    // …and the moment davey IS verified, his standing vouch counts
+    await mongo.db.collection('users').updateOne({ ul: 'davey' }, { $set: { verified: true } });
+    const postFlip = (await app.inject({ method: 'GET', url: '/api/users/carol/stats', headers: hB })).json();
+    assert.equal(postFlip.trustedBy, 2, 'verified voucher tips the vouch in');
+    assert.equal(postFlip.coco, 6, '+3 per trusted vouch');
 
     // unknown -> 404, counts never expose WHO
     assert.equal((await app.inject({ method: 'GET', url: '/api/users/nosuchuser/stats', headers: hB })).statusCode, 404);
