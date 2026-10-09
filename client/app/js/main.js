@@ -110,11 +110,22 @@ if ('serviceWorker' in navigator) {
     (r) => r.update?.().catch(() => {}),
     () => {},
   );
-  navigator.serviceWorker.addEventListener('message', (e) => {
+    // Notification-driven navigation: linking to a user means LEAVING whoever
+  // else's chat is open — close the current pane first, then open theirs.
+  // (Tapping the notice of the peer already on screen is a no-op.)
+  function openChatFromNotice(peer) {
+    if (!peer) return;
+    const ul = String(peer).toLowerCase();
+    if (chat.openPeer?.() === ul) return;
+    if (chat.openPeer?.()) chat.closeChat?.();
+    chat.openChat(ul).catch(() => {});
+  }
+
+navigator.serviceWorker.addEventListener('message', (e) => {
     // Tapping a notification: refresh the conversation list when the app is
     // open and signed in (content itself arrives via the normal channels).
     if (e.data?.from === 'sw' && e.data.type === 'notification-click' && client.token) {
-      if (e.data.peer) chat.openChat(e.data.peer).catch(() => {});
+      openChatFromNotice(e.data.peer);
       home.renderConversationList().catch(() => {});
     }
   });
@@ -170,15 +181,11 @@ async function enterApp({ gesture = false, offline = false } = {}) {
 
   // A notification click that cold-booted the app parked the peer in the
   // SW's IDB kv (delete-on-read): open exactly that conversation.
-  takePendingChat().then((peer) => {
-    if (peer) chat.openChat(peer).catch(() => {});
-  }).catch(() => {});
+  takePendingChat().then(openChatFromNotice).catch(() => {});
 
   // Page-fallback notifications (no active SW) carry their click as a window
   // event — same destination as the SW path: straight into that chat.
-  window.addEventListener('cocono:open-chat', (e) => {
-    if (e.detail) chat.openChat(String(e.detail)).catch(() => {});
-  });
+  window.addEventListener('cocono:open-chat', (e) => openChatFromNotice(e.detail));
 
   // Shared chat link (?chat=<username>): consumed here so it survives the
   // auth screen — whoever lands logged in or signs up mid-session gets

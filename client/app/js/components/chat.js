@@ -1887,6 +1887,6 @@ export function createChat({ client, onHomeRefresh }) {
     $('chat-messages').addEventListener('click', catchUp);
   }
 
-  return { wire, connectEvents, openChat, render, openSelfProfile, handleGonePeer,
+  return { wire, connectEvents, openChat, render, openSelfProfile, handleGonePeer, openPeer: () => currentPeer,
     closeChat: closeChatPane, isOpenFor: (p) => !!currentPeer && String(p ?? '').toLowerCase() === currentPeer };
 }
