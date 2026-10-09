@@ -200,12 +200,15 @@ self.addEventListener('notificationclick', (event) => {
   const info = event.notification.data || {};
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    // Broadcast the click to EVERY window and focus the first: posting to
+    // only one could hand it to a non-authed tab (the single-tab guard
+    // screen) which must ignore it — the chat then never opened.
+    let focused = null;
     for (const client of windows) {
-      if ('focus' in client) {
-        client.postMessage({ from: 'sw', type: 'notification-click', eventType: info.type, peer: info.peer });
-        return client.focus();
-      }
+      client.postMessage({ from: 'sw', type: 'notification-click', eventType: info.type, peer: info.peer });
+      if (!focused && 'focus' in client) focused = client;
     }
+    if (focused) return focused.focus();
     // No window open: the app cold-boots from openWindow and can never
     // receive this postMessage — park the peer in the shared IDB kv and
     // let the page consume it once it is logged in (swkv.takePendingChat).
