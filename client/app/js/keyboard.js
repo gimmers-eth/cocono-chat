@@ -25,19 +25,20 @@
 //     --app-h = vv.height (exact), --kb-h = the covered band, and
 //     --vv-top = vv.offsetTop. The cache learns the real keyboard height
 //     for the next pre-flight.
-//  3. RIDE: if Safari displaced the view anyway (pre-focused fields — the
-//     composer and forward search are focused programmatically, so a tap
-//     fires no focusin; drawer/modal fields the shell shrink doesn't move),
-//     the body's translateY(var(--vv-top)) shifts the WHOLE fixed layer cake
-//     down by exactly vv.offsetTop — the visual-viewport pan — on the same
-//     frame we learn it. Net effect on screen: nothing moves, the header
-//     stays glued to the top edge. Desktop/Android: offsetTop is always 0
-//     → the ride is a no-op.
-//     NOTE: window.scrollY must NOT ride along — a fixed body does not
-//     travel with document scroll, so translating by scrollY too pushed the
-//     app DOWN ("header ends up lower than it started"). The phantom
-//     document scroll is only ever CLEANED UP (scrollTo(0,0)) once the
-//     keyboard is closed.
+//  3. SQUASH (and ride as the fallback): iOS still likes to start a reveal
+//     scroll computed from the PRE-shrink geometry even though pre-flight
+//     already made the field visible — and it animates that scroll back
+//     once it re-checks. Riding the round trip showed the user both legs
+//     (header: instant down, slow up). So any document scroll (scrollY)
+//     is reset to 0 on EVERY event — per-frame squashing means neither
+//     iOS's pan nor its restore ever accumulates visibly. Only an
+//     offsetTop-WITHOUT-scrollY pan (a genuine persistent visual-viewport
+//     displacement) is ridden via translateY(var(--vv-top)) on the body —
+//     the whole fixed layer cake shifts with it, header included.
+//     NOTE: window.scrollY must NOT ride along in the transform — a fixed
+//     body does not travel with document scroll; translating by scrollY
+//     pushed the app DOWN ("header ends up lower than it started").
+//     Desktop/Android: both channels are always 0 → all of it is a no-op.
 
 // Ring buffer of keyboard-fit samples for the Diagnostics report — iOS
 // keyboard behaviour cannot be reproduced off-device, so the phone itself
@@ -90,6 +91,12 @@ export function initKeyboardFit() {
   // so re-tapping a field mid-conversation can't cause a second shrink.
   let lastCover = 0;
 
+  // Per-keyboard-session squash budget (see apply): transient reveal
+  // scrolls die within a frame or two; if iOS keeps re-scrolling past this,
+  // the field is genuinely covered and fighting it would only jitter.
+  let squashCount = 0;
+  const SQUASH_MAX = 8;
+
   // Resting layout-viewport height — the baseline for the keyboard math.
   // iOS lies about window.innerHeight WHILE the keyboard is up: the device
   // trace showed iH shrink from 894 to 796 the moment iOS scrolled the
@@ -119,7 +126,9 @@ export function initKeyboardFit() {
     log.push(
       `+${Math.round(performance.now() - t0)}ms ${src}: iH=${window.innerHeight} vvH=${Math.round(vv.height)}` +
       ` vvT=${Math.round(vv.offsetTop)} sY=${Math.round(window.scrollY)} sc=${vv.scale}` +
-      ` ae=${document.activeElement?.id || document.activeElement?.tagName || '-'} → appH=${appH} vvTop=${vvTop}`,
+      ` ae=${document.activeElement?.id || document.activeElement?.tagName || '-'}` +
+      ` restH=${Math.round(restH)} cache=${cachedKb}` +
+      ` → appH=${appH} vvTop=${vvTop}`,
     );
     if (log.length > LOG_MAX) log.shift();
   }
@@ -127,15 +136,38 @@ export function initKeyboardFit() {
   function apply(src = 'vv') {
     const cover = Math.max(0, restH - vv.height);
     lastCover = cover;
-    // Keyboard closed but iOS left a phantom document scroll behind: reset
-    // it (nothing can legitimately scroll — html is overflow:hidden, body
-    // fixed). While the keyboard is UP we never fight the scroll — yanking
-    // it mid-animation is the old snap-back hop.
-    if (cover <= 80 && window.scrollY !== 0) window.scrollTo(0, 0);
+    // SQUASH iOS's reveal scroll on EVERY event — including while the
+    // keyboard is up. With pre-flight in place the focused field is already
+    // above the keys before iOS moves, so any document scroll iOS still
+    // starts was computed from the PRE-shrink geometry and gets animated
+    // back once it re-checks — riding it showed the user the round trip
+    // (header: instant down with the pan, slow up with iOS's restore).
+    // Resetting per frame means neither animation accumulates visibly (with
+    // the fixed body this is an instant no-op snap, not the old
+    // scrollable-document tug-of-war).
+    const sy = Math.max(0, Math.round(window.scrollY));
+    if (cover <= 80) squashCount = 0; // keyboard closed: fresh session next time
+    let squashing = false;
+    if (sy !== 0) {
+      if (squashCount < SQUASH_MAX) {
+        window.scrollTo(0, 0);
+        squashCount++;
+        squashing = true;
+      } else if (squashCount === SQUASH_MAX) {
+        // iOS insists (field genuinely covered — estimate came up short):
+        // stop fighting or the per-frame reset becomes a visible jitter.
+        // One loud trace line so the diagnostics say why we gave up.
+        sample('squash-giveup');
+        squashCount++;
+      }
+    }
+    // An offsetTop-only pan (no document-scroll channel) is a genuine
+    // persistent displacement — nothing else compensates it, so ride it.
+    const pan = sy > 0 && squashing ? 0 : vv.offsetTop;
     // At genuine rest (no keyboard, no scroll, no pan): relearn the
     // baseline so toolbar show/hide doesn't leave a stale restH.
-    if (cover <= 80 && window.scrollY === 0 && vv.offsetTop === 0) restH = window.innerHeight;
-    fit(vv.height, cover, vv.offsetTop);
+    if (cover <= 80 && sy === 0 && vv.offsetTop === 0) restH = window.innerHeight;
+    fit(vv.height, cover, pan);
     if (cover > 80 && Math.abs(cover - cachedKb) > 8) { // the keyboard revealed itself: learn it
       cachedKb = cover;
       try { localStorage.setItem('cocono.kb-h', String(cover)); } catch { /* private mode */ }
@@ -194,4 +226,5 @@ export function initKeyboardFit() {
   // close-cleanup and the log catch them.
   window.addEventListener('scroll', () => apply('win-scroll'), { passive: true });
   apply('init');
+  sample(`mode:${matchMedia('(display-mode: standalone)').matches ? 'standalone' : 'browser'} scrollH=${document.scrollingElement?.scrollHeight}`);
 }
