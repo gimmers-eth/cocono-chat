@@ -95,17 +95,14 @@ export default async function usersRoutes(app, { users, redis, config, messages,
     // Revoking verification also removes the profile photo: it was shown to
     // others under a trust state the admin has just withdrawn.
     if (!verified) await profiles.updateOne({ ul }, { $set: { avatar: null } });
-    if (verified) {
-      // 'verified' is its own nudge kind: the client OS-notifies "you are
-      // verified" (always, even foreground) and re-polls badges. The Verified
-      // badge rides the badge engine: drain the queue now and hint offline
-      // devices, so the award modal reaches them too.
-      await evaluateBadges(users, config, ul).catch(() => {});
-      await pushBadgeHint(users, redis, config, ul).catch(() => {});
-      await notifyAccount(ul, 'verified');
-    } else {
-      await notifyAccount(ul, 'identity'); // stripped: just re-pull (chip vanishes)
-    }
+    // 'verified' is its own nudge kind: the client OS-notifies "you are
+    // verified". Verification awards NO badge (the badge engine has no
+    // verified-eligibility — OG/EarlyBird are the only auto awards, and
+    // those land at signup/login), so this route must NOT touch the badge
+    // queue or push a badge hint: doing both made every verification fire a
+    // spurious "new badge" notice (and, offline, a blind badge PUSH) ahead
+    // of the verified one. One event, one notification.
+    await notifyAccount(ul, verified ? 'verified' : 'identity');
     // the avatar vanished from under everyone who follows this account
     if (!verified) await notifyPeers(ul, 'profile');
     return { ul, verified };
