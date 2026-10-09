@@ -6,7 +6,7 @@ import { $, setStatus, fmtTime, confirmModal, openLightbox, toast, animateSheetC
 import { humanError } from '../errors.js';
 import { createPeerSuggestions, makeTrustDecorator } from './peers.js';
 import { iconEl } from '../icons.js';
-import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, clearAllMessages, loadPeerVerifications, loadPeerPremiums, loadPeerAvatars, rememberPeerAvatar, rememberPeerVerified, rememberPeerChip, loadPeerChips, AVATARS_EVENT, FRIENDS_EVENT, loadPeerBlocked, saveBlockedSet } from '../store.js';
+import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, clearAllMessages, loadPeerVerifications, loadPeerPremiums, loadPeerAvatars, rememberPeerAvatar, rememberPeerVerified, rememberPeerChip, loadPeerChips, AVATARS_EVENT, FRIENDS_EVENT, loadPeerBlocked, saveBlockedSet, rememberPeerMuted, loadPeerMuted } from '../store.js';
 import { blockUserWithConfirm, unblockUser, blockReasonLabel, blockReasonIcon } from '../blocks.js';
 import { purgeLocalAccount } from '../accountPurge.js';
 import { mountLine, avatarStack, setAvatar, verifiedSubEl, doubleLine } from './userline.js';

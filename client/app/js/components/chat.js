@@ -9,7 +9,7 @@
 // touches — unlike the earlier "focus class on a bubble" attempt, which the
 // click-triggered catchUp re-render wiped within the same gesture.
 
-import { $, setStatus, setChatOpen, fmtTime, confirmModal, toast, animateSheetClose } from '../ui.js';
+import { $, setStatus, setChatOpen, fmtTime, confirmModal, toast, animateSheetClose, openLightbox, closeLightbox } from '../ui.js';
 
 import { iconEl } from '../icons.js';
 import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl, premiumBadgeEl } from './peername.js';
