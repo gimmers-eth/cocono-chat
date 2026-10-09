@@ -15,15 +15,46 @@
 const POLL_MS = 60_000;
 
 export function initBadgeNotify({ client }) {
+  // Boot race that caused the double-fire: clicking a push opens a window
+  // that is technically HIDDEN for its first frames; the boot poll then
+  // "correctly" raised an OS Notification for a user who cannot see the
+  // page yet — seconds before the modal does. So: notifications only ever
+  // fire once this window has actually been visible at least once (booted);
+  // before that, the modal queue is the whole experience.
+  let booted = false;
+  const markBooted = () => {
+    if (document.visibilityState === 'visible') booted = true;
+  };
+  document.addEventListener('visibilitychange', markBooted);
+  requestAnimationFrame(markBooted);
+
   function announce(list) {
     window.dispatchEvent(new CustomEvent('cocono:newbadges', { detail: list }));
+    if (!booted) return; // booting / push-click open: modal covers it
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-    if (document.visibilityState === 'visible') return; // modal covers it
-    for (const b of list) {
-      try {
-        new Notification('You have a new badge', { tag: `badge-${b.id}` });
-      } catch { /* engine refused — the modal queue still holds it */ }
-    }
+    if (document.visibilityState === 'visible') return; // user is looking at the modal
+    for (const b of list) raiseBadgeNotice();
+  }
+
+  // Clicking a badge notification must OPEN the app. Page-created
+  // Notifications do NOT focus/launch anything on click by themselves — and
+  // the browser dismisses them when the creating tab is closing — so we go
+  // through the service worker (its notificationclick already focuses an
+  // existing window or opens a fresh one, same as push), falling back to a
+  // page Notification with an explicit focus handler.
+  function raiseBadgeNotice() {
+    const viaSw = navigator.serviceWorker?.getRegistration?.()
+      .then((reg) => {
+        if (!reg) throw new Error('no active SW');
+        reg.showNotification('You have a new badge', { tag: 'cocono-badge', data: { type: 'badge' } });
+      })
+      .catch(() => {
+        try {
+          const n = new Notification('You have a new badge', { tag: 'cocono-badge' });
+          n.onclick = () => { window.focus(); };
+        } catch { /* engine refused — the modal queue still holds it */ }
+      });
+    return viaSw;
   }
 
   async function poll() {
