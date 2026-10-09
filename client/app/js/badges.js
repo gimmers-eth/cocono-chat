@@ -155,6 +155,47 @@ export function nameChipEl(badgeId) {
   return wrap;
 }
 
+/**
+ * "You've got mail" — first five messages sent. Amber envelope with the
+ * classic flap + five pips: the mailbox stamp of a working account.
+ */
+class MailBadge extends BadgeDef {
+  id = 'mail';
+  label = "You've got mail";
+  points = 2;
+  cap = null;
+  blurb = 'Your first five messages went out into the world. The mailbox only fills up from here.';
+
+  art(svg) {
+    const plate = document.createElementNS(NS, 'rect');
+    plate.setAttribute('x', '4'); plate.setAttribute('y', '4');
+    plate.setAttribute('width', '92'); plate.setAttribute('height', '92');
+    plate.setAttribute('rx', '24');
+    plate.setAttribute('fill', '#3b2f14');
+    const body = document.createElementNS(NS, 'rect');
+    body.setAttribute('x', '20'); body.setAttribute('y', '36');
+    body.setAttribute('width', '60'); body.setAttribute('height', '38');
+    body.setAttribute('rx', '7');
+    body.setAttribute('fill', '#f0b954');
+    const flap = document.createElementNS(NS, 'path');
+    flap.setAttribute('d', 'M20 43 L50 62 L80 43');
+    flap.setAttribute('fill', 'none');
+    flap.setAttribute('stroke', '#3b2f14');
+    flap.setAttribute('stroke-width', '5');
+    flap.setAttribute('stroke-linecap', 'round');
+    const pips = document.createElementNS(NS, 'g');
+    pips.setAttribute('fill', '#3b2f14');
+    for (let i = 0; i < 5; i++) {
+      const dot = document.createElementNS(NS, 'circle');
+      dot.setAttribute('cx', String(30 + i * 10));
+      dot.setAttribute('cy', '80');
+      dot.setAttribute('r', '2.4');
+      pips.append(dot);
+    }
+    svg.append(plate, body, flap, pips);
+  }
+}
+
 class TeachersPetBadge extends BadgeDef {
   id = 'teacherspet';
   label = "Teacher's Pet";
@@ -182,5 +223,5 @@ class TeachersPetBadge extends BadgeDef {
 }
 
 export const BADGE_UI = new Map(
-  [new OgBadge(), new EarlyBirdBadge(), new PremiumBadgeDef(), new TeachersPetBadge()].map((b) => [b.id, b]),
+  [new OgBadge(), new EarlyBirdBadge(), new PremiumBadgeDef(), new TeachersPetBadge(), new MailBadge()].map((b) => [b.id, b]),
 );

@@ -101,6 +101,9 @@ export const config = {
   challengeIpWindowSec: numOf(env.CHALLENGE_IP_WINDOW_SEC, IP_TIME_WINDOW),
   // 40/15min: a household or shared NAT signing several devices in
   // kept generous after the 2026-10 doubling — login churn should not 429
+  // 'You've got mail' award threshold — messages SENT per account. Currently
+  // 5 for a playful dev-scale target; the plan is 1000 for production.
+  mailBadgeCount: numOf(env.MAIL_BADGE_COUNT, 5),
   verifyAccountLimit: numOf(env.VERIFY_ACCOUNT_LIMIT, 40),
   verifyAccountWindowSec: numOf(env.VERIFY_ACCOUNT_WINDOW_SEC, DEFAULT_TIME_WINDOW),
   verifyIpLimit: numOf(env.VERIFY_IP_LIMIT, 100),

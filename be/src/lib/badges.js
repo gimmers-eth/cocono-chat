@@ -1,17 +1,27 @@
 // ---- Badge engine -------------------------------------------------------
-// Every badge is its OWN class (cap, score, eligibility rules live together)
-// registered in BADGES. Awards live on the user doc as
-//   awards: { og: <ISO date>, earlybird: <ISO date> }   (capped badges only)
-//   displayBadge: 'og' | 'earlybird' | 'premium' | null  (name chip choice)
-// The PREMIUM badge is derived from the account flag (users.premium) — it is
-// never written to awards; badgesFor() stitches it in so every surface (app,
-// admin, scores) sees ONE list with award timestamps.
+// ONE award route: grantBadge() is the ONLY code that writes awards.<id>
+// anywhere. evaluateBadges() walks the classes and calls it for every
+// ELIGIBLE badge it finds; admin actions set state (flags) and then call
+// the same evaluation. Premium is a normal award whose ELIGIBILITY is the
+// admin flag; Teacher's Pet is a normal award whose eligibility is the
+// admin-set grant flag. There are no side channels — so every badge, from
+// every trigger, lands in the awards map with a fresh gid and goes through
+// ONE dispatch: poll → unseen → modal + notification + ack.
 //
+// Modes:
+//   'auto'  — eligibility evaluated on every normal trigger (signup, login,
+//             the client's badge poll)
+//   'admin' — eligibility comes from an admin-set flag (users.adminAwards);
+//             still awarded by the SAME evaluation loop
+//
+// Awards live on the user doc as
+//   awards: { <id>: { at: <ISO>, gid: <uuid> } }   (legacy bare ISO strings
+// are normalized on read, gid = `${id}:${at}`)
+//   displayBadge: the WEARING choice — never touched by awarding.
 // Capped badges are granted through a serial in-process QUEUE: eligibility
-// is evaluated one user at a time, and the holder-count check happens inside
-// the same queue step, so two near-simultaneous signups can never both take
-// the 10th OG slot. Awards happen AFTER signup (the user signs up, logs in,
-// then their client's badge poll picks the award up).
+// is evaluated one user at a time, holder counts checked inside the same
+// queue step, so two near-simultaneous signups can never both take the
+// final slot.
 import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 
@@ -24,11 +34,10 @@ export class Badge {
   scoreOf(_config) { return 0; }
   capOf(_config) { return null; } // null = uncapped
   blurb = null; // the story the modals tell — one source for admin + app
-  // 'auto'    — queued eligibility (signup/login/poll)
-  // 'admin'   — awardable ONLY from the admin panel (Teacher's Pet)
-  // 'derived' — never stored; read off an account flag (premium)
+  // 'auto'  — queued eligibility (signup/login/poll)
+  // 'admin' — eligibility set by an admin flag (users.adminAwards.<id>)
   mode = 'auto';
-  /** @param {object} user @param {{users: import('mongodb').Collection, config: object}} ctx */
+  /** @param {object} user @param {{users, counters, config}} ctx */
   async eligible(_user, _ctx) { return false; } // eslint-disable-line no-unused-vars
 }
 
@@ -66,11 +75,11 @@ export class EarlyBirdBadge extends Badge {
   }
 }
 
-// Premium is a badge now — derived from the admin flag, carrying the flat
-// CoCo bonus the flag already granted (one source for both).
+// Premium: the flat CoCo bonus the flag already grants, now a REAL award —
+// eligibility is the admin premium flag, the award itself goes through the
+// one route (so it dispatches its modal like everything else).
 class PremiumBadge extends Badge {
   id = 'premium';
-  mode = 'derived';
   label = 'Premium';
   blurb = 'A premium subscriber. The gold certificate funds the platform and lifts CoCo reputation.';
   scoreOf(cfg) { return cfg.cocoPremiumBonus ?? 5; }
@@ -85,9 +94,29 @@ class TeachersPetBadge extends Badge {
   scoreOf() { return 1; }
   mode = 'admin';
   blurb = "Hand-picked by the platform staff — a small apple for the teacher's pet.";
+  // the admin panel sets users.adminAwards.teacherspet; the SHARED
+  // evaluation then awards (and re-awards after a revoke) like any other
+  async eligible(user) { return user.adminAwards?.teacherspet === true; }
 }
 
-export const BADGES = [new OgBadge(), new EarlyBirdBadge(), new PremiumBadge(), new TeachersPetBadge()];
+// "You've got mail" — your first messages actually went out. The counter
+// lives in the `counters` collection keyed by USERNAME (kept OUTSIDE the
+// account doc so a deleted-and-re-registered user keeps their progress —
+// and deleteAccountFully deliberately never touches counters).
+class MailBadge extends Badge {
+  id = 'mail';
+  label = "You've got mail";
+  blurb = 'Your first five messages went out into the world. The mailbox only fills up from here.';
+  scoreOf() { return 2; }
+  async eligible(user, ctx) {
+    const target = ctx.config.mailBadgeCount ?? 5;
+    if (!ctx.counters) return false;
+    const c = await ctx.counters.findOne({ _id: `sent:${user.ul}` });
+    return (c?.n ?? 0) >= target;
+  }
+}
+
+export const BADGES = [new OgBadge(), new EarlyBirdBadge(), new PremiumBadge(), new TeachersPetBadge(), new MailBadge()];
 export const badgeById = new Map(BADGES.map((b) => [b.id, b]));
 
 /** The unified held list, award dates included. Pure — no ctx needed. */
@@ -95,7 +124,7 @@ export const badgeById = new Map(BADGES.map((b) => [b.id, b]));
  * The unified held list, grant-unique. Awards are stored as
  *   awards.<badgeId> = { at, gid }        (gid = unique per grant)
  * with legacy bare ISO strings normalized on read (gid = `${id}:${at}`).
- * Premium is derived from its flag. The gid is what the client's seen-ack
+ * The gid is what the client's seen-ack
  * records — so a REVOKED-then-RE-AWARDED badge is a brand-new grant, gets a
  * new gid, and dispatches a fresh modal/notification (the bug this fixes).
  */
@@ -105,10 +134,6 @@ export function badgesFor(user) {
     if (!badgeById.has(id)) continue;
     if (typeof grant === 'string') out.push({ id, at: grant, gid: `${id}:${grant}` });
     else if (grant) out.push({ id, at: grant.at ?? null, gid: grant.gid || `${id}:${grant.at ?? ''}` });
-  }
-  if (user.premium === true) {
-    const at = user.premiumAt ?? null;
-    out.push({ id: 'premium', at, gid: `premium:${at ?? 'now'}` });
   }
   return out.sort((a, b) => (badgeById.get(b.id).score - badgeById.get(a.id).score) || a.id.localeCompare(b.id));
 }
@@ -144,32 +169,96 @@ export function defaultDisplayBadge(user) {
 // One promise chain; each evaluation runs alone, so the count-check-then-award
 // inside is race-free (single process per environment; the queue is the only
 // award path — admin awards funnel through it too).
+// The serial queue EVERY award WRITE goes through. One in-process chain
+// means cap checks and spends happen atomically relative to each other —
+// near-simultaneous signups cannot both take the last slot.
+//
+// RE-ENTRANCY (a flag-based "run inline when held" scheme deadlocked the
+// suite: a concurrent reset let a nested grant chain BEHIND its own waiting
+// task — self-await forever). The honest design instead: doGrant() is the
+// raw body; grantBadge() wraps it in the queue; evaluateBadges() runs as a
+// queue task and calls doGrant() DIRECTLY (it already holds serialization).
+// No flags, no re-entrant paths, no races.
 let chain = Promise.resolve();
+function enqueue(task) {
+  const run = chain.then(task, task); // a failed neighbour must not poison the queue
+  chain = run.catch((err) => console.error('[badges] queue task failed:', err?.message ?? err));
+  return run;
+}
+
+/** The award write itself — ONLY call while holding the queue (enqueue). */
+async function doGrant(users, { id, ul, config }) {
+  const badge = badgeById.get(id);
+  if (!badge) throw new Error(`unknown badge ${id}`);
+  const user = await users.findOne({ ul });
+  if (!user) return null;
+  if (user.awards?.[id]) return { held: true };
+  const cap = badge.capOf(config);
+  if (cap !== null) {
+    const holders = await users.countDocuments({ [`awards.${id}`]: { $exists: true } });
+    if (holders >= cap) return { full: true };
+  }
+  const now = new Date().toISOString();
+  const gid = randomUUID();
+  // awarding never auto-wears — wearing is the user's own choice
+  await users.updateOne({ ul }, { $set: { [`awards.${id}`]: { at: now, gid } } });
+  return { at: now, gid };
+}
 
 /**
  * Fire-and-forget: evaluate every capped badge for this account and award
  * what's earned. Returns the chain handle for tests.
  */
-export function evaluateBadges(users, config, ul) {
-  chain = chain
-    .then(async () => {
-      const user = await users.findOne({ ul });
-      if (!user) return;
-      for (const badge of BADGES) {
-        if (badge.mode !== 'auto') continue; // derived (premium) & admin-only badges never auto-award
-        if (user.awards?.[badge.id]) continue; // already held
-        if (!(await badge.eligible(user, { users, config }))) continue;
-        const holders = await users.countDocuments({ [`awards.${badge.id}`]: { $exists: true } });
-        if (holders >= badge.capOf(config)) continue; // hard cap (belt to eligible's braces)
-        const now = new Date().toISOString();
-        // award = unique GRANT (gid): revoking and re-awarding later must
-        // re-dispatch, so seen-acks key on gid, not badge id
-        await users.updateOne({ ul }, { $set: { [`awards.${badge.id}`]: { at: now, gid: randomUUID() } } });
-        user.awards = { ...(user.awards ?? {}), [badge.id]: now };
-      }
-    })
-    .catch((err) => console.error('[badges] evaluation failed:', err?.message ?? err));
-  return chain;
+/**
+ * THE SINGLE AWARD ROUTE. Nothing else may write awards.<id>. Grants a
+ * badge that is not yet held, serialised through the shared queue so caps
+ * are checked the same moment they are spent. cap=null means uncapped.
+ * Returns the grant ({at,gid}) or {held:true} when already owned.
+ */
+export async function grantBadge(users, opts) {
+  return enqueue(() => doGrant(users, opts));
+}
+
+/** THE revoke primitive: drop the award and its seen-ack, so a re-grant is
+ *  a brand-new dispatch (modal + notification). Also strips the badge if it
+ *  was being worn. */
+export async function revokeBadge(users, { id, ul }) {
+  const user = await users.findOne({ ul });
+  const grant = user?.awards?.[id];
+  const gids = [grant?.gid || `${id}:${grant?.at ?? ''}`, id]; // + legacy bare-id ack
+  const set = {};
+  if (user?.displayBadge === id) set.displayBadge = null;
+  await users.updateOne({ ul }, {
+    $unset: { [`awards.${id}`]: '', ...(Object.keys(set).length ? set : {}) },
+    $pull: { badgesSeen: { $in: gids } },
+  });
+  return { revoked: true, id };
+}
+
+/**
+ * The evaluation loop — the only CALLER shape of grantBadge for automatic
+ * triggers. Walks every class; 'auto' badges are eligibility-checked,
+ * 'admin' badges only fire once an admin set their flag. Every award, from
+ * every path, lands in the awards map with a fresh gid — one dispatch
+ * pipeline for modals and notifications.
+ * ctx: { users, config, counters? } (counters missing = counter badges
+ * simply not eligible on this trigger; the client poll always supplies it).
+ */
+export function evaluateBadges(users, config, ul, counters = null) {
+  const ctx = { users, config, counters };
+  // ONE queue task walks the whole list; grants call doGrant directly
+  // because this body IS the held queue (see the re-entrancy note above)
+  return enqueue(async () => {
+    const user = await users.findOne({ ul });
+    if (!user) return;
+    for (const badge of BADGES) {
+      if (badge.mode !== 'auto' && badge.mode !== 'admin') continue;
+      if (user.awards?.[badge.id]) continue; // already held (grant is idempotent anyway)
+      if (!(await badge.eligible(user, ctx))) continue;
+      await doGrant(users, { id: badge.id, ul, config });
+      user.awards = { ...(user.awards ?? {}), [badge.id]: true };
+    }
+  });
 }
 
 // Shared admin snapshot: definitions + live holders per badge.
@@ -177,9 +266,7 @@ export async function badgeOverview(users, config) {
   const rows = [];
   for (const badge of BADGES) {
     const cap = badge.capOf(config);
-    const holders = badge.mode === 'derived'
-      ? await users.countDocuments({ premium: true })
-      : await users.countDocuments({ [`awards.${badge.id}`]: { $exists: true } });
+    const holders = await users.countDocuments({ [`awards.${badge.id}`]: { $exists: true } });
     rows.push({
       id: badge.id,
       label: badge.label,
@@ -189,7 +276,9 @@ export async function badgeOverview(users, config) {
       holders,
       full: cap !== null && holders >= cap,
       mode: badge.mode,
-      awardable: badge.mode !== 'derived',
+      // premium is the FLAG toggle's business — the badge award route
+      // refuses it; this flag must mirror that guard, not the mode
+      awardable: badge.id !== 'premium',
       auto: badge.mode === 'auto',
     });
   }

@@ -34,7 +34,7 @@ async function hasTrustedVerifier(users, ul) {
     .then((doc) => !!doc);
 }
 
-export default async function meRoutes(app, { users, redis, config, idDocs, settings }) {
+export default async function meRoutes(app, { users, redis, config, idDocs, settings, counters }) {
   app.get('/api/me', async (request, reply) => {
     const denied = requireAuth(request, reply);
     if (denied) return denied;
@@ -69,21 +69,39 @@ export default async function meRoutes(app, { users, redis, config, idDocs, sett
     const ul = request.auth.sub;
     let user = await users.findOne({ ul });
     if (!user) return fail(reply, 'unknown_account', 'No such user', 404);
-    await evaluateBadges(users, config, ul);
+    await evaluateBadges(users, config, ul, counters);
     user = await users.findOne({ ul }); // re-read: eval may have just awarded
     const held = badgesFor(user);
     const seen = new Set(user.badgesSeen ?? []);
     // unseen = its GRANT id not acked yet; a bare legacy id in seen (old
-    // scheme acked by badge id) still suppresses one-time re-notification
+    // scheme acked by badge id) still suppresses one-time re-notification.
+    // The GET does NOT ack anymore: acknowledgement is a separate call the
+    // client makes AFTER it has shown the modal — a poll whose response
+    // never rendered (tab died mid-login) must NOT silently consume the
+    // dispatch. That was the premium-modal-vanishing bug.
     const fresh = held.filter((b) => !seen.has(b.gid) && !seen.has(b.id));
-    if (fresh.length) {
-      await users.updateOne({ ul }, { $addToSet: { badgesSeen: { $each: fresh.map((b) => b.gid) } } });
-    }
     return {
       badges: held,
       new: fresh,
       displayBadge: user.displayBadge ?? null,
     };
+  });
+
+
+  // POST /api/me/badges/ack { gids: [...] } — the client confirms it has
+  // DISPATCHED these grants (modal queued). Only then do they stop being
+  // 'new'. Unknown gids are ignored; acking is per-GRANT, so a re-award
+  // (new gid) always dispatches again.
+  app.post('/api/me/badges/ack', async (request, reply) => {
+    const denied = requireAuth(request, reply);
+    if (denied) return denied;
+    const ul = request.auth.sub;
+    const gids = Array.isArray(request.body?.gids)
+      ? request.body.gids.filter((g) => typeof g === 'string' && g.length <= 128).slice(0, 64)
+      : [];
+    if (!gids.length) return { acked: 0 };
+    await users.updateOne({ ul }, { $addToSet: { badgesSeen: { $each: gids } } });
+    return { acked: gids.length };
   });
 
   // base64 inflates ~4/3: cap the raw HTTP body above the decoded max

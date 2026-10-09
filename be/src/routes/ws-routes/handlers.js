@@ -7,7 +7,7 @@ import { verifyEnvelope } from './envelope.js';
 import { devKey, sendJson, PENDING_BATCH } from './protocol.js';
 import { sendBlindPush, presenceKey, pushSentKey } from '../../lib/push.js';
 
-export function createHandlers({ users, redis, pub, config, messages, settings }) {
+export function createHandlers({ users, redis, pub, config, messages, settings, counters }) {
   async function handleSend(socket, request, body, auth) {
     const env = body.msg;
     const m = env?.m;
@@ -81,6 +81,11 @@ export function createHandlers({ users, redis, pub, config, messages, settings }
       if (err?.code === 11000) return ack(true);
       throw err;
     }
+    // SENT-message counter (username-keyed, survives account deletion by
+    // design): feeds the 'You've got mail' badge. Idempotent retries landed
+    // in the catch above, so this increments exactly once per accepted send.
+    // Self-sends count too — the badge counts messages SENT, period.
+    if (counters) await counters.updateOne({ _id: `sent:${auth.sub}` }, { $inc: { n: 1 } }, { upsert: true });
 
     await pub.publish(devKey(rul, m.dv), JSON.stringify({ type: 'msg', id: doc.mid, ts: doc.ts.getTime(), env }));
     const acked = ack(true);

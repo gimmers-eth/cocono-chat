@@ -14,7 +14,7 @@ const AES_KEY_BYTES = new Set([16, 24, 32]);
 // X25519 key-agreement public key (milestone 3), t a client epoch-seconds
 // timestamp, and s the Ed25519 signature over canonical({ a, d, p, t, u, x })
 // (M6 fix: freshness + replay protection).
-export default async function signupRoutes(app, { users, redis, config, settings }) {
+export default async function signupRoutes(app, { users, redis, config, settings , counters}) {
   app.post('/api/signup', async (request, reply) => {
     const lim = await effectiveLimit(settings, config, 'signup');
     const rl = await rateLimit(redis, `rl:signup:${request.ip}`, lim.limit, lim.windowSec);
@@ -86,7 +86,7 @@ export default async function signupRoutes(app, { users, redis, config, settings
     // Badge eligibility evaluated the moment the account exists — queued
     // serially so the ten OG seats / 1000 early-bird seats can never be
     // double-booked. Never blocks or fails the signup itself.
-    evaluateBadges(users, config, ul).catch(() => {});
+    evaluateBadges(users, config, ul, counters).catch(() => {});
     return reply.code(201).send({ u: ul });
   });
 }

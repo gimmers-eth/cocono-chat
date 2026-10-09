@@ -64,6 +64,7 @@ await app.register(async function adminScope(instance) {
     redis,
     config,
     diagnostics: mongo.db.collection('diagnostics'),
+    counters: mongo.db.collection('counters'),
     settings: mongo.db.collection('settings'),
     messages: mongo.db.collection('messages'),
     idDocs: mongo.db.collection('id_docs'),

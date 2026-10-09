@@ -106,6 +106,10 @@ export class Api {
     return this.#request('/api/me/badges', { token });
   }
 
+  ackBadges(token, gids) {
+    return this.#request('/api/me/badges/ack', { method: 'POST', body: { gids }, token });
+  }
+
   appInfo() {
     return this.#request('/api/app-info');
   }

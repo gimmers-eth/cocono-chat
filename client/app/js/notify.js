@@ -64,6 +64,11 @@ export function initBadgeNotify({ client }) {
 
   function announce(list) {
     window.dispatchEvent(new CustomEvent('cocono:newbadges', { detail: list }));
+    // ACK AFTER DISPATCH: the server stops reporting these grants as new
+    // only once this client has actually queued the modal. If we die in
+    // between, the next poll re-presents them — a badge modal is never
+    // silently consumed by a response that never rendered.
+    client.ackBadges(list.map((b) => b.gid)).catch(() => {});
     if (!booted) return; // booting / push-click open: modal covers it
     if (document.visibilityState === 'visible') return; // user is looking at the modal
     for (const b of list) raiseBadgeNotice();

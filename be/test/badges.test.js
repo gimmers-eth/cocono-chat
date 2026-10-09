@@ -35,6 +35,22 @@ async function login(app, client, u) {
 
 const poll = (app, auth) => app.inject({ method: 'GET', url: '/api/me/badges', headers: auth });
 
+// THE dispatch protocol (client contract): the GET is read-only; the app
+// ACKs the gids only after the modal was actually dispatched — a poll whose
+// response never rendered (tab died, socket raced login) must NOT silently
+// consume the badge. This helper mimics a successful dispatch.
+async function pollAndAck(app, auth) {
+  const res = await poll(app, auth);
+  const gids = res.json().new.map((b) => b.gid);
+  if (gids.length) {
+    const ack = await app.inject({
+      method: 'POST', url: '/api/me/badges/ack', headers: auth, payload: { gids },
+    });
+    assert.equal(ack.statusCode, 200);
+  }
+  return res;
+}
+
 // The OG ten + Early Bird: awarded from the queue after signup, picked up on
 // the client's next poll (login + periodic), acked exactly once.
 test('badges: first ten get OG+EarlyBird, the next ones only EarlyBird', async () => {
@@ -50,9 +66,11 @@ test('badges: first ten get OG+EarlyBird, the next ones only EarlyBird', async (
     assert.deepEqual(ids, ['earlybird', 'og'], 'rank-1 account earned both');
     // nobody auto-wears a badge any more — default is none
     assert.equal(held.displayBadge, null, 'no auto-wear');
-    // poll acks: `new` once, empty the next time
+    // read-only GET + explicit ack: `new` persists until DISPATCHED
     assert.equal(held.new.length, 2, 'first poll dispatches the fresh awards');
-    assert.equal((await poll(app, sessions[0].auth)).json().new.length, 0, 'acked');
+    assert.equal((await poll(app, sessions[0].auth)).json().new.length, 2, 'GET alone never acks');
+    await pollAndAck(app, sessions[0].auth);
+    assert.equal((await poll(app, sessions[0].auth)).json().new.length, 0, 'acked once shown');
 
     const eleventh = (await poll(app, sessions[10].auth)).json();
     assert.deepEqual(eleventh.badges.map((b) => b.id), ['earlybird'], '11th misses the OG cap');
@@ -183,7 +201,8 @@ test("badges: Teacher's Pet is admin-only (+1 CoCo), awardable and revocable", a
     const polled = (await poll(app, petty.auth)).json();
     assert.deepEqual(polled.new.map((b) => b.id), ['teacherspet'], 'modal will fire exactly once');
     assert.deepEqual(polled.badges.map((b) => b.id), ['teacherspet']);
-    assert.equal((await poll(app, petty.auth)).json().new.length, 0, 'acked');
+    await pollAndAck(app, petty.auth); // modal shown → acked
+    assert.equal((await poll(app, petty.auth)).json().new.length, 0, 'acked once shown');
     const stats = (await app.inject({
       method: 'GET', url: '/api/users/petty/stats',
       headers: { authorization: viewer.auth.authorization },
@@ -207,6 +226,50 @@ test("badges: Teacher's Pet is admin-only (+1 CoCo), awardable and revocable", a
     assert.equal(after.displayBadge, null, 'worn revoked badge is cleared');
   } finally {
     if (admin) await admin.close();
+    await teardown();
+  }
+});
+
+// THE COUNTER BADGE: 'You've got mail' rides the shared evaluation on the
+// client poll; the counter lives in its OWN username-keyed collection so a
+// deleted-then-re-registered account keeps its progress (deleteAccountFully
+// deliberately never touches counters).
+test('badges: mail award at 5 sent; counter survives deletion + name re-use', async () => {
+  const { app, mongo, teardown } = await setupApp({ ...LIMITS, ogBadgeCap: 0, earlyBirdCap: 0 });
+  try {
+    const sender = await login(app, makeClient(), 'sender');
+    const auth = sender.auth;
+    const d = sender.d;
+
+    // below the target: poll evaluates and awards NOTHING
+    await mongo.db.collection('counters').insertOne({ _id: 'sent:sender', n: 4 });
+    let polled = (await poll(app, auth)).json();
+    assert.deepEqual(polled.badges.map((b) => b.id), [], '4 messages: not yet');
+
+    // reach the target -> the SHARED evaluation (this very poll) awards it
+    await mongo.db.collection('counters').updateOne({ _id: 'sent:sender' }, { $set: { n: 5 } });
+    polled = (await poll(app, auth)).json();
+    assert.deepEqual(polled.badges.map((b) => b.id), ['mail'], '5 messages: awarded');
+    assert.deepEqual(polled.new.map((b) => b.id), ['mail'], 'dispatched as new');
+    assert.equal(polled.new[0].gid, polled.badges[0].gid, 'grant gid is stable until ack');
+    await pollAndAck(app, auth);
+    assert.equal((await poll(app, auth)).json().new.length, 0, 'acked once shown');
+
+    // delete the account outright… then re-register the SAME name: the old
+    // counter stands, so the first evaluation awards again (as a NEW grant)
+    const del = await app.inject({ method: 'DELETE', url: `/api/devices/${d}`, headers: auth });
+    assert.equal(del.json().accountDeleted, true);
+    assert.equal(
+      (await mongo.db.collection('counters').findOne({ _id: 'sent:sender' })).n, 5,
+      'counter survives account deletion by design',
+    );
+    // login() signs up + authenticates in one step: the fresh identity on
+    // the recycled username starts with the OLD counter already at 5
+    const revived2 = await login(app, makeClient(), 'sender');
+    const revived = (await poll(app, revived2.auth)).json();
+    assert.deepEqual(revived.badges.map((b) => b.id), ['mail'], 'earned again on the kept counter');
+    assert.equal(revived.new.length, 1, 'fresh grant dispatched');
+  } finally {
     await teardown();
   }
 });

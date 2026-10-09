@@ -1,4 +1,4 @@
-// ---- CONTROL NUDGES: the server->device "re-pull what you cache" pattern.
+2// ---- CONTROL NUDGES: the server->device "re-pull what you cache" pattern.
 //
 // THE TWO SYNC CHANNELS (keep the split clean when adding features):
 //

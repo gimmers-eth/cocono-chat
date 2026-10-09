@@ -109,7 +109,10 @@ test('premium: admin toggle exposes the flag to app + admin; max-devices is now 
   await app.register(adminUsers, {
     users: db.collection('users'),
     redis,
-    config,
+    // SAME merge the app runs with (setupApp LIMITS included) — the badge
+    // evaluation inside the premium toggle reads caps from THIS config; the
+    // raw singleton ignored the file's disabled-badge limits
+    config: { ...config, coldSendRequiresVerification: false, ...LIMITS },
     messages: db.collection('messages'),
     idDocs: db.collection('id_docs'),
     profiles: db.collection('profiles'),

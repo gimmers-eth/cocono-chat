@@ -9,7 +9,7 @@ import { effectiveLimit } from '../../lib/limits.js';
 import { evaluateBadges } from '../../lib/badges.js';
 
 // POST /api/auth/challenge + POST /api/auth/verify — passwordless login.
-export default async function authRoutes(app, { users, redis, config, settings }) {
+export default async function authRoutes(app, { users, redis, config, settings , counters}) {
   // L1 fix: always issue a nonce. A 404 here used to confirm which
   // (username, device) pairs exist; now unknown pairs get a nonce that will
   // simply never verify, indistinguishable from a real one.
@@ -76,7 +76,7 @@ export default async function authRoutes(app, { users, redis, config, settings }
 
     // login is the second badge checkpoint: accounts predating a new badge
     // get evaluated the moment they next sign in (queued, cap-safe, no await)
-    evaluateBadges(users, config, ul).catch(() => {});
+    evaluateBadges(users, config, ul, counters).catch(() => {});
     const token = signJwt({ sub: ul, u: user.u, d }, config.jwtSecret, config.jwtExpiresInSec);
     return { token };
   });

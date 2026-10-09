@@ -115,6 +115,10 @@ app.addHook('onSend', async (request, reply, payload) => {
     redis,
     config,
     diagnostics: mongo.db.collection('diagnostics'),
+    // username-keyed counters (messages sent) that SURVIVE account deletion
+    // by design: a deleted-then-re-registered user keeps their badge
+    // progress. wipe-data.sh still drops it (a full dev reset resets all).
+    counters: mongo.db.collection('counters'),
     settings: mongo.db.collection('settings'),
     messages: mongo.db.collection('messages'),
     idDocs: mongo.db.collection('id_docs'),

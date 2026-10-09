@@ -427,8 +427,17 @@ export class CoconoClient extends Emitter {
   }
 
   /** Badge poll: held list + unseen `new` awards (the read acks them). */
+  // Read-only poll: returns { badges, new, displayBadge }. The response is
+  // NOT an acknowledgement — call ackBadges() after the modal actually
+  // dispatched (a poll whose response never rendered must not consume the
+  // award; that was the vanished premium-modal bug).
   async pollBadges() {
     return this.api.badges(this.#requireToken());
+  }
+
+  /** Confirm dispatch of these grant gids (the badgesSeen mark server-side). */
+  async ackBadges(gids) {
+    return this.api.ackBadges(this.#requireToken(), (gids ?? []).map(String).slice(0, 64));
   }
 
   /** Peer profile: bio always, avatar ONLY on mutual add (server rule). */

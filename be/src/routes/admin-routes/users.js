@@ -5,7 +5,7 @@ import { createNotifier } from '../../lib/notify.js';
 import { pushBadgeHint } from '../../lib/push.js';
 import { effectiveLimit, readLimitsDoc } from '../../lib/limits.js';
 import { effectiveMaxDevices } from '../../lib/devicePolicy.js';
-import { badgeById, badgesFor, badgeOverview, evaluateBadges } from '../../lib/badges.js';
+import { badgeById, badgesFor, badgeOverview, evaluateBadges, grantBadge, revokeBadge } from '../../lib/badges.js';
 
 // Per-account device cap: 1..MAX_DEVICES_CAP. Raising it lets a user enroll
 // more devices; lowering it below the current device count is allowed (the
@@ -14,7 +14,7 @@ const MAX_DEVICES_CAP = 1000;
 
 // GET /api/admin/users, PATCH max-devices, DELETE user, DELETE device,
 // PUT verified (identity-verification toggle), GET/DELETE id-doc (review).
-export default async function usersRoutes(app, { users, redis, config, messages, idDocs, profiles, settings, diagnostics }) {
+export default async function usersRoutes(app, { users, redis, config, messages, idDocs, profiles, settings, diagnostics, counters }) {
   // account-review outcomes are invisible to the reviewed user otherwise —
   // content-free 'identity' nudges (lib/notify.js) make the app re-pull
   const { notify: notifyAccount, notifyPeers } = createNotifier({ redis, users });
@@ -118,18 +118,22 @@ export default async function usersRoutes(app, { users, redis, config, messages,
     if (typeof premium !== 'boolean') {
       return fail(reply, 'invalid_request', 'premium must be a boolean', 400);
     }
+    // Premium = a FLAG whose award runs through THE same grant route:
+    // ON → evaluation awards it (fresh gid → modal + notification dispatch);
+    // OFF → THE revoke primitive removes award + seen mark + worn chip.
     const set = { premium, ...(premium ? { premiumAt: new Date() } : { premiumAt: null }) };
-    if (!premium) {
-      // revoking premium while it is the WORN badge must not leave the gold
-      // chip on their name — clear the choice (they show no badge until
-      // they pick/earn another)
-      const cur = await users.findOne({ ul }, { projection: { displayBadge: 1 } });
-      if (cur?.displayBadge === 'premium') set.displayBadge = null;
-    }
     const res = await users.updateOne({ ul }, { $set: set });
     if (!res.matchedCount) return fail(reply, 'unknown_account', 'No such user', 404);
-    await notifyAccount(ul, 'identity'); // the badge + cap changed; re-pull
-    if (premium) await pushBadgeHint(users, redis, config, ul); // new badge → offline hint
+    if (premium) {
+      await evaluateBadges(users, config, ul, counters); // awards awards.premium
+      await notifyAccount(ul, 'identity'); // cap changed
+      await notifyAccount(ul, 'badges');   // new badge: poll dispatches the modal NOW
+      await pushBadgeHint(users, redis, config, ul);
+    } else {
+      await revokeBadge(users, { id: 'premium', ul }); // clears award, seen mark, worn chip
+      await notifyAccount(ul, 'identity');
+      await notifyAccount(ul, 'badges'); // picker/list re-pull without it
+    }
     return { ul, premium };
   });
 
@@ -144,30 +148,36 @@ export default async function usersRoutes(app, { users, redis, config, messages,
     const ul = request.params.username.toLowerCase();
     const id = request.body?.id;
     const badge = badgeById.get(String(id));
-    if (!badge || badge.mode === 'derived') {
+    // premium is the flag TOGGLE's business (its eligibility lives there);
+    // everything else the admin can hand out goes through THE award route
+    if (!badge || badge.id === 'premium') {
       return fail(reply, 'bad_badge', 'Unknown or non-awardable badge (premium is a toggle)', 400);
     }
     if (!await users.findOne({ ul })) return fail(reply, 'unknown_account', 'No such user', 404);
-    await evaluateBadges(users, config, ul); // drain queue first: awards stay serial
-    const cap = badge.capOf(config);
-    const held = await users.countDocuments({ [`awards.${badge.id}`]: { $exists: true } });
-    // cap === null means UNCAPPED (Teacher's Pet) — `held >= null` would
-    // coerce to true and falsely report "badge_full"
-    if (cap !== null && held >= cap) {
-      return fail(reply, 'badge_full', `${badge.label} is capped at ${cap} holders — all taken`, 409);
+    let out;
+    if (badge.mode === 'admin') {
+      // set the eligibility flag, then let the SHARED evaluation award —
+      // same grant path, same dispatch, re-awardable after a revoke
+      await users.updateOne({ ul }, { $set: { [`adminAwards.${badge.id}`]: true } });
+      await evaluateBadges(users, config, ul, counters);
+      const user = await users.findOne({ ul });
+      const g = user?.awards?.[badge.id];
+      out = g ? { awarded: true, id: badge.id, gid: g.gid, at: g.at }
+              : { awarded: false, held: !!g, id: badge.id };
+    } else {
+      const res = await grantBadge(users, { id: badge.id, ul, config });
+      if (res?.full) {
+        return fail(reply, 'badge_full', `${badge.label} is capped at ${badge.capOf(config)} holders — all taken`, 409);
+      }
+      out = res?.held ? { awarded: false, held: true, id: badge.id }
+                      : { awarded: true, id: badge.id, gid: res?.gid, at: res?.at };
     }
-    const user = await users.findOne({ ul });
-    if (user.awards?.[badge.id]) return { awarded: false, held: true, id: badge.id };
-    const now = new Date().toISOString();
-    const gid = randomUUID();
-    // awarding never auto-wears — wearing is the user's own choice
-    await users.updateOne({ ul }, { $set: { [`awards.${badge.id}`]: { at: now, gid } } });
     // wake the client NOW (poll dispatch) instead of waiting for its 60s
     // tick — and blind-push the devices that are NOT connected at all
     await notifyAccount(ul, 'badges');
     await pushBadgeHint(users, redis, config, ul);
     request.log.info(`[admin] awarded ${badge.id} to ${ul}`);
-    return { awarded: true, id: badge.id, gid, at: now };
+    return out;
   });
 
   // DELETE /api/admin/users/:username/badge/:id — revoke a CAPPED badge
@@ -176,28 +186,20 @@ export default async function usersRoutes(app, { users, redis, config, messages,
   app.delete('/api/admin/users/:username/badge/:id', async (request, reply) => {
     const ul = request.params.username.toLowerCase();
     const badge = badgeById.get(String(request.params.id));
-    if (!badge || badge.mode === 'derived') {
+    // premium is the toggle's business (its eligibility is the premium flag;
+    // revoking the award alone would just be re-granted on next evaluation)
+    if (!badge || badge.id === 'premium') {
       return fail(reply, 'bad_badge', 'Unknown or non-revocable badge (premium is a toggle)', 400);
     }
-    const user = await users.findOne({ ul }, { projection: { awards: 1, displayBadge: 1 } });
-    if (!user) return fail(reply, 'unknown_account', 'No such user', 404);
-    const grant = user.awards?.[badge.id];
-    const set = {};
-    const unset = {};
-    const pull = {};
-    if (grant) {
-      unset[`awards.${badge.id}`] = '';
-      // CLEAR THE SEEN MARK too: legacy bare-id acks and the grant's own gid
-      // (a re-award after this must re-dispatch the modal on one device)
-      pull.badgesSeen = { $in: [badge.id, typeof grant === 'string' ? `${badge.id}:${grant}` : grant.gid] };
+    if (!await users.findOne({ ul })) return fail(reply, 'unknown_account', 'No such user', 404);
+    // admin-mode badges: drop the ELIGIBILITY flag first, or the next
+    // evaluation would simply re-award what we just revoked
+    if (badge.mode === 'admin') {
+      await users.updateOne({ ul }, { $unset: { [`adminAwards.${badge.id}`]: '' } });
     }
-    if (user.displayBadge === badge.id) set.displayBadge = null;
-    if (!Object.keys(unset).length && !Object.keys(set).length) return { revoked: false };
-    await users.updateOne({ ul }, {
-      ...(Object.keys(unset).length ? { $unset: unset } : {}),
-      ...(Object.keys(pull).length ? { $pull: pull } : {}),
-      ...(Object.keys(set).length ? { $set: set } : {}),
-    });
+    // THE revoke primitive: award gone, seen-ack gone (re-award re-dispatches),
+    // worn chip stripped if it was this badge
+    await revokeBadge(users, { id: badge.id, ul });
     await notifyAccount(ul, 'badges'); // client re-pulls: list, chip + picker update live
     return { revoked: true, id: badge.id };
   });
