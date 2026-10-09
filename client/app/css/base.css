@@ -182,9 +182,14 @@ img.own-avatar { border-radius: 50%; }
 
 /* two-row identity block: name (+red badge) with "Get verified" beneath */
 .me-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
-.me-line { display: flex; align-items: baseline; gap: .35rem; min-width: 0; }
+.me-line { display: flex; align-items: center; gap: .35rem; min-width: 0; }
 .me-line .me-name { min-width: 0; }
-.me-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.me-name {
+  font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  /* the ellipsis clip box must INCLUDE descenders: with the inherited tight
+     line-height, the bottom of g/j/p/y was shaved off by overflow:hidden */
+  line-height: 1.45;
+}
 .side-actions { display: flex; align-items: center; gap: .3rem; }
 
 .side-status { padding: 0 1rem; flex: none; }
