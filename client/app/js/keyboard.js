@@ -7,13 +7,20 @@
 // MOVES; only the space between header and composer changes:
 //
 //  1. PRE-FLIGHT (iOS): Safari pans only when the focused input would land
-//     UNDER the keyboard. A pointer-down happens ~150ms BEFORE the
-//     keyboard — we shrink --app-h then, using the last measured
-//     keyboard height PLUS a margin for context variance (QuickType
-//     suggestions bar ≈55px, emoji panels taller; a first-ever open uses a
-//     generic portrait estimate). Over-estimating is safe: the shell is a
-//     little short for a moment and no pan ever starts. Under-estimating
-//     is what re-ignited the pan-jump this module exists to kill.
+//     UNDER the keyboard. The shrink must NOT happen on pointerdown: iOS
+//     dispatches the synthetic mousedown/focus only AFTER touchend,
+//     hit-tested against the by-then-moved layout — relocating the input
+//     400px away from the finger means focus never lands and the keyboard
+//     never opens. Instead we record the tap and shrink on FOCUSIN of that
+//     same input: focus is already granted (it can't be lost), and the
+//     synchronous re-fit still lands before the keyboard animation starts,
+//     so the input is already visible when Safari decides whether to pan —
+//     no pan starts, nothing to snap back. The estimate is the last
+//     measured keyboard height PLUS a margin for context variance
+//     (QuickType suggestions bar ≈55px, emoji panels taller; a first-ever
+//     open uses a generic portrait estimate). Over-estimating is safe: the
+//     shell is a little short for a moment and the mirror re-fits it.
+//     Under-estimating is what re-ignites the pan-jump.
 //  2. MIRROR: on every visualViewport event we re-fit to the TRUTH —
 //     --app-h = vv.height (exact), --kb-h = the covered band, and
 //     --vv-top = vv.offsetTop. The cache learns the real keyboard height
@@ -84,31 +91,41 @@ export function initKeyboardFit() {
     if (document.activeElement?.id === 'chat-input') pinBottom();
   }
 
-  // Pre-flight shrink — runs BEFORE focus, BEFORE any pan can start.
+  // Pre-flight shrink — runs AFTER focus is granted, BEFORE the keyboard
+  // (and its pan decision) arrives.
   let revertTimer = 0;
   function preflight() {
     if (!IS_IOS) return;            // Android resizes itself; desktop has no soft keyboard
     if (lastCover > 80) return;     // keyboard already up: nothing to pre-fit
     const est = cachedKb || DEFAULT_KB;
     fit(Math.max(MIN_APP_H, window.innerHeight - est - PRE_MARGIN), est + PRE_MARGIN, 0);
-    // Speculative shrink: if no keyboard actually arrives (tap swallowed,
-    // focus stolen), restore the true fit instead of leaving the shell
-    // stranded mid-screen.
+    // Speculative shrink: if no keyboard actually arrives (focus stolen,
+    // programmatic focus that iOS declines to honour), restore the true fit
+    // instead of leaving the shell stranded mid-screen.
     clearTimeout(revertTimer);
     revertTimer = setTimeout(() => { if (lastCover <= 80) apply(); }, 600);
   }
 
-  // Delegated capture: any INPUT/TEXTAREA anywhere — chat composer, auth,
-  // pairing, settings. No per-component wiring. POINTERDOWN only, never
-  // focusin: chat.js programmatically re-focuses the composer (open chat,
-  // after send) and on iOS that fires focusin WITHOUT a keyboard following
-  // — a pre-flight there shrank the shell with nothing to restore it
-  // (composer stranded mid-page). A soft keyboard on iOS always needs a
-  // real tap, and pointerdown catches every one of those.
+  // Tap bookkeeping: a pointerdown on an INPUT/TEXTAREA anywhere (delegated
+  // capture — composer, auth, pairing, settings, forward dialog) marks that
+  // element as genuinely tapped. focusin pre-flights ONLY for a tap-earned
+  // focus of the SAME element within the tap window — programmatic focuses
+  // (chat.js re-focuses the composer on open/after send, the forward dialog
+  // autofocuses its search) must never shrink the shell: no user tap means
+  // iOS may not raise a keyboard at all, and the shell would be stranded.
+  let tapTarget = null;
+  let tapAt = 0;
   document.addEventListener('pointerdown', (e) => {
     const t = e.target;
-    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA') && !t.disabled) preflight();
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA') && !t.disabled) {
+      tapTarget = t;
+      tapAt = performance.now();
+    }
   }, { capture: true, passive: true });
+  document.addEventListener('focusin', (e) => {
+    if (e.target === tapTarget && performance.now() - tapAt < 700) preflight();
+    tapTarget = null;
+  });
 
   vv.addEventListener('resize', apply);
   vv.addEventListener('scroll', apply);
