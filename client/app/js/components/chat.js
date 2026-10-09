@@ -912,9 +912,6 @@ export function createChat({ client, onHomeRefresh }) {
     // guards on visibility, so calling it earlier silently skipped the top
     // name badge (the bug: selected badge missing on the profile header)
     renderProfileBadges();
-    mountLine($('profile-line'), {
-      peer: meUl, state: PS.TRUSTED, chipEl: chipFor(profileDisplay, sheetPremium),
-    });
     $('profile-modal').focus?.();
   }
 
@@ -933,6 +930,15 @@ export function createChat({ client, onHomeRefresh }) {
     profileDisplay = prof?.displayBadge ?? me?.displayBadge ?? null;
     sheetPremium = !!prof?.premium || !!me?.premium;
     renderProfileBadges();
+    // the sheet is fed ENTIRELY from own data here — never through
+    // renderProfileView (that renders currentPeer and would leave the last
+    // viewed profile on screen)
+    mountLine($('profile-line'), {
+      peer: meUl,
+      state: me?.verified ? PS.TRUSTED : PS.SELF, // green shield once identity-verified, like any verified account reads
+      chipEl: chipFor(profileDisplay, sheetPremium),
+      unverified: me ? !me.verified : null,
+    });
     // No me.verified gate here: the profile endpoint already IS the policy
     // (owner always sees their own photo; others only on mutual+verified),
     // and stacking a second fetch's result over it made the photo vanish
