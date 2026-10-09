@@ -107,11 +107,16 @@ serves the deployed sha. `./update.sh --dry-run` shows the plan without
 acting. It refuses to run with uncommitted changes or a diverged history —
 commit/stash or resolve first.
 
-`cocono-be` runs under `node --watch`: edits to **`be/` sources during
-development restart it automatically**; static FE/SDK files (`client/app`,
-`client/src`) are read per request and need NO restart. A manual
-`systemctl --user restart cocono-be` is for stuck crash loops or config
-changes only — update.sh does the clean known-good bounce itself.
+Static FE/SDK files (`client/app`, `client/src`) are read per request and
+need NO restart. **Do NOT trust `node --watch` for `be/` sources**: it has
+been observed to silently stop restarting its child after a while (2026-10
+incident: server code was ~15 min stale, a new required-field check never
+went live, and blocks were accepted without reasons while tests said the
+route was correct). After ANY `be/` change: `systemctl --user restart
+cocono-be` (and `cocono-admin` when `be/` touched admin routes), then
+confirm freshness — compare `ps -ef | grep src/dev.js` child start time
+against the edited files' mtimes (`stat -c %y …`); the child must be NEWER
+than the code it should be running. update.sh does this bounce itself.
 
 ## Backups (ops trio #2 — LIVE, local-only)
 
