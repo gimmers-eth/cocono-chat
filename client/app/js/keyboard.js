@@ -23,17 +23,18 @@ export function initKeyboardFit() {
 
   function apply() {
     root.style.setProperty('--app-h', `${Math.round(vv.height)}px`);
+    // RIDE the pan instead of fighting it: Safari offsets the visual
+    // viewport when a near-keys input focuses, and any scrollTo correction
+    // becomes the visible "hop" (pan out, snap back). Publishing
+    // --vv-top lets CSS shift the WHOLE app down by exactly the pan amount
+    // — every fixed layer moves with the body, so the header stays pinned
+    // to the top of what the user actually sees, frame for frame.
+    root.style.setProperty('--vv-top', `${Math.round(vv.offsetTop)}px`);
     // keyboard height the DOCUMENT can no longer scroll away from (body is
     // fixed): auth forms pad themselves by --kb-h so focused inputs are
     // never under the keys; the chat shell doesn't need it (it resizes).
     const covered = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
     root.style.setProperty('--kb-h', `${covered}px`);
-    // Safari STILL offsets the visual viewport past a fixed body when an
-    // input near the keys takes focus (vv.offsetTop > 0 — exactly the
-    // "composer at top, header off page" state). Undo it every event: with
-    // the document locked this snaps instantly and cannot animate — the
-    // shell already fits the visible area, so there is nothing to reveal.
-    if (vv.offsetTop > 0 || window.scrollY > 0) window.scrollTo(0, 0);
     // Keep the newest messages above the keys as the shell resizes.
     if (document.activeElement?.id === 'chat-input') pinBottom();
   }
