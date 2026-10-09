@@ -110,17 +110,6 @@ if ('serviceWorker' in navigator) {
     (r) => r.update?.().catch(() => {}),
     () => {},
   );
-    // Notification-driven navigation: linking to a user means LEAVING whoever
-  // else's chat is open — close the current pane first, then open theirs.
-  // (Tapping the notice of the peer already on screen is a no-op.)
-  function openChatFromNotice(peer) {
-    if (!peer) return;
-    const ul = String(peer).toLowerCase();
-    if (chat.openPeer?.() === ul) return;
-    if (chat.openPeer?.()) chat.closeChat?.();
-    chat.openChat(ul).catch(() => {});
-  }
-
 navigator.serviceWorker.addEventListener('message', (e) => {
     // Tapping a notification: refresh the conversation list when the app is
     // open and signed in (content itself arrives via the normal channels).
@@ -149,6 +138,19 @@ async function reconcileFriends() {
     const ul = String(ent.peer ?? '').toLowerCase();
     if (ul && !now.has(ul)) chat.handleGonePeer?.(ul).catch(() => {});
   }
+}
+
+// Notification-driven navigation: linking to a user means LEAVING whoever
+// else's chat is open — close the current pane first, then open theirs.
+// (Tapping the notice of the peer already on screen is a no-op.)
+// MODULE scope: called from the SW message listener, the page-fallback
+// event, and enterApp's cold-boot pendingchat consumption.
+function openChatFromNotice(peer) {
+  if (!peer) return;
+  const ul = String(peer).toLowerCase();
+  if (chat.openPeer?.() === ul) return;
+  if (chat.openPeer?.()) chat.closeChat?.();
+  chat.openChat(ul).catch(() => {});
 }
 
 async function enterApp({ gesture = false, offline = false } = {}) {

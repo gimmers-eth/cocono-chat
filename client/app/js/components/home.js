@@ -174,7 +174,10 @@ export function createHome({ client, chat, onLogout }) {
     // explicit tab wins; otherwise routing by verification state:
     // unverified → Verify (nag) · verified → Profile (the unlocked tab)
     const want = tab || (myVerified === false ? 'verify' : myVerified === true ? 'profile' : null);
-    if (settingsOpen && want) selectSettingsTab(want);
+    // apply the routing target on FRESH opens too (it used to only fire
+    // when the drawer was already open — a cold open kept the stale
+    // persisted tab, e.g. 'devices', which read as broken routing)
+    if (want) selectSettingsTab(want);
     if (!settingsOpen) {
       settingsOpen = true;
       for (const el of [$('drawer-overlay'), $('settings-drawer')]) el.classList.remove('closing');
