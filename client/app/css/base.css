@@ -340,9 +340,12 @@ img.own-avatar { border-radius: 50%; }
 
 /* action pill inside the trust warning bars (e.g. "Add <user>") */
 .chat-warn .warn-action {
-  display: inline-block;
-  margin: 6px 0 0 2px;
-  padding: 4px 12px;
+  // the bar's text is centered — a trailing inline button would crowd the
+  // last word; give it its own centered line with symmetric breathing room
+  display: block;
+  width: max-content;
+  margin: .6rem auto .15rem;
+  padding: 4px 14px;
   border-radius: 999px;
   border: 1px solid currentColor;
   background: transparent;
