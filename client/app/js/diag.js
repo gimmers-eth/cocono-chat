@@ -6,6 +6,7 @@
 
 import { $ } from './ui.js';
 import { readSwLog } from './swkv.js';
+import { keyboardLogLines } from './keyboard.js';
 
 const idb = (req) =>
   new Promise((resolve, reject) => {
@@ -82,6 +83,7 @@ export async function collectDiagnostics() {
       .map((e) => `${new Date(e.at).toISOString().slice(11, 19)} ${e.kind}: ${e.msg}`)
       .join('\n');
   });
+  await attempt('keyboard-fit', async () => `cachedKb=${localStorage.getItem('cocono.kb-h') ?? '-'}\n${keyboardLogLines().join('\n')}`);
   await attempt('storage', async () => {
     const est = await navigator.storage.estimate();
     const persisted = navigator.storage.persisted ? await navigator.storage.persisted() : 'n/a';

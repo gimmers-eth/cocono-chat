@@ -25,19 +25,33 @@
 //     --app-h = vv.height (exact), --kb-h = the covered band, and
 //     --vv-top = vv.offsetTop. The cache learns the real keyboard height
 //     for the next pre-flight.
-//  3. RIDE: if Safari did pan/scroll anyway (pre-focused fields — the
+//  3. RIDE: if Safari displaced the view anyway (pre-focused fields — the
 //     composer and forward search are focused programmatically, so a tap
 //     fires no focusin; drawer/modal fields the shell shrink doesn't move),
 //     the body's translateY(var(--vv-top)) shifts the WHOLE fixed layer cake
-//     down by exactly the displacement, on the same frame we learn it —
-//     net effect on screen: nothing moves, the header stays glued to the
-//     top edge. iOS displaces fixed layers through TWO channels and the
-//     ride must sum both (the canonical pin formula is
-//     pageYOffset + vv.offsetTop): vv.offsetTop (visual-viewport pan) AND
-//     window.scrollY — iOS phantom-scrolls the DOCUMENT to reveal focused
-//     inputs even with html overflow:hidden + a fixed body, and that scroll
-//     carries fixed elements off-screen with it.
-//     Desktop/Android: both are always 0 → the ride is a no-op.
+//     down by exactly vv.offsetTop — the visual-viewport pan — on the same
+//     frame we learn it. Net effect on screen: nothing moves, the header
+//     stays glued to the top edge. Desktop/Android: offsetTop is always 0
+//     → the ride is a no-op.
+//     NOTE: window.scrollY must NOT ride along — a fixed body does not
+//     travel with document scroll, so translating by scrollY too pushed the
+//     app DOWN ("header ends up lower than it started"). The phantom
+//     document scroll is only ever CLEANED UP (scrollTo(0,0)) once the
+//     keyboard is closed.
+
+// Ring buffer of keyboard-fit samples for the Diagnostics report — iOS
+// keyboard behaviour cannot be reproduced off-device, so the phone itself
+// has to tell us what Safari did: every sample is one event with the raw
+// viewport numbers and what we set in response.
+const LOG_MAX = 60;
+const log = [];
+let t0 = 0;
+
+/** Formatted keyboard-fit trace for collectDiagnostics() (newest last). */
+export function keyboardLogLines() {
+  if (!log.length) return ['no visualViewport events recorded (desktop, or module never ran)'];
+  return log.slice();
+}
 
 // iOS soft keyboards don't resize the layout viewport — only they pan it.
 // Android Chrome resizes (interactive-widget=resizes-content in the meta),
@@ -66,6 +80,7 @@ export function initKeyboardFit() {
   if (!vv) return; // desktop/old engines: 100dvh fallback is already right
   const root = document.documentElement;
   let raf = 0;
+  t0 = performance.now();
 
   let cachedKb = 0;
   try { cachedKb = Math.max(0, Math.round(Number(localStorage.getItem('cocono.kb-h')) || 0)); } catch { /* private mode */ }
@@ -88,20 +103,32 @@ export function initKeyboardFit() {
     root.style.setProperty('--vv-top', `${Math.max(0, Math.round(vvTop))}px`);
   }
 
-  function apply() {
+  function sample(src) {
+    const appH = root.style.getPropertyValue('--app-h') || '(unset)';
+    const vvTop = root.style.getPropertyValue('--vv-top') || '(unset)';
+    log.push(
+      `+${Math.round(performance.now() - t0)}ms ${src}: iH=${window.innerHeight} vvH=${Math.round(vv.height)}` +
+      ` vvT=${Math.round(vv.offsetTop)} sY=${Math.round(window.scrollY)} sc=${vv.scale}` +
+      ` ae=${document.activeElement?.id || document.activeElement?.tagName || '-'} → appH=${appH} vvTop=${vvTop}`,
+    );
+    if (log.length > LOG_MAX) log.shift();
+  }
+
+  function apply(src = 'vv') {
     const cover = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
     lastCover = cover;
     // Keyboard closed but iOS left a phantom document scroll behind: reset
     // it (nothing can legitimately scroll — html is overflow:hidden, body
-    // fixed). While the keyboard is UP we never fight the scroll — we RIDE
-    // it (below); yanking it mid-animation is the old snap-back hop.
+    // fixed). While the keyboard is UP we never fight the scroll — yanking
+    // it mid-animation is the old snap-back hop.
     if (cover <= 80 && window.scrollY !== 0) window.scrollTo(0, 0);
-    fit(vv.height, cover, vv.offsetTop + Math.max(0, window.scrollY));
+    fit(vv.height, cover, vv.offsetTop);
     if (cover > 80 && Math.abs(cover - cachedKb) > 8) { // the keyboard revealed itself: learn it
       cachedKb = cover;
       try { localStorage.setItem('cocono.kb-h', String(cover)); } catch { /* private mode */ }
     }
     if (document.activeElement?.id === 'chat-input') pinBottom();
+    sample(src);
   }
 
   // Pre-flight shrink — runs AFTER focus is granted, BEFORE the keyboard
@@ -116,7 +143,8 @@ export function initKeyboardFit() {
     // programmatic focus that iOS declines to honour), restore the true fit
     // instead of leaving the shell stranded mid-screen.
     clearTimeout(revertTimer);
-    revertTimer = setTimeout(() => { if (lastCover <= 80) apply(); }, 600);
+    revertTimer = setTimeout(() => { if (lastCover <= 80) apply('revert'); }, 600);
+    sample('preflight');
   }
 
   // Tap bookkeeping: a pointerdown on an INPUT/TEXTAREA anywhere (delegated
@@ -133,17 +161,24 @@ export function initKeyboardFit() {
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA') && !t.disabled) {
       tapTarget = t;
       tapAt = performance.now();
+      sample(`tap:${t.id || t.tagName}`);
     }
   }, { capture: true, passive: true });
   document.addEventListener('focusin', (e) => {
+    sample(`focusin:${e.target?.id || e.target?.tagName}${e.target === tapTarget ? '' : ' (no-tap)'}`);
     if (e.target === tapTarget && performance.now() - tapAt < 700) preflight();
     tapTarget = null;
   });
 
-  vv.addEventListener('resize', apply);
-  vv.addEventListener('scroll', apply);
-  // iOS's phantom DOCUMENT scroll (the scrollY ride channel) fires window
-  // scroll events that the visualViewport listeners never see.
-  window.addEventListener('scroll', apply, { passive: true });
-  apply();
+  document.addEventListener('focusout', (e) => {
+    sample(`focusout:${e.target?.id || e.target?.tagName}`);
+  });
+
+  vv.addEventListener('resize', () => apply('vv-resize'));
+  vv.addEventListener('scroll', () => apply('vv-scroll'));
+  // iOS's phantom DOCUMENT scroll fires window scroll events that the
+  // visualViewport listeners may not see — feed them through apply so the
+  // close-cleanup and the log catch them.
+  window.addEventListener('scroll', () => apply('win-scroll'), { passive: true });
+  apply('init');
 }
