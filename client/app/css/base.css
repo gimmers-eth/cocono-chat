@@ -284,6 +284,17 @@ img.own-avatar { border-radius: 50%; }
 .drawer-body h3 { font-size: .85rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: .6rem 0 .55rem; }
 
 .chat-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* Opening a chat slides the pane in from the right — SNAPPY: short distance,
+   fast 160ms, decisive ease-out so it decelerates into place. The animation
+   restarts naturally because [hidden] (display:none) -> shown re-triggers it.
+   Reduced-motion users get it instantly, no slide. */
+@keyframes chat-slide-in {
+  from { transform: translateX(18%); opacity: .55; }
+  to   { transform: none; opacity: 1; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .chat-view:not([hidden]) { animation: chat-slide-in .16s cubic-bezier(.22, .9, .3, 1) both; }
+}
 
 .chat-head {
   height: var(--head-h); flex: none; display: flex; align-items: center; gap: .6rem;
