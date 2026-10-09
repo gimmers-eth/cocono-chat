@@ -48,12 +48,25 @@ export function setBusy(busy) {
  * Promise-based confirm dialog: resolves true on confirm, false on cancel /
  * scrim / Escape. Falls back to window.confirm if the markup is missing.
  */
-export function confirmModal({ title, body, okLabel = 'Confirm', danger = false, warning = '', subline = '' }) {
+// bodyEl: pass a NODE instead of plain text (rendered inside confirm-body)
+// for interactive payloads like the block-reason choice list.
+// validate: gate OK on a live predicate (e.g. "a reason is selected") —
+// while false, OK stays disabled; the owner keeps the modal open until truth.
+let validateCleanup = null;
+const clearValidateHook = () => { validateCleanup?.(); validateCleanup = null; };
+
+export function confirmModal({ title, body, bodyEl, okLabel = 'Confirm', danger = false, warning = '', subline = '', validate = null }) {
   const overlay = $('confirm-overlay');
   const modal = $('confirm-modal');
   if (!modal || !overlay) return Promise.resolve(window.confirm(`${title}\n\n${body}`));
   $('confirm-title').textContent = title;
-  $('confirm-body').textContent = body;
+  const bodyTarget = $('confirm-body');
+  if (bodyEl) {
+    bodyTarget.textContent = '';
+    bodyTarget.append(bodyEl);
+  } else {
+    bodyTarget.textContent = body;
+  }
   const warnEl = $('confirm-warning');
   if (warnEl) {
     warnEl.textContent = warning;
@@ -67,6 +80,18 @@ export function confirmModal({ title, body, okLabel = 'Confirm', danger = false,
   const ok = $('btn-confirm-ok');
   ok.textContent = okLabel;
   ok.classList.toggle('btn-danger', danger);
+  if (validate) {
+    // drop any PREVIOUS validate wiring before hooking: stale listeners on
+    // the persistent #confirm-body would fire against an old modal's state
+    // and fight over the OK button of the next one
+    clearValidateHook?.();
+    const sync = () => { ok.disabled = !validate(); };
+    bodyTarget.addEventListener('change', sync);
+    validateCleanup = () => bodyTarget.removeEventListener('change', sync);
+    sync();
+  } else {
+    clearValidateHook?.();
+  }
   return new Promise((resolve) => {
     const done = (value) => {
       overlay.hidden = true;

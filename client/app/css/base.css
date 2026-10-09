@@ -338,6 +338,47 @@ img.own-avatar { border-radius: 50%; }
 #msg-modal .msg-modal-text { flex: 1 1 auto; max-height: none; }
 .linkish.danger { color: var(--danger); }
 
+/* ---- BLOCK confirm: required reason choice-list (three lines, never a
+   dropdown — the options must be readable at a glance on a phone) ---- */
+.block-reasons { display: flex; flex-direction: column; gap: .55rem; margin-top: .4rem; }
+.block-reasons label {
+  display: flex; align-items: flex-start; gap: .55rem;
+  padding: .55rem .7rem; border: 1px solid var(--border); border-radius: .6rem;
+  cursor: pointer; font-size: .9rem;
+}
+.block-reasons label:hover { background: rgba(255, 255, 255, 0.05); }
+.block-reasons input { margin-top: .15rem; accent-color: var(--danger); }
+.block-reasons label:has(input:checked) { border-color: var(--danger); }
+
+/* ---- Settings > Relationships ---- */
+.rel-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-bottom: .6rem; }
+.rel-toolbar .input { flex: 1 1 10rem; }
+.rel-toggles { display: inline-flex; gap: .4rem; }
+.toggle-chip {
+  padding: 4px 12px; border-radius: 999px; border: 1px solid var(--border);
+  background: transparent; color: inherit; font: inherit; font-size: .82rem; cursor: pointer;
+}
+.toggle-chip[aria-pressed="true"] { border-color: currentColor; font-weight: 600; }
+.toggle-chip.off { opacity: .45; }
+.rel-list { list-style: none; margin: 0; padding: 0; }
+.rel-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
+  padding: .55rem .2rem; border-bottom: 1px solid var(--border);
+}
+.rel-name { font-weight: 600; min-width: 7.5rem; }
+.rel-info { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.rel-pill {
+  padding: 2px 9px; border-radius: 999px; font-size: .75rem;
+  border: 1px solid var(--border); color: inherit;
+}
+.rel-pill.ok { color: var(--success, #4caf7d); border-color: currentColor; }
+.rel-pill.warn { color: var(--warning); border-color: currentColor; }
+.rel-pill.bad { color: var(--danger); border-color: currentColor; }
+.rel-pill.blocked { color: var(--danger); border-color: currentColor; font-weight: 700; }
+.rel-pill.reason { opacity: .8; }
+.rel-row-blocked { background: rgba(239, 105, 117, 0.06); }
+.rel-action { margin-left: .2rem; }
+
 /* trust-warning actions: a NEW centered line of pills under the bar text
    (the bar itself is text-align:center — inline tails would crowd the last
    word). One rem rhythm: .6rem above, .15rem below the symmetric .4rem bar

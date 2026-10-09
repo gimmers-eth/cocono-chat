@@ -39,6 +39,13 @@ const fmtDuration = (sec) => {
 };
 const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// mirrors the client's block-reason enum (ids enforced by the server)
+const BLOCK_REASON_TEXT = {
+  nospeak: 'does not want to speak to them',
+  unknown: 'does not know them',
+  scam: 'reports a scam attempt',
+};
+
 function renderLimits(limits) {
   const body = $('limits-body');
   $('limits-empty').hidden = limits.length > 0;
@@ -174,10 +181,12 @@ async function loadRelations() {
     const mark = (on) => on ? '<span class="rel-yes">✓</span>' : '<span class="dim">—</span>';
     el.innerHTML = relationships.length
       ? `<table class="rel-table">
-          <thead><tr><th>User</th><th>Added&nbsp;them</th><th>They&nbsp;added</th><th>Verified</th><th>Trusted</th></tr></thead>
-          <tbody>${relationships.map((r) => `<tr>
+          <thead><tr><th>User</th><th>Added&nbsp;them</th><th>They&nbsp;added</th><th>Verified</th><th>Trusted</th><th>Blocked&nbsp;them</th><th>Blocked&nbsp;by</th></tr></thead>
+          <tbody>${relationships.map((r) => `<tr class="${r.blocks || r.blockedBy ? 'rel-blocked' : ''}">
             <td><button class="linkish" data-view-user="${esc(r.ul)}">@${esc(r.ul)}</button>${r.premium ? ' <span class="badge gold-badge">★</span>' : ''}</td>
             <td>${mark(r.added)}</td><td>${mark(r.theyAddedMe)}</td><td>${mark(r.verified)}</td><td>${mark(r.trust)}</td>
+            <td>${r.blocks ? '<span class="rel-block" title="' + esc(BLOCK_REASON_TEXT[r.blockReason] ?? 'blocked') + '">⛔ ' + esc(BLOCK_REASON_TEXT[r.blockReason] ?? 'blocked') + '</span>' : '<span class="dim">—</span>'}</td>
+            <td>${r.blockedBy ? '<span class="rel-block" title="blocked by @' + esc(r.ul) + '">⛔</span>' : '<span class="dim">—</span>'}</td>
           </tr>`).join('')}</tbody>
         </table>`
       : '<p class="dim">No relationships yet — this account has added nobody, and nobody has added it.</p>';

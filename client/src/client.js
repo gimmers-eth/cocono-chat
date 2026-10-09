@@ -373,6 +373,28 @@ export class CoconoClient extends Emitter {
    * ones reconcile via listFriends().
    * @returns {Promise<Array<{u, p, gone, changed, trusted}>>} authoritative entries
    */
+  /** Block a user: severs the relation both ways and walls off inbound
+   *  messages (server-gated before storage: no delivery, no push). The
+   *  blocked party is never told — their own list just shows a stranger. */
+  // reason: 'nospeak' | 'unknown' | 'scam' (server-enforced enum) — the
+  // blocker's own note for recall + admin context; never shown to the
+  // blocked party.
+  async blockUser(username, reason) {
+    const ul = String(username ?? '').toLowerCase();
+    return this.api.blockUser(this.#requireToken(), ul, reason);
+  }
+
+  /** Lift a block. Nothing is restored: relations are rebuilt deliberately. */
+  async unblockUser(username) {
+    const ul = String(username ?? '').toLowerCase();
+    return this.api.unblockUser(this.#requireToken(), ul);
+  }
+
+  /** Unified relationship view: { added: [entries…], blocked: [users…] }. */
+  async relationships() {
+    return this.api.relationships(this.#requireToken());
+  }
+
   async addFriend(username) {
     const ul = String(username).toLowerCase();
     const res = await this.api.addFriend(this.#requireToken(), ul);

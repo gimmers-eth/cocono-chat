@@ -67,6 +67,15 @@ export class Api {
     return this.#request('/api/me/friends', { token });
   }
 
+  blockUser(token, ul, reason) {
+    return this.#request(`/api/me/friends/${encodeURIComponent(ul)}/block`, { method: 'PUT', body: { r: reason }, token });
+  }
+  unblockUser(token, ul) {
+    return this.#request(`/api/me/friends/${encodeURIComponent(ul)}/block`, { method: 'DELETE', token });
+  }
+  relationships(token) {
+    return this.#request('/api/me/relationships', { token });
+  }
   addFriend(token, ul) {
     return this.#request(`/api/me/friends/${encodeURIComponent(ul)}`, { method: 'PUT', token });
   }

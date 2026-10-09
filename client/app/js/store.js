@@ -333,6 +333,36 @@ export async function rememberPeerAvatar(peer, avatar) {
   window.dispatchEvent(new Event(AVATARS_EVENT));
 }
 
+// Blocked peers ride the same PEERS mirror row (peer -> {blocked:true}).
+// The server list is the source of truth; saveBlockedSet rebuilds the
+// whole local view at login/reconcile so removals (unblocks on any device)
+// survive. This mirror only drives BADGES (sidebar pill, chat bar) — every
+// real gate is server-side.
+export async function rememberPeerBlocked(peer, blocked) {
+  const ul = String(peer).toLowerCase();
+  const cur = (await withStore('readonly', (s) => s.get(ul), PEERS)) ?? { peer: ul };
+  const next = { ...cur, blocked: !!blocked };
+  await withStore('readwrite', (s) => s.put(next), PEERS);
+}
+
+export async function saveBlockedSet(peers) {
+  const keep = new Set((peers ?? []).map((p) => String(p).toLowerCase()));
+  const rows = await withStore('readonly', (s) => s.getAll(), PEERS);
+  for (const r of rows ?? []) {
+    const now = keep.has(r.peer);
+    if (!!r.blocked !== now) {
+      await withStore('readwrite', (s) => s.put({ ...r, blocked: now }), PEERS);
+    }
+  }
+}
+
+export async function loadPeerBlocked() {
+  const rows = await withStore('readonly', (s) => s.getAll(), PEERS);
+  const map = new Map();
+  for (const r of rows ?? []) map.set(r.peer, !!r.blocked);
+  return map;
+}
+
 export async function loadPeerVerifications() {
   const rows = await withStore('readonly', (s) => s.getAll(), PEERS);
   const map = new Map();

@@ -15,6 +15,8 @@ export const ERROR_TEXT = {
   bad_recipient_key: 'Unknown recipient key — not sent.',
   unknown_device: 'This device is no longer on the account.',
   unknown_recipient: 'That user no longer exists.',
+  blocked: 'Your message could not be delivered.',
+  self_blocked: 'You blocked this user — unblock them (chat menu or Settings > Relationships) to send messages.',
   verify_required: 'You need to get verified before messaging new people.',
   rate_limited: 'Too many messages — wait a moment.',
   not_connected: 'Not connected right now.',

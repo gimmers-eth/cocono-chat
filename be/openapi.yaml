@@ -283,6 +283,44 @@ paths:
                         changed: { type: boolean }
                         trusted: { type: boolean }
 
+  /api/me/relationships:
+    get:
+      summary: Unified relationship view (added contacts with trust stages + blocked users with the blocker's reason)
+      responses:
+        '200': { description: '{ added: [enriched friend entries], blocked: [{peer, addedBack, reason, at}] }' }
+        '401': { description: 'Missing/invalid token' }
+  /api/me/friends/{ul}/block:
+    put:
+      summary: Block a user (severs the relation both ways; gates their sends at the ws send seam before storage; reason required)
+      parameters:
+        - in: path
+          name: ul
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [r]
+              properties:
+                r: { type: string, enum: [nospeak, unknown, scam] }
+      responses:
+        '200': { description: '{ blocked: true }' }
+        '400': { description: 'self_block / invalid_request (reason missing or not in the enum)' }
+        '403': { description: 'rate-limited' }
+        '404': { description: 'unknown_account' }
+    delete:
+      summary: Lift a block (nothing is restored — relations rebuild deliberately)
+      parameters:
+        - in: path
+          name: ul
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: '{ blocked: false }' }
+
   /api/me/stage-limits:
     get:
       tags: [friends]

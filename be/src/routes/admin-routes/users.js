@@ -212,13 +212,14 @@ export default async function usersRoutes(app, { users, redis, config, messages,
   // brute force (two collection reads) over anything index gymnastics.
   app.get('/api/admin/users/:username/relationships', async (request, reply) => {
     const ul = request.params.username.toLowerCase();
-    const actor = await users.findOne({ ul }, { projection: { friends: 1 } });
+    const actor = await users.findOne({ ul }, { projection: { friends: 1, blocked: 1, blockReasons: 1 } });
     if (!actor) return fail(reply, 'unknown_account', 'No such user', 404);
+    const myBlocked = new Set((actor.blocked ?? []).map((u) => String(u).toLowerCase()));
     const toList = (doc) => (doc?.friends ?? []).map((f) => (typeof f === 'string' ? { u: f } : f));
     const mine = new Map(toList(actor).map((f) => [String(f.u).toLowerCase(), f]));
     const others = await users.find(
       { ul: { $ne: ul } },
-      { projection: { ul: 1, friends: 1, verified: 1, premium: 1 } },
+      { projection: { ul: 1, friends: 1, verified: 1, premium: 1, blocked: 1 } },
     ).toArray();
     const rows = [];
     for (const other of others) {
@@ -229,13 +230,20 @@ export default async function usersRoutes(app, { users, redis, config, messages,
       rows.push({
         ul: other.ul,
         premium: other.premium === true,
+        // blocks are one-way walls: which side faces whom (never merged —
+        // "blocks" and "blocked-by" are different facts for the operator),
+        // plus the blocker's own stated reason when the wall faces outward
+        blocks: myBlocked.has(other.ul),
+        blockReason: myBlocked.has(other.ul) ? (actor.blockReasons?.[other.ul]?.r ?? null) : null,
+        blockedBy: (other.blocked ?? []).some((u) => String(u).toLowerCase() === ul),
         theyAddedMe: !!theirs,
         added: !!m,
         verified: !!(m?.v && mutual),   // same mutuality gate the app enforces
         trust: !!(m?.v && m?.t && mutual),
       });
     }
-    rows.sort((a, b) => (Number(b.added) - Number(a.added)) || a.ul.localeCompare(b.ul));
+    rows.sort((a, b) => (Number(b.blocks) - Number(a.blocks))
+      || (Number(b.added) - Number(a.added)) || a.ul.localeCompare(b.ul));
     return { ul, relationships: rows };
   });
 

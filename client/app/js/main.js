@@ -157,6 +157,7 @@ async function enterApp({ gesture = false, offline = false } = {}) {
   home.paintMe(client.username);
   if (!offline) client.connect(); // offline mode: browse the local store only
   if (!offline) badgeNotify.poll(); // badges the queue awarded since last seen
+  if (!offline) home.refreshBlocked?.().catch(() => {}); // blocked mirror re-sync (server = truth)
   await home.renderConversationList();
 
   // Friends mirror: the SERVER list is the source of truth — reconcile on
@@ -283,6 +284,9 @@ client.on('notice', ({ what, by }) => {
     // and setFriends fires FRIENDS_EVENT which repaints sidebar, trust
     // strip and the verification gate.
     reconcileFriends().catch(() => { /* next entry reconciles */ });
+    // a block/unblock on ANY device moved this same relation — keep the
+    // blocked mirror (sidebar badges, chat bar) true to the server
+    home.refreshBlocked?.().catch(() => {});
   } else if (what === 'identity') {
     // admin reviewed my account: re-read /api/me (badge, Profile-tab gate)
     home.refreshIdentity?.().catch?.(() => {});

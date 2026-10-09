@@ -6,7 +6,8 @@ import { $, setStatus, fmtTime, confirmModal, openLightbox } from '../ui.js';
 import { humanError } from '../errors.js';
 import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
-import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, clearAllMessages, loadPeerVerifications, loadPeerPremiums, loadPeerAvatars, rememberPeerAvatar, rememberPeerVerified, rememberPeerChip, loadPeerChips, AVATARS_EVENT, FRIENDS_EVENT } from '../store.js';
+import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, clearAllMessages, loadPeerVerifications, loadPeerPremiums, loadPeerAvatars, rememberPeerAvatar, rememberPeerVerified, rememberPeerChip, loadPeerChips, AVATARS_EVENT, FRIENDS_EVENT, loadPeerBlocked, saveBlockedSet } from '../store.js';
+import { blockUserWithConfirm, unblockUser, blockReasonLabel } from '../blocks.js';
 import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl } from './peername.js';
 import { guessDeviceName, humanPlatform } from '../devices.js';
 import { BADGE_UI, nameChipEl } from '../badges.js';
@@ -33,6 +34,7 @@ export function createHome({ client, chat, onLogout }) {
   function showSettingsTab() {
     for (const t of SETTINGS_TABS) {
       const panel = $(`tabpanel-${t}`);
+    if (t === 'relationships') renderRelationships(); // fresh pull on entry
       if (panel) panel.hidden = t !== settingsTab;
     }
     for (const btn of document.querySelectorAll('.drawer-tab')) {
@@ -486,8 +488,8 @@ export function createHome({ client, chat, onLogout }) {
 
   async function renderConversationList() {
     const list = $('conversation-list');
-    const [all, friends, pins, peerVerified, avatars, peerPremium, peerChips] = await Promise.all(
-      [allMessages(), loadFriends(), loadPins(), loadPeerVerifications(), loadPeerAvatars(), loadPeerPremiums(), loadPeerChips()],
+    const [all, friends, pins, peerVerified, avatars, peerPremium, peerChips, peerBlocked] = await Promise.all(
+      [allMessages(), loadFriends(), loadPins(), loadPeerVerifications(), loadPeerAvatars(), loadPeerPremiums(), loadPeerChips(), loadPeerBlocked()],
     );
     const latestByPeer = new Map();
     for (const m of all) {
@@ -541,6 +543,7 @@ export function createHome({ client, chat, onLogout }) {
       // only when we actually looked the peer up (Map value false, not undefined)
       { const chip = nameChipEl(peerChips.get(peer)); if (chip) { chip.classList.add('name-chip-inline'); name.append(chip); } }
       if (peerVerified.get(peer) === false) name.append(unverifiedBadgeEl());
+      if (peerBlocked.get(peer)) { const b = iconEl('ban', 'icon-danger'); b.title = 'Blocked'; name.append(b); }
       name.classList.toggle('gone', state === PS.GONE);
       const preview = document.createElement('span');
       preview.className = 'convo-last';
@@ -986,5 +989,113 @@ export function createHome({ client, chat, onLogout }) {
     wireApproveCode();
   }
 
-  return { wire, paintMe, renderConversationList, renderDevices, refreshIdentity: renderIdentity, refreshPeerProfiles };
+  // ---- Settings > Relationships: every added or blocked user, searchable,
+  // with per-filter toggles and the full trust picture. Server is source of
+  // truth (fresh pull on tab entry); actions re-pull after success. ----
+  const relState = { q: '', added: true, blocked: true, rows: null };
+
+  async function renderRelationships() {
+    const ul = $('rel-list');
+    const empty = $('rel-empty');
+    if (!ul) return;
+    try {
+      relState.rows = await client.relationships();
+    } catch {
+      empty.hidden = false;
+      empty.textContent = 'Could not load relationships (offline?).';
+      ul.replaceChildren();
+      return;
+    }
+    // keep the sidebar badges honest with the same pull
+    saveBlockedSet((relState.rows.blocked ?? []).map((b) => b.peer)).then(() => {});
+    const q = relState.q.trim().toLowerCase();
+    const rows = [];
+    if (relState.added) {
+      for (const a of relState.rows.added ?? []) {
+        if (q && !a.u.includes(q)) continue;
+        rows.push({ peer: a.u, entry: a, blocked: false });
+      }
+    }
+    if (relState.blocked) {
+      for (const b of relState.rows.blocked ?? []) {
+        if (q && !b.peer.includes(q)) continue;
+        // a blocked peer can ALSO still be in added? no — block severs both
+        // ways; the two sets are disjoint by construction. Dedup is free.
+        rows.push({ peer: b.peer, entry: b, blocked: true });
+      }
+    }
+    rows.sort((x, y) => x.peer.localeCompare(y.peer));
+    empty.hidden = rows.length > 0;
+    empty.textContent = 'No matches — or nothing to show for the current filters.';
+    const pill = (text, cls) => {
+      const p = document.createElement('span');
+      p.className = `rel-pill ${cls ?? ''}`;
+      p.textContent = text;
+      return p;
+    };
+    const action = (label, fn, danger = false) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = `linkish rel-action${danger ? ' danger' : ''}`;
+      b.textContent = label;
+      b.addEventListener('click', () => { b.disabled = true; fn().finally(() => { b.disabled = false; }); });
+      return b;
+    };
+    ul.replaceChildren();
+    for (const r of rows) {
+      const li = document.createElement('li');
+      li.className = r.blocked ? 'rel-row rel-row-blocked' : 'rel-row';
+      const name = document.createElement('span');
+      name.className = 'rel-name';
+      name.textContent = `@${r.peer}`;
+      const info = document.createElement('span');
+      info.className = 'rel-info';
+      if (r.blocked) {
+        info.append(pill('Blocked', 'blocked'));
+        if (r.entry.reason) info.append(pill(blockReasonLabel(r.entry.reason, r.peer), 'reason'));
+        if (r.entry.addedBack) info.append(pill('they added you back', 'dim'));
+        info.append(action('Unblock', async () => {
+          if (await unblockUser(client, r.peer)) { await renderRelationships(); renderConversationList().catch(() => {}); }
+        }));
+      } else {
+        if (r.entry.addedBack) info.append(pill('added back', 'ok'));
+        if (r.entry.verified) info.append(pill('verified', 'ok'));
+        if (r.entry.trust) info.append(pill('trusted', 'ok'));
+        if (r.entry.gone) info.append(pill('account deleted', 'bad'));
+        else if (r.entry.changed) info.append(pill('key changed', 'bad'));
+        else if (!r.entry.verified) info.append(pill(r.entry.addedBack ? 'not verified' : 'waiting for them to add back', 'warn'));
+        info.append(action('Block', async () => {
+          if (await blockUserWithConfirm(client, r.peer)) { await renderRelationships(); renderConversationList().catch(() => {}); }
+        }, true));
+      }
+      li.append(name, info);
+      ul.append(li);
+    }
+  }
+
+  function wireRelationships() {
+    const search = $('rel-search');
+    search?.addEventListener('input', () => { relState.q = search.value ?? ''; renderRelationships().catch(() => {}); });
+    const toggle = (id, key) => {
+      const btn = $(id);
+      btn?.addEventListener('click', () => {
+        relState[key] = !relState[key];
+        btn.setAttribute('aria-pressed', String(relState[key]));
+        btn.classList.toggle('off', !relState[key]);
+        renderRelationships().catch(() => {});
+      });
+    };
+    toggle('rel-toggle-added', 'added');
+    toggle('rel-toggle-blocked', 'blocked');
+  }
+  wireRelationships();
+
+  /** Re-sync the blocked mirror from the server (login + friends nudges). */
+  async function refreshBlocked() {
+    const rel = await client.relationships();
+    await saveBlockedSet((rel.blocked ?? []).map((b) => b.peer));
+    renderConversationList().catch(() => {});
+  }
+
+  return { wire, refreshBlocked, paintMe, renderConversationList, renderDevices, refreshIdentity: renderIdentity, refreshPeerProfiles };
 }

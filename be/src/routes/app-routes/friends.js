@@ -175,9 +175,15 @@ export default async function friendsRoutes(app, { users, redis, config, setting
     const target = targetOf(request);
     if (!target) return fail(reply, 'bad_username', 'Invalid username', 400);
     if (target === ul) return fail(reply, 'self_friend', 'You cannot friend yourself', 400);
-    const targetDoc = await users.findOne({ ul: target }, { projection: { identity: 1, devices: 1 } });
+    const targetDoc = await users.findOne({ ul: target }, { projection: { identity: 1, devices: 1, blocked: 1 } });
     if (!targetDoc) return fail(reply, 'unknown_account', 'No such user', 404);
     // ground-truth binding — whatever the client thinks, we store the NOW
+    // BLOCK GATE (add seam): the blocker never learns who tried — the
+    // attempt just never lands. Copy stays neutral (no "you are blocked").
+    if (Array.isArray(targetDoc.blocked) && targetDoc.blocked.includes(ul)) {
+      return fail(reply, 'blocked', 'This user is not accepting contacts.', 403);
+    }
+
     const idp = targetDoc.identity?.p ?? targetDoc.devices?.[0]?.pub ?? null;
 
     // read-modify-write (single-account scale; unique-ul index protects the
@@ -275,6 +281,98 @@ export default async function friendsRoutes(app, { users, redis, config, setting
       }
     }
     return setFlag(request, reply, 't', 'trust', 'v');
+  });
+
+  // ---- BLOCKING ------------------------------------------------------
+  // Blocking is the loud end of the ladder: it SEVERS the relation both
+  // ways (stronger than un-adding) and walls off inbound traffic. Data:
+  // account-level `blocked: [ul]`. Effects (enforced server-side):
+  //   * the blocked party cannot send messages (ws handleSend gate — before
+  //     storage, so store-and-forward + live delivery + push are ALL gated)
+  //   * already-stored copies from them stop draining (deliverPending /
+  //     handleResync filter — see ws-routes/handlers.js)
+  //   * they cannot add you back ('blocked' 403 on the add route)
+  //   * both friends entries are removed and every v/t flag they carried
+  //     on you is revoked — trust never survives a block on either side.
+  // The blocked party is NOT nudged that they were blocked (that is the
+  // blocker's privacy); their own reconcile just shows the severed relation
+  // as a stranger again. Unblocking restores nothing: relations are
+  // rebuilt deliberately, like after an un-add.
+  app.put('/api/me/friends/:ul/block', async (request, reply) => {
+    const denied = await guard(request, reply, 'friendschange');
+    if (denied) return denied;
+    const target = targetOf(request);
+    if (!target) return fail(reply, 'bad_username', 'Invalid username', 400);
+    if (target === request.auth.sub) return fail(reply, 'self_block', 'You cannot block yourself', 400);
+    // The blocker picks WHY (one of three, enforced as an enum). This is the
+    // blocker's own account data — for recall in Settings and for admin
+    // context — and is NEVER shown to the blocked party.
+    // ids: 'nospeak' | 'unknown' | 'scam' (copy lives client-side in BLOCK_REASONS)
+    const reason = String(request.body?.r ?? '');
+    if (!['nospeak', 'unknown', 'scam'].includes(reason)) {
+      return fail(reply, 'invalid_request', 'Pick a block reason', 400);
+    }
+    const ul = String(request.auth.sub ?? '').toLowerCase();
+    const tDoc = await users.findOne({ ul: target }, { projection: { _id: 1, friends: 1 } });
+    if (!tDoc) return fail(reply, 'unknown_account', 'No such user', 404);
+
+    await users.updateOne({ ul }, {
+      $addToSet: { blocked: target },
+      $set: { [`blockReasons.${target}`]: { r: reason, at: new Date() } },
+    });
+
+    // sever BOTH ways (stronger than un-add: their entry on me goes too,
+    // and my flags on them die with it — no half-trust may persist)
+    const user = await users.findOne({ ul }, { projection: { friends: 1 } });
+    const kept = normalize(user?.friends).filter((f) => f.u !== target);
+    await users.updateOne({ ul }, { $set: { friends: kept.sort((a, b) => a.u.localeCompare(b.u)) } });
+    const theirKept = normalize(tDoc.friends).filter((f) => f.u !== ul);
+    if (theirKept.length !== normalize(tDoc.friends).length) {
+      await users.updateOne({ ul: target }, { $set: { friends: theirKept.sort((a, b) => a.u.localeCompare(b.u)) } });
+      // their view of the relation moved completely — nudge (they learn the
+      // severing via their own re-pull, never that they are blocked)
+      await notifyAccount(target, 'friends');
+    }
+    // my other devices: the entry left MY list too
+    await notifyAccount(ul, 'friends');
+    return { blocked: true };
+  });
+
+  app.delete('/api/me/friends/:ul/block', async (request, reply) => {
+    const denied = await guard(request, reply, 'friendschange');
+    if (denied) return denied;
+    const target = targetOf(request);
+    if (!target) return fail(reply, 'bad_username', 'Invalid username', 400);
+    const ul = String(request.auth.sub ?? '').toLowerCase();
+    await users.updateOne({ ul }, { $pull: { blocked: target }, $unset: { [`blockReasons.${target}`]: '' } });
+    await notifyAccount(ul, 'friends');
+    return { blocked: false };
+  });
+
+  // GET /api/me/relationships — the unified view the Settings tab renders:
+  // every contact I added (with trust stages) + everyone I blocked.
+  app.get('/api/me/relationships', async (request, reply) => {
+    const denied = await guard(request, reply, 'friends');
+    if (denied) return denied;
+    const ul = String(request.auth.sub ?? '').toLowerCase();
+    const me = await users.findOne({ ul }, { projection: { friends: 1, blocked: 1, blockReasons: 1 } });
+    const added = await enriched(ul);
+    const blockedList = [...new Set((me?.blocked ?? []).map((u) => String(u).toLowerCase()))].sort();
+    const blocked = [];
+    for (const bu of blockedList) {
+      // addedBack survives the sever ONLY if they re-added after blocking
+      // (the add gate means they cannot while blocked — so this is always
+      // false today; computed, not assumed, so the shape stays honest if
+      // the policy ever gains a "block without severing" mode)
+      const doc = await users.findOne({ ul: bu }, { projection: { friends: 1 } });
+      blocked.push({
+        peer: bu,
+        addedBack: normalize(doc?.friends).some((f) => f.u === ul),
+        reason: me?.blockReasons?.[bu]?.r ?? null,
+        at: me?.blockReasons?.[bu]?.at ?? null,
+      });
+    }
+    return { added, blocked };
   });
 
   app.delete('/api/me/friends/:ul', async (request, reply) => {

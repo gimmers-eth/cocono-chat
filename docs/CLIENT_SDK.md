@@ -240,3 +240,24 @@ Local overrides go in `client/.env.test` (gitignored): `TEST_REDIS_URL`,
   fan-out will miss it.
 - Reconnection is automatic; messages queued while you were offline arrive on
   the next `'open'`.
+
+## Blocking
+
+- `client.blockUser(username, reason)` — `reason` is REQUIRED and one of
+  `'nospeak' | 'unknown' | 'scam'` (server-enforced enum; the app collects it
+  via the three-line choice list in the block confirm modal). Blocking:
+  severs the friends relation BOTH ways (all verify/trust flags die), refuses
+  the blocked party's future sends at the ws send seam **before storage** (so
+  live delivery, store-and-forward and push are all gated by one check),
+  filters their already-stored copies out of the drain/resync seams, and
+  rejects their add attempts (`403 blocked`, neutral copy — they are never
+  told). The reason is stored on the blocker (`blockReasons.<ul>`) for recall
+  in Settings > Relationships and admin context; the blocked party never sees
+  it.
+- `client.unblockUser(username)` — lifts the wall; nothing is restored.
+- `client.relationships()` — `{ added: [...friend entries with trust
+  stages...], blocked: [{ peer, addedBack, reason, at }] }`, backing the
+  Settings > Relationships tab (searchable, Added/Blocked filter toggles,
+  per-row Block/Unblock).
+- WS ack errors: `blocked` (they blocked you — message never stored) and
+  `self_blocked` (you blocked them — unblock to message).

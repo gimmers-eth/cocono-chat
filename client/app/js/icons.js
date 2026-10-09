@@ -31,6 +31,7 @@ export const ICONS = {
 
   // friendship (one-way trust) — sidebar + menu identity marks
   userSolid: 'fa-user',              // you (solid)
+  ban: 'fa-ban',                    // blocked marker
   userGone: 'fa-user-slash',         // deleted account (red, italic name)
   friend: 'fa-regular fa-user',      // added, not verified (orange)
   friendVerified: 'fa-user-shield',  // shield — ORANGE when only verified,
@@ -50,6 +51,7 @@ export const ICONS = {
   tabLimits: 'fa-gauge-high',
   tabDiagnostics: 'fa-heart-pulse',
   tabProfile: 'fa-address-card',
+  tabRelationships: 'fa-users',
   profile: 'fa-address-card',       // peer profile panel
 
   // message status marks

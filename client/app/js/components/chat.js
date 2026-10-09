@@ -15,12 +15,13 @@ import { iconEl } from '../icons.js';
 import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl, premiumBadgeEl } from './peername.js';
 import { safetyNumber } from '../identity.js';
 import { BADGE_UI, nameChipEl } from '../badges.js';
+import { blockUserWithConfirm, unblockUser } from '../blocks.js';
 import { errorText, humanError } from '../errors.js';
 import {
   saveMessage, updateMessage, messagesWith, markRead, allMessages,
   getMessage, deleteMessage, clearMessages,
   loadPeerAvatars, rememberPeerAvatar, AVATARS_EVENT,
-  loadFriends, friendAdd, friendDel, friendMarkFlags, setFriends, FRIENDS_EVENT,
+  loadFriends, friendAdd, friendDel, friendMarkFlags, setFriends, FRIENDS_EVENT, loadPeerBlocked,
   getPin, recordPinSeen, markPeerGone, rememberPeerVerified,
 } from '../store.js';
 
@@ -513,6 +514,39 @@ export function createChat({ client, onHomeRefresh }) {
     const state = trustState(ent, pin);
     const gone = state === PS.GONE;
 
+    // MY OWN BLOCK wins the display: the relation is severed and inbound is
+    // gated server-side, so the bar says what is true and offers the only
+    // two honest actions (unblock / look them up). Checked first because a
+    // blocked peer has NO friend entry — the cascade would call them a
+    // stranger, which is not the whole story.
+    const blockedMap = await loadPeerBlocked();
+    if (blockedMap.get(currentPeer)) {
+      headStatus.replaceChildren(iconEl('ban', 'icon-danger'));
+      warn.classList.toggle('danger', true);
+      warn.classList.toggle('warn', false);
+      warn.hidden = false;
+      const actions = document.createElement('span');
+      actions.className = 'warn-actions';
+      const mkBtn = (label, fn) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'warn-action';
+        b.textContent = label;
+        b.addEventListener('click', () => { b.disabled = true; Promise.resolve(fn()).finally(() => { b.disabled = false; }); });
+        return b;
+      };
+      actions.append(mkBtn('Unblock', async () => {
+        if (await unblockUser(client, currentPeer)) { await updateTrustUI(); onHomeRefresh?.(); }
+      }));
+      actions.append(mkBtn('View profile', openProfileView));
+      warn.replaceChildren(
+        iconEl('ban', 'icon-danger'),
+        document.createTextNode(` You have blocked ${currentPeer}. They cannot message you, and you cannot message them.`),
+        actions,
+      );
+      return;
+    }
+
     headStatus.replaceChildren(peerStateIcon(state));
     $('chat-peer').parentElement.classList.toggle('gone', gone);
 
@@ -573,6 +607,11 @@ export function createChat({ client, onHomeRefresh }) {
         };
         actions.append(mk('View profile', openProfileView));
         if (!conflictAlert(ent, pin) && pinState !== 'changed') actions.append(mk(`Add ${currentPeer}`, addUser));
+        // Block is offered BEFORE any relation exists — a stranger is
+        // exactly who a block is for (harassment arrives from strangers).
+        actions.append(mk(`Block ${currentPeer}`, () => blockUserWithConfirm(client, currentPeer).then(async (did) => {
+          if (did) { await updateTrustUI(); onHomeRefresh?.(); }
+        })));
         kids.push(actions);
       }
       warn.replaceChildren(...kids);
@@ -600,6 +639,13 @@ export function createChat({ client, onHomeRefresh }) {
     btn.replaceChildren(iconEl(icon, cls), document.createTextNode(` ${label}`));
     btn.disabled = state === PS.GONE || state === PS.SELF;
     $('btn-chat-remove').closest('.menu-row').hidden = !(state === PS.UNVERIFIED || state === PS.VERIFIED || state === PS.TRUSTED);
+    // Block: any real peer except yourself (and already-blocked peers have
+    // their own bar state — the menu row would be redundant noise there)
+    const blockBtn = $('btn-chat-block');
+    if (blockBtn) {
+      blockBtn.closest('.menu-row').hidden = state === PS.SELF;
+      blockBtn.disabled = state === PS.SELF;
+    }
   }
 
   // Menu primary row dispatch: the next step of the ladder. VERIFY/VIEW
@@ -1522,6 +1568,14 @@ export function createChat({ client, onHomeRefresh }) {
     $('btn-peer-profile')?.addEventListener('click', openProfileView);
     $('btn-chat-profile')?.addEventListener('click', openProfileView);
     $('chatopts-overlay').addEventListener('click', closeChatOpts);
+    $('btn-chat-block')?.addEventListener('click', async () => {
+      closeChatOpts();
+      if (!currentPeer) return;
+      if (await blockUserWithConfirm(client, currentPeer)) {
+        await updateTrustUI();
+        onHomeRefresh?.();
+      }
+    });
     $('btn-chat-friend')?.addEventListener('click', () => {
       primaryAction(); // decides itself whether to stay open (panel) or close
     });

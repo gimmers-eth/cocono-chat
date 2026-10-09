@@ -38,11 +38,20 @@ export function createHandlers({ users, redis, pub, config, messages, settings }
 
     // Recipient account + device must exist.
     const rul = m.u.toLowerCase();
-    const recipient = await users.findOne({ ul: rul }, { projection: { devices: 1, friends: 1 } });
+    const recipient = await users.findOne({ ul: rul }, { projection: { devices: 1, friends: 1, blocked: 1 } });
     const recipientDevice = recipient?.devices.find((dev) => dev.id === m.dv);
     if (!recipient || !recipientDevice) {
       return ack(false, 'unknown_recipient');
     }
+
+    // BLOCK GATES (send seam, BEFORE storage — one check covers store-and-
+    // forward, live delivery and push because nothing new enters the queue):
+    // inbound from a blocked sender is refused; sending TO someone you
+    // blocked is refused too (blocking is not an inbox you may keep using).
+    if (Array.isArray(recipient.blocked) && recipient.blocked.includes(auth.sub)) {
+      return ack(false, 'blocked');
+    }
+    if (sender.blocked?.includes(rul)) return ack(false, 'self_blocked'); // (sender doc already loaded above)
 
     // Cold-send policy (identity verification): an UNVERIFIED account may
     // only message someone who added them as a friend, or who messaged
@@ -123,7 +132,9 @@ export function createHandlers({ users, redis, pub, config, messages, settings }
       .sort({ ts: 1 })
       .limit(PENDING_BATCH)
       .toArray();
+    const blockedSet = await blockedOf(ul);
     for (const doc of pending) {
+      if (blockedSet.has(String(doc.from?.ul ?? ''))) continue; // stored pre-block: never delivered
       sendJson(socket, {
         type: 'msg',
         id: doc.mid,
@@ -131,6 +142,14 @@ export function createHandlers({ users, redis, pub, config, messages, settings }
         env: doc.env,
       });
     }
+  }
+
+  // one indexed read per connection/drain — the block list is tiny
+  async function blockedOf(ul) {
+    try {
+      const doc = await users.findOne({ ul }, { projection: { blocked: 1 } });
+      return new Set((doc?.blocked ?? []).map((u) => String(u).toLowerCase()));
+    } catch { return new Set(); }
   }
 
   async function handlePulled(socket, body, auth) {
@@ -173,7 +192,9 @@ export function createHandlers({ users, redis, pub, config, messages, settings }
       .sort({ ts: 1 })
       .limit(PENDING_BATCH)
       .toArray();
+    const blockedSet = await blockedOf(ul);
     for (const doc of kept) {
+      if (blockedSet.has(String(doc.from?.ul ?? ''))) continue; // resync must not refill a blocked inbox
       sendJson(socket, {
         type: 'msg',
         id: doc.mid,
