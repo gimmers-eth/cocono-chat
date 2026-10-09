@@ -1080,8 +1080,8 @@ export function createHome({ client, chat, onLogout }) {
     saveBlockedSet((relState.rows.blocked ?? []).map((b) => b.peer)).then(() => {});
     const q = relState.q.trim().toLowerCase();
     const rows = [];
+    const mutedSet = new Set(relState.rows.muted ?? []);
     if (relState.added) {
-      const mutedSet = new Set(relState.rows.muted ?? []);
       for (const a of relState.rows.added ?? []) {
         if (q && !a.u.includes(q)) continue;
         rows.push({ peer: a.u, entry: a, blocked: false, muted: mutedSet.has(a.u) });
@@ -1099,12 +1099,13 @@ export function createHome({ client, chat, onLogout }) {
         if (q && !b.peer.includes(q)) continue;
         // a blocked peer can ALSO still be in added? no — block severs both
         // ways; the two sets are disjoint by construction. Dedup is free.
-        rows.push({ peer: b.peer, entry: b, blocked: true });
+        rows.push({ peer: b.peer, entry: b, blocked: true, muted: mutedSet.has(b.peer) });
       }
     }
     rows.sort((x, y) => x.peer.localeCompare(y.peer));
     empty.hidden = rows.length > 0;
-    empty.textContent = 'No matches — or nothing to show for the current filters.';
+    // mirror pulls for the username component (worn chip + identity mark)
+    const [chips, verifiedMap] = await Promise.all([loadPeerChips(), loadPeerVerifications()]);
     const pill = (text, cls) => {
       const p = document.createElement('span');
       p.className = `rel-pill ${cls ?? ''}`;
@@ -1119,45 +1120,78 @@ export function createHome({ client, chat, onLogout }) {
       b.addEventListener('click', () => { b.disabled = true; fn().finally(() => { b.disabled = false; }); });
       return b;
     };
-    ul.replaceChildren();
+    // ---- THE table: username (single-line component) | trust level |
+    // ---- Block | Muted. Column geometry is fixed, so actions NEVER move.
+    const table = document.createElement('table');
+    table.className = 'rel-table';
+    const thead = document.createElement('tr');
+    for (const h of ['Username', 'Trust level', 'Block', 'Muted']) {
+      const th = document.createElement('th');
+      th.textContent = h;
+      thead.append(th);
+    }
+    table.append(document.createElement('thead')).append(thead);
+    const tbody = document.createElement('tbody');
     for (const r of rows) {
-      const li = document.createElement('li');
-      li.className = r.blocked ? 'rel-row rel-row-blocked' : 'rel-row';
-      const name = document.createElement('span');
-      name.className = 'rel-name';
-      name.textContent = `@${r.peer}`;
-      const info = document.createElement('span');
-      info.className = 'rel-info';
+      const tr = document.createElement('tr');
+      if (r.blocked) tr.className = 'rel-row-blocked';
+      // username cell — THE single-line component: trust icon + name +
+      // worn badge chip + red unverified mark
+      const cName = document.createElement('td');
+      const line = document.createElement('span');
+      const ent = r.entry;
+      const state = r.blocked ? PS.BLOCKED
+        : resolvePeerState({
+          gone: !!ent.gone,
+          bound: !!ent.trusted,
+          verified: !!ent.verified,
+          trusted: !!ent.trust,
+        });
+      const chip = nameChipEl(chips.get(r.peer) ?? null);
+      if (chip) chip.classList.add('name-chip-inline');
+      mountLine(line, { peer: r.peer, state, chipEl: chip, unverified: verifiedMap.get(r.peer) === false });
+      cName.append(line);
+      if (r.blocked && r.entry.reason) {
+        const why = document.createElement('span');
+        why.className = 'rel-reason';
+        why.append(blockReasonIcon(r.entry.reason), document.createTextNode(` ${blockReasonLabel(r.entry.reason, r.peer)}`));
+        cName.append(why);
+      }
+      // trust level cell
+      const cTrust = document.createElement('td');
+      if (r.blocked) cTrust.append(pill('blocked', 'bad'));
+      else if (ent.gone) cTrust.append(pill('deleted', 'bad'));
+      else if (ent.changed) cTrust.append(pill('key changed', 'bad'));
+      else if (ent.trust) cTrust.append(pill('trusted', 'ok'));
+      else if (ent.verified) cTrust.append(pill('verified', 'ok'));
+      else if (ent.u) cTrust.append(pill(ent.addedBack ? 'added' : 'waiting for them to add back', 'warn'));
+      else cTrust.append(pill('not added', 'dim')); // muted non-contact
+      // block cell
+      const cBlock = document.createElement('td');
       if (r.blocked) {
-        info.append(pill('Blocked', 'blocked'));
-        if (r.entry.reason) { const rp = pill(blockReasonLabel(r.entry.reason, r.peer), 'reason'); rp.prepend(blockReasonIcon(r.entry.reason)); info.append(rp); }
-        if (r.entry.addedBack) info.append(pill('they added you back', 'dim'));
-        info.append(action('Unblock', async () => {
+        cBlock.append(action('Unblock', async () => {
           if (await unblockUser(client, r.peer)) { await renderRelationships(); renderConversationList().catch(() => {}); }
         }));
       } else {
-        if (r.entry.addedBack) info.append(pill('added back', 'ok'));
-        if (r.entry.verified) info.append(pill('verified', 'ok'));
-        if (r.entry.trust) info.append(pill('trusted', 'ok'));
-        if (r.entry.gone) info.append(pill('account deleted', 'bad'));
-        else if (r.entry.changed) info.append(pill('key changed', 'bad'));
-        else if (!r.entry.verified) info.append(pill(r.entry.addedBack ? 'not verified' : 'waiting for them to add back', 'warn'));
-        info.append(pill(r.muted ? 'notifications muted' : 'notifications on', r.muted ? 'warn' : 'ok'));
-        info.append(action(r.muted ? 'Unmute' : 'Mute', async () => {
-          try {
-            if (r.muted) { await client.unmuteUser(r.peer); await rememberPeerMuted(r.peer, false); }
-            else { await client.muteUser(r.peer); await rememberPeerMuted(r.peer, true); }
-            r.muted = !r.muted;
-            renderRelationships().catch(() => {});
-          } catch (err) { toast(humanError(err), 'error'); }
-        }));
-        info.append(action('Block', async () => {
+        cBlock.append(action('Block', async () => {
           if (await blockUserWithConfirm(client, r.peer)) { await renderRelationships(); renderConversationList().catch(() => {}); }
         }, true));
       }
-      li.append(name, info);
-      ul.append(li);
+      // muted cell
+      const cMute = document.createElement('td');
+      cMute.append(action(r.muted ? 'Unmute' : 'Mute', async () => {
+        try {
+          if (r.muted) { await client.unmuteUser(r.peer); await rememberPeerMuted(r.peer, false); }
+          else { await client.muteUser(r.peer); await rememberPeerMuted(r.peer, true); }
+          r.muted = !r.muted;
+          renderRelationships().catch(() => {});
+        } catch (err) { toast(humanError(err), 'error'); }
+      }));
+      tr.append(cName, cTrust, cBlock, cMute);
+      tbody.append(tr);
     }
+    table.append(tbody);
+    ul.replaceChildren(table);
   }
 
   function wireRelationships() {

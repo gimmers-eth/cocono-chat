@@ -455,7 +455,24 @@ img.own-avatar { border-radius: 50%; }
 }
 .toggle-chip[aria-pressed="true"] { border-color: currentColor; font-weight: 600; }
 .toggle-chip.off { opacity: .45; }
-.rel-list { list-style: none; margin: 0; padding: 0; }
+/* Settings > Relationships TABLE: fixed four columns, actions aligned —
+   nothing shifts as mutes/blocks change */
+.rel-list { margin: 0; padding: 0; }
+.rel-table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+.rel-table thead th {
+  text-align: left; font-size: .7rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--muted);
+  padding: .35rem .4rem; border-bottom: 1px solid var(--border);
+}
+.rel-table td { padding: .5rem .4rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.rel-table td:first-child { min-width: 9.5rem; }
+.rel-row-blocked td { background: rgba(239, 105, 117, 0.06); }
+.rel-reason {
+  display: flex; align-items: center; gap: .35em;
+  font-size: .75rem; color: var(--muted); margin-top: .15rem;
+}
+.rel-table .uname { font-weight: 600; }
+.rel-action { white-space: nowrap; }
 .rel-row {
   display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
   padding: .55rem .2rem; border-bottom: 1px solid var(--border);
