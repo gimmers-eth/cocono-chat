@@ -222,6 +222,10 @@ export function initKeyboardFit() {
     // baseline so toolbar show/hide doesn't leave a stale restH.
     if (cover <= 80 && sy === 0 && vv.offsetTop === 0) restH = window.innerHeight;
     fit(vv.height, cover);
+    // Standalone: keep the 2px scroll room alive while the keyboard is up
+    // (the hammer window may have ended); drop it at rest so the document
+    // is exactly viewport-sized again.
+    if (IS_STANDALONE && !suppressActive) setScrollRoom(cover > 80 ? 2 : 0);
     // Deferred shove: once per keyboard session, when the fit first lands.
     if (keyboardUp && !shovedThisSession) {
       shovedThisSession = true;
@@ -286,15 +290,34 @@ export function initKeyboardFit() {
   // the standalone keyboard slide; a single call loses to the animation).
   // Bounded windows around focus/blur only — no idle rAF cost.
   let suppressRaf = 0;
+  let suppressActive = false;
   function suppressNativeSlide(ms) {
     if (!IS_STANDALONE) return;
+    // Give the document a 2px scroll range FIRST: px-fitted to exactly the
+    // viewport, it has zero scrollability — window.scrollTo(0,0) is then a
+    // no-op and the native displacement never surfaces in scrollY (eight
+    // rounds of pristine traces with a visibly sliding header). With room
+    // to scroll, the offset becomes observable AND resettable — including
+    // the negative bounce (band at the top) the field report described.
+    setScrollRoom(2);
+    suppressActive = true;
     const until = performance.now() + ms;
     cancelAnimationFrame(suppressRaf);
     const tick = () => {
+      const sy = window.scrollY;
+      if (sy !== 0) sample(`hammer:sY=${Math.round(sy)}`); // the displacement, caught on camera at last
       window.scrollTo(0, 0);
       if (performance.now() < until) suppressRaf = requestAnimationFrame(tick);
+      else {
+        suppressActive = false;
+        setScrollRoom(lastCover > 80 ? 2 : 0);
+      }
     };
     suppressRaf = requestAnimationFrame(tick);
+  }
+
+  function setScrollRoom(px) {
+    root.style.setProperty('--kb-room', `${px}px`);
   }
 
   // Pre-flight shrink — runs AFTER focus is granted, BEFORE the keyboard

@@ -59,12 +59,17 @@ body { position: fixed; inset: 0; overflow: hidden; height: var(--app-h, 100dvh)
    header still jumping). In normal flow the JS-fitted document is exactly
    viewport-sized at rest (nothing to scroll), and any native offset during
    the resize animation surfaces as a REAL document scroll keyboard.js can
-   see and squash per frame. NOTE: 100dvh does NOT track the standalone
+   see and squash per frame. --kb-room (2px, managed by keyboard.js while
+   the keyboard machinery is active) guarantees a minimal scroll RANGE:
+   without it the exactly-fitted document is unscrollable, scrollTo(0,0)
+   is a no-op, and WKWebView's displacement (including the negative bounce
+   that leaves a band at the top) is neither observable nor resettable.
+   NOTE: 100dvh does NOT track the standalone
    keyboard resize (iOS freezes viewport units there — field-proven: the
    composer ended up behind the keys), so the height always comes from the
    --app-h px mirror. */
 @media (display-mode: standalone) {
-  body { position: static; }
+  body { position: static; height: calc(var(--app-h, 100dvh) + var(--kb-room, 0px)); }
 }
 /* --vv-top ride — TAB-MODE iOS ONLY (keyboard.js adds .kb-fit there; the
    standalone media rule above keeps the body flow-positioned and
