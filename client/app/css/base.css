@@ -52,13 +52,25 @@ html, body { height: 100%; overflow: hidden; }
    owns all scrolling (app-shell clips; lists scroll internally), so the
    body is fixed and the document can NEVER be panned. */
 body { position: fixed; inset: 0; overflow: hidden; height: var(--app-h, 100dvh); }
-/* --vv-top ride — TOUCH DEVICES ONLY: keyboard.js adds .kb-fit (and only
-   there does it ever set --app-h/--vv-top). A transform makes the body the
-   containing block for EVERY fixed descendant (drawers, modals, toasts) —
-   correct on a phone, where the whole layer cake must ride iOS's viewport
-   pan, but on desktop it re-anchored the settings drawer to the body box
-   and let pinch-zoom offsets drag the sidebar around. Desktop keeps the
-   pristine viewport-anchored fixed layers. */
+/* STANDALONE (installed PWA) unlocks the body: iOS resizes the webview
+   natively there (no pan to ride), and a position:fixed layer is exactly
+   what the classic standalone keyboard bug displaces INVISIBLY (native
+   content offsets that scrollY/offsetTop never report — traces pristine,
+   header still jumping). In normal flow the document is exactly viewport-
+   sized (nothing to scroll), and any native offset surfaces as a real
+   document scroll keyboard.js can see and squash per frame. The shell and
+   body then ride 100dvh, which re-resolves natively on every frame of the
+   keyboard resize — no JS px-snap in the loop at all. */
+@media (display-mode: standalone) {
+  body { position: static; }
+}
+/* --vv-top ride — TAB-MODE iOS ONLY (keyboard.js adds .kb-fit there; the
+   standalone media rule above keeps the body flow-positioned and
+   transform-free, so its fixed overlays stay viewport-anchored): when
+   tab-mode Safari pans the visual viewport, the body — and with it the
+   WHOLE app incl. drawers/modals/toast — shifts down by exactly the pan.
+   Net effect on screen: nothing moves, the header stays glued to the top
+   edge. Android/desktop never set --vv-top → no-op. */
 body.kb-fit { transform: translateY(var(--vv-top, 0px)); }
 /* Mobile: no double-tap zoom anywhere (tap targets are app chrome, not a
    document). Panning stays alive — .drawer-tabs swipe and the message list

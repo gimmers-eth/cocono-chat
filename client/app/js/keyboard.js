@@ -107,10 +107,11 @@ export function initKeyboardFit() {
   // anchored fixed layers, zero listeners.
   if (!window.matchMedia || !window.matchMedia('(pointer: coarse)').matches) return;
   const root = document.documentElement;
-  // Opt the body into the ride transform (CSS: body.kb-fit only) —
-  // desktop never gets the class, so its containing block stays the
-  // viewport.
-  document.body.classList.add('kb-fit');
+  // Opt the body into the ride transform — TAB MODE ONLY. Standalone rides
+  // nothing: its webview resizes natively, the body is flow-positioned (see
+  // the display-mode rule in base.css) and 100dvh tracks the resize per
+  // frame; a transform there would only re-anchor the fixed overlays.
+  if (!IS_STANDALONE) document.body.classList.add('kb-fit');
   let raf = 0;
   t0 = performance.now();
 
@@ -151,7 +152,14 @@ export function initKeyboardFit() {
   }
 
   function fit(appH, kbH) {
-    root.style.setProperty('--app-h', `${Math.round(appH)}px`);
+    // STANDALONE: never write --app-h — the shell/body fall back to
+    // 100dvh, which re-resolves NATIVELY on every frame of the webview's
+    // keyboard resize. The JS mirror can only ever fit at the END of that
+    // native animation (events are delivered once, late): a px snap out
+    // of sync with the native motion was the last visible "header jump"
+    // — traces were numerically pristine while the user still saw it.
+    // Tab-mode iOS + Android keep the px mirror (no native resize there).
+    if (!IS_STANDALONE) root.style.setProperty('--app-h', `${Math.round(appH)}px`);
     root.style.setProperty('--kb-h', `${Math.max(0, Math.round(kbH))}px`);
   }
 
@@ -303,6 +311,14 @@ export function initKeyboardFit() {
 
   document.addEventListener('focusout', (e) => {
     sample(`focusout:${e.target?.id || e.target?.tagName}`);
+    // Classic standalone-PWA hygiene: the WKWebView can keep a residual
+    // content offset after the keyboard closes that JS scroll values never
+    // report (blank band / stuck-shifted view). One delayed settle pass
+    // re-squashes and re-fits once the close animation is done.
+    setTimeout(() => {
+      window.scrollTo(0, 0);
+      apply('focusout-settle');
+    }, 150);
   });
 
   vv.addEventListener('resize', () => apply('vv-resize'));
