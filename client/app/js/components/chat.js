@@ -270,7 +270,15 @@ export function createChat({ client, onHomeRefresh }) {
       //    and shows the rich notification.
       const viewingThis = currentPeer && currentPeer.toLowerCase() === m.peer.toLowerCase();
       const catchUp = Date.now() - lastOpenAt < 3000;
-      if (windowActive() && !viewingThis && !catchUp) {
+      // MUTE closes the THIRD path: server pushes are gated (ws handler) and
+      // offline devices are covered — but an open-but-backgrounded app
+      // notifies from THIS page (banner or notifyOS), and that path must
+      // respect the account's mute list too. Unread dots still count; only
+      // the alert hushes.
+      const mutedNow = (await loadPeerMuted().catch(() => new Map())).get(String(m.peer).toLowerCase());
+      if (mutedNow) {
+        // silent: no banner, no OS notice
+      } else if (windowActive() && !viewingThis && !catchUp) {
         const snippet = (m.text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
         showBanner(`${m.peer}: ${snippet || '(message)'}`, m.peer);
       } else if (!windowActive()) {
