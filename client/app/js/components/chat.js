@@ -351,6 +351,37 @@ export function createChat({ client, onHomeRefresh }) {
 
   // --- rendering ---
 
+  // The open-time pin can be undone by chrome that lands a few frames
+  // LATER (updateTrustUI's warn strip, the head avatar/line, safe-area
+  // settling): the flex column redistributes, .messages loses a few px,
+  // and the newest bubble slips under the fold ("scroll down slightly to
+  // see it"). Re-pin for a short settle window after every full render —
+  // cancelled the instant the user touches/wheels the list, so it can
+  // never fight a deliberate scroll.
+  let settleRaf = 0;
+  let settleCancel = null;
+  function settleAtBottom(list) {
+    settleCancel?.();
+    const cancel = () => {
+      cancelAnimationFrame(settleRaf);
+      list.removeEventListener('touchstart', cancel);
+      list.removeEventListener('wheel', cancel);
+      if (settleCancel === cancel) settleCancel = null;
+    };
+    settleCancel = cancel;
+    list.addEventListener('touchstart', cancel, { passive: true });
+    list.addEventListener('wheel', cancel, { passive: true });
+    const until = performance.now() + 600;
+    const step = () => {
+      if (list.scrollHeight - list.scrollTop - list.clientHeight > 1) {
+        list.scrollTop = list.scrollHeight;
+      }
+      if (performance.now() < until) settleRaf = requestAnimationFrame(step);
+      else cancel();
+    };
+    settleRaf = requestAnimationFrame(step);
+  }
+
   async function render() {
     const list = $('chat-messages');
     if (!list || !currentPeer) return;
@@ -382,6 +413,7 @@ export function createChat({ client, onHomeRefresh }) {
     }
     list.replaceChildren(frag);
     list.scrollTop = list.scrollHeight;
+    settleAtBottom(list); // hold the pin through the late-landing chrome
     return msgs[msgs.length - 1]; // newest displayed message, for the read marker
   }
 
