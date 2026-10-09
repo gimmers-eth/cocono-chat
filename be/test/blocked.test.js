@@ -5,6 +5,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { setupApp, makeClient, randomAesKey, nowEpoch } from './helpers.js';
+import Fastify from 'fastify';
+import adminRoutes from '../src/routes/admin-routes/index.js';
+import { config } from '../src/config.js';
 
 const LIMITS = {
   signupIpLimit: 1000,
@@ -122,5 +125,49 @@ test('block: self and unknown targets rejected; blocking a stranger is fine', as
     await signupUser(app, other, 'dave', randomUUID());
     const ok = await app.inject({ method: 'PUT', url: '/api/me/friends/dave/block', headers: tok, payload: { r: 'nospeak' } });
     assert.equal(ok.statusCode, 200, 'stranger blockable without any relation');
+  } finally { await teardown(); }
+});
+
+test('admin relationships: a pure block (no friends ever) still shows in the panel', async () => {
+  const { app, mongo, redis, teardown } = await setupApp(LIMITS);
+  const admin = Fastify({ logger: false });
+  await admin.register(adminRoutes, {
+    users: mongo.db.collection('users'),
+    redis,
+    config,
+    diagnostics: mongo.db.collection('diagnostics'),
+    settings: mongo.db.collection('settings'),
+    messages: mongo.db.collection('messages'),
+    idDocs: mongo.db.collection('id_docs'),
+    profiles: mongo.db.collection('profiles'),
+  });
+  try {
+    const alice = makeClient();
+    const bobby = makeClient();
+    const dA = randomUUID();
+    const dB = randomUUID();
+    await signupUser(app, alice, 'edith', dA);
+    await signupUser(app, bobby, 'frank', dB);
+    const aTok = await getToken(app, alice, 'edith', dA);
+
+    // NO friends on either side — the block is the whole relation (the user
+    // repro: admin Relationships showed nothing because blocked pairs have
+    // no friend entries left and the rows loop skipped them)
+    const block = await app.inject({ method: 'PUT', url: '/api/me/friends/frank/block', headers: aTok, payload: { r: 'scam' } });
+    assert.equal(block.statusCode, 200);
+
+    const rel = (await admin.inject({ method: 'GET', url: '/api/admin/users/edith/relationships' })).json();
+    const row = rel.relationships.find((r) => r.ul === 'frank');
+    assert.ok(row, 'blocked stranger appears in admin relationships');
+    assert.equal(row.blocks, true);
+    assert.equal(row.blockReason, 'scam');
+    assert.equal(row.added, false, 'no friend residue');
+    assert.equal(row.theyAddedMe, false);
+
+    // reverse direction: frank's own panel row shows blockedBy
+    const back = (await admin.inject({ method: 'GET', url: '/api/admin/users/frank/relationships' })).json();
+    const backRow = back.relationships.find((r) => r.ul === 'edith');
+    assert.ok(backRow, 'the wall is visible from BOTH sides of the panel');
+    assert.equal(backRow.blockedBy, true);
   } finally { await teardown(); }
 });

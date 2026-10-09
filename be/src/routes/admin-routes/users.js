@@ -225,7 +225,11 @@ export default async function usersRoutes(app, { users, redis, config, messages,
     for (const other of others) {
       const m = mine.get(other.ul);
       const theirs = toList(other).find((f) => String(f.u).toLowerCase() === ul);
-      if (!m && !theirs) continue;
+      // a BLOCK severs both friend entries — the wall itself is often the
+      // ONLY relation left. Do not skip blocked pairs or the block columns
+      // would show nothing for exactly the case they exist for.
+      const wall = myBlocked.has(other.ul) || (other.blocked ?? []).some((u) => String(u).toLowerCase() === ul);
+      if (!m && !theirs && !wall) continue;
       const mutual = !!m && !!theirs;
       rows.push({
         ul: other.ul,
