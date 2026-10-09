@@ -767,7 +767,7 @@ export function createChat({ client, onHomeRefresh }) {
     facts.append(
       fact('App', peerIdentityKnown ? (peerIdentityVerified ? '✓ Verified' : '✗ Unverified') : '· Unknown',
         !peerIdentityKnown ? 'dim' : peerIdentityVerified ? 'ok' : 'bad'),
-      fact('Social', stats ? (stats.socialTrusted ? '✓ Trusted' : '✗ Untrusted') : '· Unknown',
+      fact('Social', stats ? (stats.socialTrusted ? '✓ Trusted' : '✗ Not yet trusted') : '· Unknown',
         stats ? (stats.socialTrusted ? 'ok' : 'bad') : 'dim'),
       fact('CoCo', stats ? String(stats.coco) : '—', stats ? 'num' : 'dim'),
     );
@@ -947,7 +947,7 @@ export function createChat({ client, onHomeRefresh }) {
     if (stats) {
       const trusted = stats.socialTrusted === true;
       setRow(socialState, socialNote, trusted ? 'ok' : 'bad',
-        trusted ? 'Social: Trusted' : 'Social: Untrusted',
+        trusted ? 'Social: Trusted' : 'Social: Not yet trusted',
         trusted
           ? 'Other people vouch for this account. Every vouch is a risk for the voucher — scammer contacts get their trustors reported and removed.'
           : 'Nobody vouches for this account yet. Be extra careful: trust must be earned here, not assumed.');
@@ -1048,7 +1048,7 @@ export function createChat({ client, onHomeRefresh }) {
     if (stats) {
       setRow($('profile-social-state'), $('profile-social-note'),
         stats.socialTrusted ? 'ok' : 'bad',
-        stats.socialTrusted ? 'Social: Trusted' : 'Social: Untrusted',
+        stats.socialTrusted ? 'Social: Trusted' : 'Social: Not yet trusted',
         'Reputation grows when contacts verify and trust you.');
       $('profile-reputation').textContent =
         `Vouched by ${stats.addedBy} added · ${stats.verifiedBy} verified · ${stats.trustedBy} trusted`;
