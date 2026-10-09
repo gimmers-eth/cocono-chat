@@ -56,11 +56,13 @@ body { position: fixed; inset: 0; overflow: hidden; height: var(--app-h, 100dvh)
    natively there (no pan to ride), and a position:fixed layer is exactly
    what the classic standalone keyboard bug displaces INVISIBLY (native
    content offsets that scrollY/offsetTop never report — traces pristine,
-   header still jumping). In normal flow the document is exactly viewport-
-   sized (nothing to scroll), and any native offset surfaces as a real
-   document scroll keyboard.js can see and squash per frame. The shell and
-   body then ride 100dvh, which re-resolves natively on every frame of the
-   keyboard resize — no JS px-snap in the loop at all. */
+   header still jumping). In normal flow the JS-fitted document is exactly
+   viewport-sized at rest (nothing to scroll), and any native offset during
+   the resize animation surfaces as a REAL document scroll keyboard.js can
+   see and squash per frame. NOTE: 100dvh does NOT track the standalone
+   keyboard resize (iOS freezes viewport units there — field-proven: the
+   composer ended up behind the keys), so the height always comes from the
+   --app-h px mirror. */
 @media (display-mode: standalone) {
   body { position: static; }
 }

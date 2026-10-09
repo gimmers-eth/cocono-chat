@@ -152,14 +152,18 @@ export function initKeyboardFit() {
   }
 
   function fit(appH, kbH) {
-    // STANDALONE: never write --app-h — the shell/body fall back to
-    // 100dvh, which re-resolves NATIVELY on every frame of the webview's
-    // keyboard resize. The JS mirror can only ever fit at the END of that
-    // native animation (events are delivered once, late): a px snap out
-    // of sync with the native motion was the last visible "header jump"
-    // — traces were numerically pristine while the user still saw it.
-    // Tab-mode iOS + Android keep the px mirror (no native resize there).
-    if (!IS_STANDALONE) root.style.setProperty('--app-h', `${Math.round(appH)}px`);
+    // The px mirror runs in EVERY touch mode. Standalone briefly tried
+    // 100dvh instead (no JS in the loop) — field-proven dead: iOS FREEZES
+    // viewport units through the standalone keyboard resize even though
+    // innerHeight changes, so the shell stayed full-height and the
+    // composer ended up behind the keys. Standalone's real protection is
+    // the FLOW body (base.css display-mode rule): the px-fitted document
+    // is exactly viewport-sized at rest, and any native content offset
+    // during the resize animation becomes an observable window.scrollY
+    // that the squash below resets per frame — with the old fixed body
+    // that displacement was JS-invisible (pristine traces, jumping
+    // header).
+    root.style.setProperty('--app-h', `${Math.round(appH)}px`);
     root.style.setProperty('--kb-h', `${Math.max(0, Math.round(kbH))}px`);
   }
 
