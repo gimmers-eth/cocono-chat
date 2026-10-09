@@ -474,6 +474,9 @@ img.own-avatar { border-radius: 50%; }
 .rel-row-blocked { background: rgba(239, 105, 117, 0.06); }
 .rel-action { margin-left: .2rem; }
 
+/* sidebar: muted-conversation marker before the preview text */
+.convo-muted { font-size: .68rem; margin-right: .45em; vertical-align: .05em; color: var(--muted); }
+
 /* trust-warning actions: a NEW centered line of pills under the bar text
    (the bar itself is text-align:center — inline tails would crowd the last
    word). One rem rhythm: .6rem above, .15rem below the symmetric .4rem bar

@@ -518,8 +518,8 @@ export function createHome({ client, chat, onLogout }) {
 
   async function renderConversationList() {
     const list = $('conversation-list');
-    const [all, friends, pins, peerVerified, avatars, peerPremium, peerChips, peerBlocked] = await Promise.all(
-      [allMessages(), loadFriends(), loadPins(), loadPeerVerifications(), loadPeerAvatars(), loadPeerPremiums(), loadPeerChips(), loadPeerBlocked()],
+    const [all, friends, pins, peerVerified, avatars, peerPremium, peerChips, peerBlocked, peerMuted] = await Promise.all(
+      [allMessages(), loadFriends(), loadPins(), loadPeerVerifications(), loadPeerAvatars(), loadPeerPremiums(), loadPeerChips(), loadPeerBlocked(), loadPeerMuted()],
     );
     const latestByPeer = new Map();
     for (const m of all) {
@@ -588,8 +588,17 @@ export function createHome({ client, chat, onLogout }) {
       } else {
         if (last.dir === 'out') {
           preview.append('You: ');
-          preview.append(iconEl(MSG_STATE_ICON[last.state] ?? 'stateSending', last.state === 'failed' ? 'icon-danger' : ''));
+          // No delivery ticks on the LAST message when it's mine: the
+          // sidebar is a conversation index, not a receipt tracker — the
+          // (red) failed marker stays, it is not a tick but an alarm.
+          if (last.state === 'failed') preview.append(iconEl('stateFailed', 'icon-danger'));
           preview.append(' ');
+        }
+        // muted person: quiet speaker glyph LEFT of their preview text
+        if (peerMuted.get(peer)) {
+          const mi = iconEl('volumeXmark', 'convo-muted');
+          mi.title = 'Notifications muted';
+          preview.prepend(mi);
         }
         preview.append(last.text ?? '');
       }
