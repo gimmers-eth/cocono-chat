@@ -1507,12 +1507,15 @@ export function createChat({ client, onHomeRefresh }) {
       closeChatOpts();
       closeForward();
       const view = $('chat-view');
-      $('chat-empty').hidden = false;
       const finish = () => {
         view.classList.remove('closing');
         // never stomp a chat opened while the slide-out was still running
         if (currentPeer) return;
         view.hidden = true;
+        // the empty pane appears ONLY once the sliding pane is gone: it is a
+        // flex sibling, so showing it during the slide split main() in two
+        // and the chat pane visibly snapped narrower — the desktop "flicker"
+        $('chat-empty').hidden = false;
       };
       if (window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches && !view.hidden) {
         let settled = false;
