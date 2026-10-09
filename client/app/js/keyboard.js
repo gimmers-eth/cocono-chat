@@ -68,13 +68,15 @@ const IS_IOS =
 // Installed PWA (Add to Home Screen). CRITICAL behavioural fork proven by
 // the device traces: the standalone WKWebView RESIZES itself for the
 // keyboard (innerHeight 894→481 in one near-instant native step, zero
-// pan/scroll) while browser-tab Safari PANS instead. Pre-flight shrinking
-// is only needed for the panning browser mode — in standalone it fires
-// ~60ms BEFORE the native resize, so the user saw the app snap up 413px
-// with no keyboard on screen yet, then the resize arrive: two motions,
-// the reported "header jumps about". Standalone therefore skips the
-// pre-flight entirely and lets the native resize + mirror do the single,
-// keyboard-synced fit.
+// visual-viewport pan) while tab-mode Safari PANS instead. Two standalone
+// facts the rounds since have nailed down: (1) viewport units (dvh) are
+// FROZEN through that resize — the shell must be JS-fitted in px; (2) in
+// the focus→resize gap WKWebView natively scroll-to-reveals the first
+// responder and animates the undo — scroll events fire with scrollY
+// already restored, so the squash cannot catch it; only the pre-flight
+// (shell already fitted before the resize lands) removes its reason to
+// move. Hence standalone runs the SAME pre-flight + px mirror as tab
+// mode; what it does NOT need is the pan ride (vvT is always 0 there).
 const IS_STANDALONE =
   !!window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
 
@@ -275,7 +277,17 @@ export function initKeyboardFit() {
   let revertTimer = 0;
   function preflight(el) {
     if (!IS_IOS) return;            // Android resizes itself; desktop has no soft keyboard
-    if (IS_STANDALONE) return;      // the webview resizes natively — pre-fitting would double-move (see IS_STANDALONE)
+    // STANDALONE NEEDS THIS TOO — the 12:08 trace proved it: without a
+    // pre-fit there is an ~80ms window (focus → resize event) where the
+    // 894px document sits in a shrinking webview, WKWebView natively
+    // scrolls to reveal the first responder and animates the undo — win-
+    // scroll events with sY already restored to 0, i.e. a displacement
+    // that self-heals BEFORE the squash can observe it. Its restore
+    // animation is the header motion every 'pristine' trace still showed.
+    // Pre-fitting closes the window: content already fits when the resize
+    // lands, so the native reveal scroll has nothing to do. (The earlier
+    // standalone skip dated from when the FIXED body made native motion
+    // invisible — with the flow body both protections now stack.)
     if (lastCover > 80) return;     // keyboard already up: nothing to pre-fit
     const est = cachedKb || DEFAULT_KB;
     const margin = cachedKb ? 0 : PRE_MARGIN; // learned cache = device truth, no slack
