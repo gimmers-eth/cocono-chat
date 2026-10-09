@@ -1284,7 +1284,17 @@ export function createChat({ client, onHomeRefresh }) {
     ul.replaceChildren();
     // exact matches stay visible, max 3 rows (the 3-name floor means the
     // action bar below never shifts no matter what matches)
-    for (const c of fwdContacts.filter((x) => !q || x.peer.includes(q)).slice(0, 3)) {
+    const matches = fwdContacts.filter((x) => !q || x.peer.includes(q)).slice(0, 3);
+    if (q && !matches.length) {
+      // forward-only empty state: the floor stays occupied, politely
+      const li = document.createElement('li');
+      const none = document.createElement('span');
+      none.className = 'fwd-nomatches';
+      none.textContent = 'No matches';
+      li.append(none);
+      ul.append(li);
+    }
+    for (const c of matches) {
       const li = document.createElement('li');
       const btn = document.createElement('button');
       btn.type = 'button';
