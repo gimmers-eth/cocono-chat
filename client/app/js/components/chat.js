@@ -777,8 +777,14 @@ export function createChat({ client, onHomeRefresh }) {
       + 'vouch counts toward this profile’s reputation. Only trust people you '
       + 'actually know, after comparing safety numbers.';
     const wrap = document.createElement('div');
-    // the explanation reads first, the evidence below it
-    wrap.append(bodyP, facts);
+    // the explanation reads first, the evidence below it — then what the
+    // evidence MEANS: CoCo demystified right where it's shown
+    const cocoNote = document.createElement('p');
+    cocoNote.className = 'muted small coco-note';
+    cocoNote.textContent = 'CoCo is this account\u2019s social trust score — earned by '
+      + 'getting badges and by other people vouching for it (verifying and trusting '
+      + 'it). A score of 100 or more is usually really good.';
+    wrap.append(bodyP, facts, cocoNote);
     // the consequence sits BELOW the button, in a box: read it last, right
     // where the commitment happens
     const box = document.createElement('div');

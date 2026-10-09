@@ -926,7 +926,8 @@ body[data-view="blocked"] .page-footer { display: none; }
 }
 
 /* trust-modal evidence table + consequence box */
-.trust-facts { width: 100%; border-collapse: collapse; margin: .8rem 0 .9rem; }
+.trust-facts { width: 100%; border-collapse: collapse; margin: .5rem 0 .5rem; }
+.coco-note { margin-top: 0; text-align: center; }
 .trust-facts th {
   text-align: left; font-weight: 600; color: var(--muted);
   font-size: .82rem; padding: .28rem .4rem .28rem 0;
