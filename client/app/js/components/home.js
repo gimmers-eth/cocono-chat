@@ -594,7 +594,12 @@ export function createHome({ client, chat, onLogout }) {
         side.appendChild(dot);
       }
       btn.append(av, meta, side);
-      btn.addEventListener('click', () => chat.openChat(peer));
+      // toggle: tapping the row of the ALREADY OPEN chat closes the pane
+      // (mobile: the only way back to the list is this or the swipe/arrow)
+      btn.addEventListener('click', () => {
+        if (chat.isOpenFor?.(peer)) chat.closeChat?.();
+        else chat.openChat(peer).catch(() => {});
+      });
       li.appendChild(btn);
       frag.appendChild(li);
     }

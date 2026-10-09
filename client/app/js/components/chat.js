@@ -1493,6 +1493,41 @@ export function createChat({ client, onHomeRefresh }) {
     input.placeholder = enabled ? 'Type a message' : `${currentPeer ?? 'This user'} no longer exists`;
   }
 
+  const paneClosing = () => $('chat-view').classList.contains('closing');
+  const closeChatPane = () => {
+    currentPeer = null;
+    closeProfileView();
+    setChatOpen(false);
+    closeMsgModal();
+    closeChatOpts();
+    closeForward();
+    const view = $('chat-view');
+    const finish = () => {
+      view.classList.remove('closing');
+      // never stomp a chat opened while the slide-out was still running
+      if (currentPeer) return;
+      view.hidden = true;
+      // the empty pane appears ONLY once the sliding pane is gone: it is a
+      // flex sibling, so showing it during the slide split main() in two
+      // and the chat pane visibly snapped narrower — the desktop "flicker"
+      $('chat-empty').hidden = false;
+    };
+    if (window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches && !view.hidden) {
+      let settled = false;
+      const done = () => { if (!settled) { settled = true; finish(); } };
+      view.addEventListener('animationend', done, { once: true });
+      setTimeout(done, 240); // failsafe: tab-hidden animations can stall
+      view.classList.add('closing');
+    } else {
+      finish();
+    }
+    onHomeRefresh?.();
+  };
+
+  // the close path now lives at COMPONENT scope (closeChatPane is
+  // exposed on the return object so the sidebar row can TOGGLE the pane shut)
+  // — same trap that once bit playChatEnter.
+
   function wire() {
     const sendBtn = $('btn-send');
     // Mobile: a button tap normally moves focus off the input, tearing the
@@ -1516,36 +1551,6 @@ export function createChat({ client, onHomeRefresh }) {
     // only the pane's `hidden` waits for the animation. Guards therefore
     // test the .closing CLASS as well as hidden — the synthetic click a
     // swipe leaves behind lands inside this ~140ms window.
-    const paneClosing = () => $('chat-view').classList.contains('closing');
-    const closeChatPane = () => {
-      currentPeer = null;
-      closeProfileView();
-      setChatOpen(false);
-      closeMsgModal();
-      closeChatOpts();
-      closeForward();
-      const view = $('chat-view');
-      const finish = () => {
-        view.classList.remove('closing');
-        // never stomp a chat opened while the slide-out was still running
-        if (currentPeer) return;
-        view.hidden = true;
-        // the empty pane appears ONLY once the sliding pane is gone: it is a
-        // flex sibling, so showing it during the slide split main() in two
-        // and the chat pane visibly snapped narrower — the desktop "flicker"
-        $('chat-empty').hidden = false;
-      };
-      if (window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches && !view.hidden) {
-        let settled = false;
-        const done = () => { if (!settled) { settled = true; finish(); } };
-        view.addEventListener('animationend', done, { once: true });
-        setTimeout(done, 240); // failsafe: tab-hidden animations can stall
-        view.classList.add('closing');
-      } else {
-        finish();
-      }
-      onHomeRefresh?.();
-    };
     $('btn-chat-back').addEventListener('click', closeChatPane);
     // Swipe closes the conversation (mobile): a deliberate horizontal drag
     // either way (>72px, clearly more horizontal than vertical) acts as the
@@ -1721,5 +1726,6 @@ export function createChat({ client, onHomeRefresh }) {
     $('chat-messages').addEventListener('click', catchUp);
   }
 
-  return { wire, connectEvents, openChat, render, openSelfProfile, handleGonePeer };
+  return { wire, connectEvents, openChat, render, openSelfProfile, handleGonePeer,
+    closeChat: closeChatPane, isOpenFor: (p) => !!currentPeer && String(p ?? '').toLowerCase() === currentPeer };
 }
