@@ -777,7 +777,8 @@ export function createChat({ client, onHomeRefresh }) {
       + 'vouch counts toward this profile’s reputation. Only trust people you '
       + 'actually know, after comparing safety numbers.';
     const wrap = document.createElement('div');
-    wrap.append(facts, bodyP);
+    // the explanation reads first, the evidence below it
+    wrap.append(bodyP, facts);
     // the consequence sits BELOW the button, in a box: read it last, right
     // where the commitment happens
     const box = document.createElement('div');

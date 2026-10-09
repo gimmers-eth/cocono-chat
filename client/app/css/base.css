@@ -932,11 +932,12 @@ body[data-view="blocked"] .page-footer { display: none; }
   font-size: .82rem; padding: .28rem .4rem .28rem 0;
 }
 .trust-facts td { text-align: right; padding: .28rem 0; }
-.tf-val { display: inline-block; padding: .12rem .6rem; border-radius: 999px; font-size: .82rem; font-weight: 700; border: 1px solid transparent; }
-.tf-val.ok  { color: var(--success); border-color: currentColor; background: rgba(0, 168, 132, 0.10); }
-.tf-val.bad { color: var(--danger); border-color: currentColor; background: rgba(239, 105, 117, 0.10); }
-.tf-val.dim { color: var(--muted); border-color: var(--border); }
-.tf-val.num { color: var(--accent, #7d6ce0); border-color: currentColor; background: rgba(125, 108, 224, 0.10); }
+/* plain verdicts: no pills, no borders — just the tick, the words, colour */
+.tf-val { font-size: .88rem; font-weight: 700; }
+.tf-val.ok  { color: var(--success); }
+.tf-val.bad { color: var(--danger); }
+.tf-val.dim { color: var(--muted); font-weight: 600; }
+.tf-val.num { color: var(--accent, #7d6ce0); }
 .tf-consequence {
   margin-top: .8rem; padding: .6rem .8rem;
   border: 1px solid var(--danger); border-radius: 10px;
