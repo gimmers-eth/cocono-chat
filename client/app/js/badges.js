@@ -55,7 +55,7 @@ export class OgBadge extends BadgeDef {
   points = 10;
   cap = 10;
   animated = true;
-  blurb = 'One of the first ten accounts on CoCoNo. This seat is gone forever once ten are claimed. Awarded by the platform team.';
+  blurb = 'One of the first ten accounts on CoCoNo.';
 
   art(svg) {
     // the CoCoNo mark, distilled: two linked rings (the double-C) on the
@@ -160,7 +160,7 @@ class TeachersPetBadge extends BadgeDef {
   label = "Teacher's Pet";
   points = 1;
   cap = null;
-  blurb = "Hand-picked by the platform staff — a small apple for the teacher's pet. Awarded only from the admin panel.";
+  blurb = "Hand-picked by the platform staff — a small apple for the teacher's pet.";
 
   art(svg) {
     const plate = document.createElementNS(NS, 'rect');

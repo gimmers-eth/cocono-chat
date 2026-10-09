@@ -38,7 +38,7 @@ export class OgBadge extends Badge {
   id = 'og';
   mode = 'auto';
   label = 'OG';
-  blurb = 'One of the first ten accounts on CoCoNo. This seat is gone forever once ten are claimed.';
+  blurb = 'One of the first ten accounts on CoCoNo.';
   scoreOf() { return 10; }
   capOf(cfg) { return cfg.ogBadgeCap ?? 10; }
   async eligible(user, ctx) {
@@ -84,7 +84,7 @@ class TeachersPetBadge extends Badge {
   label = "Teacher's Pet";
   scoreOf() { return 1; }
   mode = 'admin';
-  blurb = "Hand-picked by the platform staff — a small apple for the teacher's pet. Awarded only from the admin panel.";
+  blurb = "Hand-picked by the platform staff — a small apple for the teacher's pet.";
 }
 
 export const BADGES = [new OgBadge(), new EarlyBirdBadge(), new PremiumBadge(), new TeachersPetBadge()];
