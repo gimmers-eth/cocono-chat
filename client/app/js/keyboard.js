@@ -7,8 +7,8 @@
 // MOVES; only the space between header and composer changes:
 //
 //  1. PRE-FLIGHT (iOS): Safari pans only when the focused input would land
-//     UNDER the keyboard. A pointer-down (or focusin) happens ~150ms BEFORE
-//     the keyboard — we shrink --app-h then, using the last measured
+//     UNDER the keyboard. A pointer-down happens ~150ms BEFORE the
+//     keyboard — we shrink --app-h then, using the last measured
 //     keyboard height PLUS a margin for context variance (QuickType
 //     suggestions bar ≈55px, emoji panels taller; a first-ever open uses a
 //     generic portrait estimate). Over-estimating is safe: the shell is a
@@ -85,22 +85,30 @@ export function initKeyboardFit() {
   }
 
   // Pre-flight shrink — runs BEFORE focus, BEFORE any pan can start.
+  let revertTimer = 0;
   function preflight() {
     if (!IS_IOS) return;            // Android resizes itself; desktop has no soft keyboard
     if (lastCover > 80) return;     // keyboard already up: nothing to pre-fit
     const est = cachedKb || DEFAULT_KB;
     fit(Math.max(MIN_APP_H, window.innerHeight - est - PRE_MARGIN), est + PRE_MARGIN, 0);
+    // Speculative shrink: if no keyboard actually arrives (tap swallowed,
+    // focus stolen), restore the true fit instead of leaving the shell
+    // stranded mid-screen.
+    clearTimeout(revertTimer);
+    revertTimer = setTimeout(() => { if (lastCover <= 80) apply(); }, 600);
   }
 
   // Delegated capture: any INPUT/TEXTAREA anywhere — chat composer, auth,
-  // pairing, settings. No per-component wiring. focusin is the second
-  // chance for non-pointer focus (autofocus, tab, programmatic .focus()).
-  const onTarget = (e) => {
+  // pairing, settings. No per-component wiring. POINTERDOWN only, never
+  // focusin: chat.js programmatically re-focuses the composer (open chat,
+  // after send) and on iOS that fires focusin WITHOUT a keyboard following
+  // — a pre-flight there shrank the shell with nothing to restore it
+  // (composer stranded mid-page). A soft keyboard on iOS always needs a
+  // real tap, and pointerdown catches every one of those.
+  document.addEventListener('pointerdown', (e) => {
     const t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA') && !t.disabled) preflight();
-  };
-  document.addEventListener('pointerdown', onTarget, { capture: true, passive: true });
-  document.addEventListener('focusin', onTarget);
+  }, { capture: true, passive: true });
 
   vv.addEventListener('resize', apply);
   vv.addEventListener('scroll', apply);
