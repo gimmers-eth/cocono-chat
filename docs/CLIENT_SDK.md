@@ -261,3 +261,16 @@ Local overrides go in `client/.env.test` (gitignored): `TEST_REDIS_URL`,
   per-row Block/Unblock).
 - WS ack errors: `blocked` (they blocked you — message never stored) and
   `self_blocked` (you blocked them — unblock to message).
+
+## Muting (notifications-off per person)
+
+- `client.muteUser(username)` / `client.unmuteUser(username)` — silences ALL
+  notifications FROM that person: pushes are gated server-side at the send
+  seam (the recipient's `muted: [ul]` list on the ACCOUNT doc, so every
+  device mirrors it), and the app suppresses relationship notices from muted
+  actors locally. Messages themselves still deliver, read, and count — a
+  mute is quiet, not absence (a block is the severing tool). The mute is
+  invisible to the muted party.
+- `client.relationships()` now also returns `muted: [username]` — the app
+  re-pulls this mirror at login and on the `'muted'` control nudge (another
+  device flipped it).

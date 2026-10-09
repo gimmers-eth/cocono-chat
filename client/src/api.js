@@ -67,6 +67,13 @@ export class Api {
     return this.#request('/api/me/friends', { token });
   }
 
+  muteUser(token, ul) {
+    return this.#request(`/api/me/friends/${encodeURIComponent(ul)}/mute`, { method: 'PUT', token });
+  }
+  unmuteUser(token, ul) {
+    return this.#request(`/api/me/friends/${encodeURIComponent(ul)}/mute`, { method: 'DELETE', token });
+  }
+
   blockUser(token, ul, reason) {
     return this.#request(`/api/me/friends/${encodeURIComponent(ul)}/block`, { method: 'PUT', body: { r: reason }, token });
   }

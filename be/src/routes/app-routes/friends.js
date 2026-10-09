@@ -349,13 +349,45 @@ export default async function friendsRoutes(app, { users, redis, config, setting
     return { blocked: false };
   });
 
+  // ---- MUTING --------------------------------------------------------
+  // A mute silences NOTIFICATIONS from one person — messages still deliver
+  // and the relation is untouched (unlike a block). The list lives on the
+  // ACCOUNT (users.muted:[ul]) so every device mirrors it; enforcement sits
+  // where pushes are decided (ws handleSend) — a muted sender can never
+  // reach the notification layer from any device.
+  app.put('/api/me/friends/:ul/mute', async (request, reply) => {
+    const denied = await guard(request, reply, 'friendschange');
+    if (denied) return denied;
+    const target = targetOf(request);
+    if (!target) return fail(reply, 'bad_username', 'Invalid username', 400);
+    if (target === request.auth.sub) return fail(reply, 'self_mute', 'You cannot mute yourself', 400);
+    const ul = String(request.auth.sub ?? '').toLowerCase();
+    if (!await users.findOne({ ul: target }, { projection: { _id: 1 } })) {
+      return fail(reply, 'unknown_account', 'No such user', 404);
+    }
+    await users.updateOne({ ul }, { $addToSet: { muted: target } });
+    await notifyAccount(ul, 'muted'); // mirror to the blocker's other devices
+    return { muted: true };
+  });
+
+  app.delete('/api/me/friends/:ul/mute', async (request, reply) => {
+    const denied = await guard(request, reply, 'friendschange');
+    if (denied) return denied;
+    const target = targetOf(request);
+    if (!target) return fail(reply, 'bad_username', 'Invalid username', 400);
+    const ul = String(request.auth.sub ?? '').toLowerCase();
+    await users.updateOne({ ul }, { $pull: { muted: target } });
+    await notifyAccount(ul, 'muted');
+    return { muted: false };
+  });
+
   // GET /api/me/relationships — the unified view the Settings tab renders:
   // every contact I added (with trust stages) + everyone I blocked.
   app.get('/api/me/relationships', async (request, reply) => {
     const denied = await guard(request, reply, 'friends');
     if (denied) return denied;
     const ul = String(request.auth.sub ?? '').toLowerCase();
-    const me = await users.findOne({ ul }, { projection: { friends: 1, blocked: 1, blockReasons: 1 } });
+    const me = await users.findOne({ ul }, { projection: { friends: 1, blocked: 1, blockReasons: 1, muted: 1 } });
     const added = await enriched(ul);
     const blockedList = [...new Set((me?.blocked ?? []).map((u) => String(u).toLowerCase()))].sort();
     const blocked = [];
@@ -372,7 +404,7 @@ export default async function friendsRoutes(app, { users, redis, config, setting
         at: me?.blockReasons?.[bu]?.at ?? null,
       });
     }
-    return { added, blocked };
+    return { added, blocked, muted: [...new Set((me?.muted ?? []).map((u) => String(u).toLowerCase()))].sort() };
   });
 
   app.delete('/api/me/friends/:ul', async (request, reply) => {

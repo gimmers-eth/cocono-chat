@@ -183,3 +183,47 @@ test('admin relationships: a pure block (no friends ever) still shows in the pan
     assert.equal(ghost.statusCode, 404);
   } finally { await teardown(); }
 });
+
+// ---- MUTING: notification-only, account-level, relation-intact ----
+test('mute: silences notifications without touching the relation; mirrors via relationships', async () => {
+  const { app, mongo, teardown } = await setupApp(LIMITS);
+  try {
+    const alice = makeClient();
+    const bobby = makeClient();
+    const dA = randomUUID();
+    const dB = randomUUID();
+    await signupUser(app, alice, 'muted01', dA); // names >= 4 chars (USERNAME_RE)
+    await signupUser(app, bobby, 'muted02', dB);
+    const aTok = await getToken(app, alice, 'muted01', dA);
+    const bTok = await getToken(app, bobby, 'muted02', dB);
+
+    // a real friend relation first — muting must NOT sever it
+    await app.inject({ method: 'PUT', url: '/api/me/friends/muted02', headers: aTok });
+    await app.inject({ method: 'PUT', url: '/api/me/friends/muted01', headers: bTok });
+
+    assert.equal((await app.inject({ method: 'PUT', url: '/api/me/friends/muted02/mute', headers: aTok })).statusCode, 200);
+
+    // relation untouched
+    const aList = (await app.inject({ method: 'GET', url: '/api/me/friends', headers: aTok })).json().friends;
+    assert.deepEqual(aList.map((f) => f.u), ['muted02'], 'still friends');
+
+    // the unified view carries the mute for every device to mirror
+    const rel = (await app.inject({ method: 'GET', url: '/api/me/relationships', headers: aTok })).json();
+    assert.deepEqual(rel.muted, ['muted02']);
+
+    // guards
+    assert.equal((await app.inject({ method: 'PUT', url: '/api/me/friends/muted01/mute', headers: aTok })).json().error, 'self_mute');
+    assert.equal((await app.inject({ method: 'PUT', url: '/api/me/friends/ghost0000/mute', headers: aTok })).statusCode, 404);
+
+    // unmute clears
+    assert.equal((await app.inject({ method: 'DELETE', url: '/api/me/friends/muted02/mute', headers: aTok })).json().muted, false);
+    const rel2 = (await app.inject({ method: 'GET', url: '/api/me/relationships', headers: aTok })).json();
+    assert.deepEqual(rel2.muted, []);
+    const doc = await mongo.db.collection('users').findOne({ ul: 'muted01' });
+    assert.deepEqual(doc.muted ?? [], []);
+
+    // the OTHER account was never touched by any of this (invisible mute)
+    const bDoc = await mongo.db.collection('users').findOne({ ul: 'muted02' });
+    assert.equal(bDoc.blocked, undefined);
+  } finally { await teardown(); }
+});

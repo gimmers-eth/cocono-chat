@@ -31,12 +31,16 @@ export const ICONS = {
 
   // friendship (one-way trust) — sidebar + menu identity marks
   userSolid: 'fa-user',              // you (solid)
+  volume: 'fa-volume',                    // chat unmuted (tap to mute)
+  volumeXmark: 'fa-volume-xmark',        // chat muted (tap to unmute)
   magnifier: 'fa-magnifying-glass-plus',
   ban: 'fa-ban',
   // block-reason glyphs (iconEl understands two-word 'fa-<style> <name>')
   reasonNospeak: 'fa-regular fa-message',
   reasonUnknown: 'fa-regular fa-circle-question',
   reasonScam: 'fa-solid fa-triangle-exclamation',
+  volume: 'fa-volume',                    // chat unmuted (tap to mute)
+  volumeXmark: 'fa-volume-xmark',        // chat muted (tap to unmute)
   magnifier: 'fa-magnifying-glass-plus',
   ban: 'fa-ban',                    // blocked marker
   userGone: 'fa-user-slash',         // deleted account (red, italic name)

@@ -38,7 +38,7 @@ export function createHandlers({ users, redis, pub, config, messages, settings, 
 
     // Recipient account + device must exist.
     const rul = m.u.toLowerCase();
-    const recipient = await users.findOne({ ul: rul }, { projection: { devices: 1, friends: 1, blocked: 1 } });
+    const recipient = await users.findOne({ ul: rul }, { projection: { devices: 1, friends: 1, blocked: 1, muted: 1 } });
     const recipientDevice = recipient?.devices.find((dev) => dev.id === m.dv);
     if (!recipient || !recipientDevice) {
       return ack(false, 'unknown_recipient');
@@ -96,7 +96,12 @@ export function createHandlers({ users, redis, pub, config, messages, settings, 
     // Phase 1 notifications: push ONLY when the recipient device is offline
     // (no live WS). Blind payload — event type, nothing else. Never push to
     // the sender's own device (self-chat echo arrives via its live WS anyway).
-    if (recipientDevice.push && m.d !== auth.d) {
+    // MUTE gate (notification layer ONLY): a muted sender's messages still
+    // store and deliver exactly as before — but no push ever leaves for
+    // them. Enforced on the SERVER list, so it mirrors every device.
+    const mutedBy = Array.isArray(recipient.muted) && recipient.muted.includes(auth.sub);
+    if (mutedBy) request.log.info(`[push] mute ${rul}/${m.dv.slice(0, 8)}: sender ${auth.sub} muted — push suppressed`);
+    if (!mutedBy && recipientDevice.push && m.d !== auth.d) {
       try {
         const online = await redis.exists(presenceKey(rul, m.dv));
         if (online) request.log.info(`[push] skip ${rul}/${m.dv.slice(0, 8)}: device online (live WS)`);

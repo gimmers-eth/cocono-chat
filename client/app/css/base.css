@@ -1065,6 +1065,9 @@ body[data-view="blocked"] .page-footer { display: none; }
 .udouble-meta { display: grid; gap: .1rem; min-width: 0; }
 
 .avatar-stack { display: inline-flex; flex: none; }
+/* chat-head mute speaker: muted reads as struck-through quiet */
+#btn-chat-mute.muted-on { color: var(--danger); }
+#btn-chat-mute.muted-on:hover { background: rgba(239, 105, 117, 0.12); }
 .avatar-stack { position: relative; }
 .avatar-stack.zoomable .avatar-img { cursor: zoom-in; }
 /* magnifier corner: the zoom affordance, shown only when a real photo can

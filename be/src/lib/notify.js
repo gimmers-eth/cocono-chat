@@ -45,6 +45,9 @@
 //               Carries `by`. Headline event: always OS-notified.
 //   'verified' YOUR account became Verified (admin decision): headline OS
 //               notice + the auto Verified badge arrives via 'badges'.
+//   'muted'    YOUR mute list changed (muted/unmuted someone from any
+//              device): re-pull the mirror. The muted party is NEVER
+//              notified — a mute is invisible to them.
 //
 // `by` IS ALLOWED HERE although nudges are content-free by doctrine: it
 // names only a fact the recipient's own authenticated re-pull already

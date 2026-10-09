@@ -151,6 +151,9 @@
               <span id="chat-sub" class="muted small sub-preview"></span>
             </span>
           </button>
+          <!-- per-chat notification mute: lives in the HEADER (always
+               visible while the chat is), not buried in the menu -->
+          <button id="btn-chat-mute" class="icon-btn" title="Mute notifications" data-icon="volume" hidden></button>
           <button id="btn-chat-menu" class="icon-btn chat-menu-btn" title="Chat options" aria-haspopup="true" data-icon="menu"></button>
         </header>
         <p id="chat-warn" class="chat-warn" hidden></p>

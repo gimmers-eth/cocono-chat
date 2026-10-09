@@ -1072,9 +1072,17 @@ export function createHome({ client, chat, onLogout }) {
     const q = relState.q.trim().toLowerCase();
     const rows = [];
     if (relState.added) {
+      const mutedSet = new Set(relState.rows.muted ?? []);
       for (const a of relState.rows.added ?? []) {
         if (q && !a.u.includes(q)) continue;
-        rows.push({ peer: a.u, entry: a, blocked: false });
+        rows.push({ peer: a.u, entry: a, blocked: false, muted: mutedSet.has(a.u) });
+      }
+      // a muted person who is NOT (or no longer) a contact still deserves
+      // their row — the mute exists and can be lifted from here
+      for (const mu of relState.rows.muted ?? []) {
+        if (q && !mu.includes(q)) continue;
+        if ((relState.rows.added ?? []).some((a) => a.u === mu)) continue;
+        rows.push({ peer: mu, entry: { peer: mu }, blocked: false, muted: true });
       }
     }
     if (relState.blocked) {
@@ -1125,6 +1133,15 @@ export function createHome({ client, chat, onLogout }) {
         if (r.entry.gone) info.append(pill('account deleted', 'bad'));
         else if (r.entry.changed) info.append(pill('key changed', 'bad'));
         else if (!r.entry.verified) info.append(pill(r.entry.addedBack ? 'not verified' : 'waiting for them to add back', 'warn'));
+        info.append(pill(r.muted ? 'notifications muted' : 'notifications on', r.muted ? 'warn' : 'ok'));
+        info.append(action(r.muted ? 'Unmute' : 'Mute', async () => {
+          try {
+            if (r.muted) { await client.unmuteUser(r.peer); await rememberPeerMuted(r.peer, false); }
+            else { await client.muteUser(r.peer); await rememberPeerMuted(r.peer, true); }
+            r.muted = !r.muted;
+            renderRelationships().catch(() => {});
+          } catch (err) { toast(humanError(err), 'error'); }
+        }));
         info.append(action('Block', async () => {
           if (await blockUserWithConfirm(client, r.peer)) { await renderRelationships(); renderConversationList().catch(() => {}); }
         }, true));

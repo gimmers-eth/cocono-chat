@@ -289,6 +289,22 @@ paths:
       responses:
         '200': { description: '{ added: [enriched friend entries], blocked: [{peer, addedBack, reason, at}] }' }
         '401': { description: 'Missing/invalid token' }
+  /api/me/friends/{ul}/mute:
+    put:
+      summary: Mute a user (notifications only — messages still deliver; account-level, mirrors to every device; push gate enforced server-side)
+      parameters:
+        - { in: path, name: ul, required: true, schema: { type: string } }
+      responses:
+        '200': { description: '{ muted: true }' }
+        '400': { description: 'self_mute / bad_username' }
+        '404': { description: 'unknown_account' }
+    delete:
+      summary: Lift a mute (re-enables notifications from that user)
+      parameters:
+        - { in: path, name: ul, required: true, schema: { type: string } }
+      responses:
+        '200': { description: '{ muted: false }' }
+
   /api/me/friends/{ul}/block:
     put:
       summary: Block a user (severs the relation both ways; gates their sends at the ws send seam before storage; reason required)

@@ -388,6 +388,33 @@ export async function saveBlockedSet(peers) {
   }
 }
 
+// Muted peers ride the same PEERS row (mirror of users.muted on the
+// server). UI-only: it paints the chat-head speaker and gates the LOCAL
+// relationship notices — the push suppression itself is server-enforced.
+export async function rememberPeerMuted(peer, muted) {
+  const ul = String(peer).toLowerCase();
+  const cur = (await withStore('readonly', (s) => s.get(ul), PEERS)) ?? { peer: ul };
+  await withStore('readwrite', (s) => s.put({ ...cur, muted: !!muted }), PEERS);
+}
+
+export async function saveMutedSet(peers) {
+  const keep = new Set((peers ?? []).map((p) => String(p).toLowerCase()));
+  const rows = await withStore('readonly', (s) => s.getAll(), PEERS);
+  for (const r of rows ?? []) {
+    const now = keep.has(r.peer);
+    if (!!r.muted !== now) {
+      await withStore('readwrite', (s) => s.put({ ...r, muted: now }), PEERS);
+    }
+  }
+}
+
+export async function loadPeerMuted() {
+  const rows = await withStore('readonly', (s) => s.getAll(), PEERS);
+  const map = new Map();
+  for (const r of rows ?? []) map.set(r.peer, !!r.muted);
+  return map;
+}
+
 export async function loadPeerBlocked() {
   const rows = await withStore('readonly', (s) => s.getAll(), PEERS);
   const map = new Map();

@@ -22,7 +22,7 @@ import {
   saveMessage, updateMessage, messagesWith, markRead, allMessages,
   getMessage, deleteMessage, clearMessages,
   loadPeerAvatars, rememberPeerAvatar, AVATARS_EVENT,
-  loadFriends, friendAdd, friendDel, friendMarkFlags, setFriends, FRIENDS_EVENT, loadPeerBlocked, loadPeerChips,
+  loadFriends, friendAdd, friendDel, friendMarkFlags, setFriends, FRIENDS_EVENT, loadPeerBlocked, loadPeerMuted, rememberPeerMuted, loadPeerChips,
   getPin, recordPinSeen, markPeerGone, rememberPeerVerified,
 } from '../store.js';
 
@@ -518,6 +518,7 @@ export function createChat({ client, onHomeRefresh }) {
     const warn = $('chat-warn');
     if (!currentPeer) {
       if (warn) warn.hidden = true;
+      paintMuteBtn(null);
       $('chat-peer-line')?.replaceChildren();
       return;
     }
@@ -531,6 +532,7 @@ export function createChat({ client, onHomeRefresh }) {
     // two honest actions (unblock / look them up). Checked first because a
     // blocked peer has NO friend entry — the cascade would call them a
     // stranger, which is not the whole story.
+    paintMuteBtn(currentPeer, (await loadPeerMuted()).get(currentPeer));
     const blockedMap = await loadPeerBlocked();
     const blockedByMe = blockedMap.get(currentPeer);
     if (blockedByMe) {
@@ -1548,6 +1550,39 @@ export function createChat({ client, onHomeRefresh }) {
     }
   }
 
+  // ---- per-chat notification mute (speaker button, chat header) ----------
+  // The mute itself is ACCOUNT data (users.muted) enforced at the push
+  // seam; this button flips it and mirrors instantly via the PEERS store
+  // + the 'muted' nudge reaches every other device.
+  function paintMuteBtn(peer, muted) {
+    const btn = $('btn-chat-mute');
+    if (!btn) return;
+    if (!peer) { btn.hidden = true; return; }
+    btn.hidden = false;
+    btn.dataset.icon = muted ? 'volumeXmark' : 'volume';
+    btn.title = muted
+      ? `${peer} is muted — no notifications. Tap to unmute.`
+      : `Mute notifications from ${peer} (messages still arrive).`;
+    btn.classList.toggle('muted-on', !!muted);
+    btn.replaceChildren(iconEl(muted ? 'volumeXmark' : 'volume'));
+  }
+
+  async function toggleChatMute() {
+    if (!currentPeer) return;
+    const muted = (await loadPeerMuted()).get(currentPeer);
+    const btn = $('btn-chat-mute');
+    btn.disabled = true;
+    try {
+      if (muted) { await client.unmuteUser(currentPeer); await rememberPeerMuted(currentPeer, false); toast(`${currentPeer} unmuted — notifications are on.`); }
+      else { await client.muteUser(currentPeer); await rememberPeerMuted(currentPeer, true); toast(`${currentPeer} muted — no more notifications from them.`); }
+      paintMuteBtn(currentPeer, !muted);
+    } catch (err) {
+      toast(humanError(err), 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
   // Opening a chat slides the pane in from the left (see .chat-view.entering
   // in base.css). CLASS-driven with a forced-reflow restart, so SWITCHING
   // chats — where the pane is never display-toggled — re-animates too.
@@ -1782,6 +1817,7 @@ export function createChat({ client, onHomeRefresh }) {
     $('btn-peer-profile')?.addEventListener('click', openProfileView);
     $('btn-chat-profile')?.addEventListener('click', openProfileView);
     $('chatopts-overlay').addEventListener('click', closeChatOpts);
+    $('btn-chat-mute')?.addEventListener('click', toggleChatMute);
     $('btn-chat-block')?.addEventListener('click', async () => {
       closeChatOpts();
       if (!currentPeer) return;

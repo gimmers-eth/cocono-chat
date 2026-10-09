@@ -9,7 +9,7 @@ import { startSingleTabGuard } from './components/blocked.js';
 import { createAuth } from './components/auth.js';
 import { createHome } from './components/home.js';
 import { createChat } from './components/chat.js';
-import { setScope, setFriends, loadFriends, ensureScoped } from './store.js';
+import { setScope, setFriends, loadFriends, ensureScoped, loadPeerMuted, saveMutedSet } from './store.js';
 import { purgeLocalAccount } from './accountPurge.js';
 import { initKeyboardFit } from './keyboard.js';
 import { mountDiagnostics } from './diag.js';
@@ -141,6 +141,13 @@ async function reconcileFriends() {
   }
 }
 
+/** Re-pull the mute mirror (login + 'muted' nudges from my other devices). */
+async function syncMuted() {
+  if (!client.token) return;
+  const rel = await client.relationships();
+  await saveMutedSet(rel.muted ?? []);
+}
+
 // Notification-driven navigation: linking to a user means LEAVING whoever
 // else's chat is open — close the current pane first, then open theirs.
 // (Tapping the notice of the peer already on screen is a no-op.)
@@ -176,6 +183,7 @@ async function enterApp({ gesture = false, offline = false, fresh = false } = {}
   if (!offline) client.connect(); // offline mode: browse the local store only
   if (!offline) badgeNotify.poll(); // badges the queue awarded since last seen
   if (!offline) home.refreshBlocked?.().catch(() => {}); // blocked mirror re-sync (server = truth)
+  if (!offline) syncMuted(); // mute mirror re-pull (server list = truth)
   await home.renderConversationList();
 
   // Friends mirror: the SERVER list is the source of truth — reconcile on
@@ -289,7 +297,7 @@ auth.wire();
 // badge modal.
 const badgeNotify = initBadgeNotify({ client }); // poll loop + modal dispatch + OS-notification dedup in js/notify.js
 
-client.on('notice', ({ what, by }) => {
+client.on('notice', async ({ what, by }) => {
   if (!client.token) return;
   if (what === 'friends' || what === 'gone') {
     // add / remove / un-add-revoke ('friends') and account-deletion purge
@@ -307,6 +315,9 @@ client.on('notice', ({ what, by }) => {
   } else if (what === 'profile') {
     // someone I follow edited their bio/photo: re-prime the peer caches
     home.refreshPeerProfiles?.();
+  } else if (what === 'muted') {
+    // another device muted/unmuted someone: mirror + repaint affordances
+    syncMuted().then(() => home.renderConversationList?.().catch?.(() => {})).catch(() => {});
   } else if (what === 'badges') {
     // admin awarded/revoked a badge on MY account: skip the 60s wait —
     // poll now (dispatches any unseen-grant modal on whichever device wins
@@ -318,7 +329,10 @@ client.on('notice', ({ what, by }) => {
     // raise a clickable OS notification ALWAYS — foreground too, by explicit
     // request; these are rare enough to deserve the interruption.
     // name the actor AND route the tap straight into their chat
-    osNotify(noticeText(what, by), `cocono-${what}`, by ?? '');
+    // A muted person's headline events stay silent TOO (a mute is
+    // notifications-off, full stop) — the graph still re-pulls.
+    const muted = by ? (await loadPeerMuted().catch(() => new Map())).get(String(by).toLowerCase()) : false;
+    if (!muted) osNotify(noticeText(what, by), `cocono-${what}`, by ?? '');
     reconcileFriends().catch(() => { /* next entry reconciles */ });
   } else if (what === 'verified') {
     // MY account just became Verified (admin decision): headline notice plus

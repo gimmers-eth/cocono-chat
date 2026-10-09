@@ -376,6 +376,19 @@ export class CoconoClient extends Emitter {
   /** Block a user: severs the relation both ways and walls off inbound
    *  messages (server-gated before storage: no delivery, no push). The
    *  blocked party is never told — their own list just shows a stranger. */
+  /** Silence ALL notifications from one person (messages still arrive).
+   *  The mute lives on the ACCOUNT — every device mirrors it, and the push
+   *  gate is enforced server-side, so muting anywhere mutes everywhere. */
+  async muteUser(username) {
+    const ul = String(username ?? '').toLowerCase();
+    return this.api.muteUser(this.#requireToken(), ul);
+  }
+
+  async unmuteUser(username) {
+    const ul = String(username ?? '').toLowerCase();
+    return this.api.unmuteUser(this.#requireToken(), ul);
+  }
+
   // reason: 'nospeak' | 'unknown' | 'scam' (server-enforced enum) — the
   // blocker's own note for recall + admin context; never shown to the
   // blocked party.
