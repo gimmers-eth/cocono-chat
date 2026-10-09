@@ -18,7 +18,10 @@ export const BLOCK_REASONS = [
 /** The reason's glyph as an <i> element (choice list + recall pills share
     the same icon language as the admin panel's mirrored SVGs). */
 export const blockReasonIcon = (id) =>
-  iconEl(BLOCK_REASONS.find(([k]) => k === id)?.[2] ?? 'ban');
+  // 'reason-icon' carries the spacing between glyph and text (see base.css:
+  // .rel-pill .reason-icon { margin-right: .35em }) — without the class the
+  // icon sits glued to the label
+  iconEl(BLOCK_REASONS.find(([k]) => k === id)?.[2] ?? 'ban', 'reason-icon');
 
 export const blockReasonLabel = (id, peer) =>
   (BLOCK_REASONS.find(([k]) => k === id)?.[1] ?? (() => `blocked @${peer}`))(peer);
