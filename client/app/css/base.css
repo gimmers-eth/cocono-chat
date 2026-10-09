@@ -338,6 +338,11 @@ img.own-avatar { border-radius: 50%; }
 #msg-modal .msg-modal-text { flex: 1 1 auto; max-height: none; }
 .linkish.danger { color: var(--danger); }
 
+/* drawer head: logout + close sit together as a pair */
+.drawer-actions { display: inline-flex; align-items: center; gap: 6px; }
+.icon-btn.danger { color: var(--danger); }
+.icon-btn.danger:hover { background: rgba(239, 105, 117, 0.14); }
+
 /* Off-screen selection helper for the clipboard fallback (never visible). */
 .copy-helper { position: fixed; top: -100vw; left: -100vw; opacity: 0; }
 

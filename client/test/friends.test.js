@@ -183,8 +183,10 @@ test('friends: verification requires the MUTUAL add', async (t) => {
   await bClient.connect(); await waitOpen(bClient);
 
   // REAL-TIME: alice's add nudges BOBBY's open connection (content-free
-  // 'notice' frame what='friends' -> app re-pulls its own list).
-  const addNudge = waitFor(bClient, 'notice', (p) => p.what === 'friends', 8000);
+  // 'notice' frame what='request' (a brand-new add got its own nudge kind
+  // so the app can OS-notify "someone added you"; re-binds stay 'friends')
+  // -> app re-pulls its own list).
+  const addNudge = waitFor(bClient, 'notice', (p) => p.what === 'request', 8000);
   const entries = await dev.addFriend(bobby);
   await addNudge;
   assert.equal(entries[0].addedBack, false, 'one-sided add: they have not added us');

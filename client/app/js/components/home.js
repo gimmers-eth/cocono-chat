@@ -859,6 +859,7 @@ export function createHome({ client, chat, onLogout }) {
     });
 
     $('btn-logout').addEventListener('click', () => {
+      closeSettings(); // logout now lives INSIDE the drawer — don't leave it hanging
       client.logout();
       // logout wipes device-local trust: friends mirror (refetched at next
       // login) + identity pins + verified flags (see store.clearLocalTrustData)

@@ -99,7 +99,6 @@
         <div class="side-actions">
           <button id="btn-share-chat" class="icon-btn" title="Share a link to chat with me" data-icon="share"></button>
           <button id="btn-devices" class="icon-btn" title="Devices" data-icon="settings"></button>
-          <button id="btn-logout" class="icon-btn" title="Log out" data-icon="logout"></button>
         </div>
       </header>
 
@@ -184,7 +183,12 @@
   <section id="settings-drawer" class="side-menu wide" role="dialog" aria-modal="true" aria-labelledby="drawer-title" hidden>
     <header class="drawer-head">
       <h2 id="drawer-title">Settings</h2>
-      <button id="btn-settings-close" class="icon-btn" title="Close" data-icon="close"></button>
+      <span class="drawer-actions">
+        <!-- logout lives here (was top-left in the sidebar): one place where
+             account-level actions sit, and it can never be tapped by accident -->
+        <button id="btn-logout" class="icon-btn danger" title="Log out" data-icon="logout"></button>
+        <button id="btn-settings-close" class="icon-btn" title="Close" data-icon="close"></button>
+      </span>
     </header>
     <div class="drawer-body">
       <div class="drawer-tabs-wrap" id="drawer-tabs-wrap">

@@ -186,6 +186,7 @@ export default async function friendsRoutes(app, { users, redis, config, setting
     const user = await users.findOne({ ul }, { projection: { friends: 1 } });
     const list = normalize(user?.friends);
     const existing = list.find((f) => f.u === target);
+    let freshAdd = false;
     if (existing) {
       existing.p = idp;
       existing.v = false; // a new key is never pre-verified or pre-trusted
@@ -195,10 +196,13 @@ export default async function friendsRoutes(app, { users, redis, config, setting
         return fail(reply, 'friends_full', `Friends list is full (max ${config.friendsMax})`, 409);
       }
       list.push({ u: target, p: idp, v: false, t: false });
+      freshAdd = true;
     }
     await users.updateOne({ ul }, { $set: { friends: list.sort((a, b) => a.u.localeCompare(b.u)) } });
-    // the peer's view of THIS relation just moved (addedBack) — nudge
-    await notifyAccount(target, 'friends');
+    // the peer's view of THIS relation just moved — nudge. A brand-new add
+    // gets its own kind so the client can raise a real OS notification
+    // ("someone added you"); a re-bind is just ordinary list churn.
+    await notifyAccount(target, freshAdd ? 'request' : 'friends');
     return { friends: await enriched(ul) };
   });
 
@@ -220,6 +224,11 @@ export default async function friendsRoutes(app, { users, redis, config, setting
     existing[field] = on;
     if (!on && field === 'v') existing.t = false; // un-verifying revokes trust too
     await users.updateOne({ ul }, { $set: { friends: list } });
+    // The peer's derived view moved too — and when someone CONFIRMS us
+    // (verify) or EXTENDS trust, that is a headline event: dedicated nudge
+    // kinds so the client always OS-notifies. Undoing is quiet churn.
+    if (on) await notifyAccount(target, field === 'v' ? 'verify' : 'trusts');
+    else await notifyAccount(target, 'friends');
     return { friends: await enriched(ul) };
   }
 

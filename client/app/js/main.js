@@ -14,7 +14,17 @@ import { initKeyboardFit } from './keyboard.js';
 import { mountDiagnostics } from './diag.js';
 import { applyIcons } from './icons.js';
 import { initInstallAndNotify } from './install.js';
-import { initBadgeNotify } from './notify.js';
+import { initBadgeNotify, osNotify } from './notify.js';
+
+// Generic lock-screen-safe copy for relationship headline notices — no names,
+// no counts: the notification surfaces on the lock screen and the push/OS
+// path is not E2EE. The app carries the detail once opened.
+const NOTICE_TEXT = {
+  request: 'Someone added you as a friend',
+  verify: 'A contact verified you',
+  trusts: 'A contact trusted you',
+  verified: 'Your account is verified!',
+};
 import { putAppTitle, takePendingChat } from './swkv.js';
 
 // Debug console logging: flip localStorage.setItem('cocono.debug','1') or use
@@ -273,6 +283,21 @@ client.on('notice', ({ what }) => {
     // poll now (dispatches any unseen-grant modal on whichever device wins
     // the ack race) and resync the picker/chip
     badgeNotify.onNotice(what); // one module owns poll + dedup + resync
+  } else if (what === 'request' || what === 'verify' || what === 'trusts') {
+    // Relationship headline events FROM a contact: someone added me,
+    // confirmed my safety number, or extended trust. Re-pull the graph AND
+    // raise a clickable OS notification ALWAYS — foreground too, by explicit
+    // request; these are rare enough to deserve the interruption.
+    osNotify(NOTICE_TEXT[what]);
+    reconcileFriends().catch(() => { /* next entry reconciles */ });
+  } else if (what === 'verified') {
+    // MY account just became Verified (admin decision): headline notice plus
+    // the full resync — the Verified BADGE itself arrives through the badge
+    // poll (modal), and offline devices get the server's badge push hint.
+    osNotify(NOTICE_TEXT.verified);
+    home.refreshIdentity?.().catch?.(() => {});
+    badgeNotify.poll().catch(() => {});
+    reconcileFriends().catch(() => {});
   } else {
     client.logger.debug('notice: unhandled what', JSON.stringify(what));
   }

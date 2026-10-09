@@ -1,3 +1,29 @@
+// OS notifications for the page: service-worker notifications first (clicking
+// one focuses an open window or launches the app — the SW's notificationclick
+// owns that), falling back to a page-created Notification with an explicit
+// focus handler. Page-created notifications do NOTHING on click by default,
+// which once made badge notices feel like dead buttons.
+//
+// `text` must be generic (no peer names, no counts beyond "a contact"): the
+// notification may render on the lock screen, and the OS/notification service
+// is not E2EE. The app itself carries the detail once opened.
+export function osNotify(text, tag = 'cocono-activity') {
+  if (typeof Notification !== 'undefined' && Notification.permission !== 'granted') return Promise.resolve();
+  const page = () => {
+    try {
+      const n = new Notification(text, { tag });
+      n.onclick = () => { window.focus(); };
+    } catch { /* engine refused */ }
+  };
+  return (navigator.serviceWorker?.getRegistration?.() ?? Promise.resolve(null))
+    .then((reg) => {
+      if (!reg) { page(); return; }
+      try { reg.showNotification(text, { tag, data: { type: 'app' } }); }
+      catch { page(); }
+    })
+    .catch(page);
+}
+
 // Badge notifications, in ONE place: the poll loop (login + every 60s), the
 // 'badges' control-nudge handling, modal dispatch, and the OS Notification
 // decision. Everything else (message push, the service worker's own blind
@@ -31,7 +57,6 @@ export function initBadgeNotify({ client }) {
   function announce(list) {
     window.dispatchEvent(new CustomEvent('cocono:newbadges', { detail: list }));
     if (!booted) return; // booting / push-click open: modal covers it
-    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     if (document.visibilityState === 'visible') return; // user is looking at the modal
     for (const b of list) raiseBadgeNotice();
   }
@@ -43,18 +68,7 @@ export function initBadgeNotify({ client }) {
   // existing window or opens a fresh one, same as push), falling back to a
   // page Notification with an explicit focus handler.
   function raiseBadgeNotice() {
-    const viaSw = navigator.serviceWorker?.getRegistration?.()
-      .then((reg) => {
-        if (!reg) throw new Error('no active SW');
-        reg.showNotification('You have a new badge', { tag: 'cocono-badge', data: { type: 'badge' } });
-      })
-      .catch(() => {
-        try {
-          const n = new Notification('You have a new badge', { tag: 'cocono-badge' });
-          n.onclick = () => { window.focus(); };
-        } catch { /* engine refused — the modal queue still holds it */ }
-      });
-    return viaSw;
+    return osNotify('You have a new badge', 'cocono-badge');
   }
 
   async function poll() {
