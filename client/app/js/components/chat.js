@@ -1552,9 +1552,9 @@ export function createChat({ client, onHomeRefresh }) {
     // test the .closing CLASS as well as hidden — the synthetic click a
     // swipe leaves behind lands inside this ~140ms window.
     $('btn-chat-back').addEventListener('click', closeChatPane);
-    // Swipe closes the conversation (mobile): a deliberate horizontal drag
-    // either way (>72px, clearly more horizontal than vertical) acts as the
-    // back button. Passive listeners — we never fight the vertical scroll.
+    // Swipe closes the conversation (mobile): a deliberate LEFT drag (>72px,
+    // clearly more horizontal than vertical) acts as the back button — right
+    // swipes do nothing. Passive listeners; we never fight the vertical scroll.
     {
       const view = $('chat-view');
       let sw = null;
@@ -1566,7 +1566,9 @@ export function createChat({ client, onHomeRefresh }) {
         if (!sw || sw.fired || e.touches.length !== 1) return;
         const dx = e.touches[0].clientX - sw.x;
         const dy = e.touches[0].clientY - sw.y;
-        if (Math.abs(dx) > 72 && Math.abs(dx) > Math.abs(dy) * 1.6) sw.fired = true;
+        // LEFT swipes only close (matching the back arrow and the slide-out
+        // direction); a right drag is never a close gesture
+        if (dx < -72 && Math.abs(dx) > Math.abs(dy) * 1.6) sw.fired = true;
       }, { passive: true });
       view.addEventListener('touchend', () => {
         const fired = sw?.fired;
