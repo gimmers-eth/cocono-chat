@@ -926,7 +926,7 @@ body[data-view="blocked"] .page-footer { display: none; }
 }
 
 /* trust-modal evidence table + consequence box */
-.trust-facts { width: 100%; border-collapse: collapse; margin: .25rem 0 .6rem; }
+.trust-facts { width: 100%; border-collapse: collapse; margin: .8rem 0 .9rem; }
 .trust-facts th {
   text-align: left; font-weight: 600; color: var(--muted);
   font-size: .82rem; padding: .28rem .4rem .28rem 0;
@@ -938,6 +938,10 @@ body[data-view="blocked"] .page-footer { display: none; }
 .tf-val.bad { color: var(--danger); }
 .tf-val.dim { color: var(--muted); font-weight: 600; }
 .tf-val.num { color: var(--accent, #7d6ce0); }
+/* the confirm dialog has a single action (cancel is the header ✕) — it
+   belongs centered, not shy in the corner */
+#confirm-modal .row-actions { justify-content: center; }
+
 .tf-consequence {
   margin-top: .8rem; padding: .6rem .8rem;
   border: 1px solid var(--danger); border-radius: 10px;
