@@ -257,27 +257,17 @@ export function initKeyboardFit() {
         }
       }, RIDE_DELAY);
     }
-    // Learn the TALLEST keyboard seen, never a shorter one: the numeric
-    // pad (386) overwriting the letter keyboard (413) made the next
-    // pre-flight under-shrink — which is exactly what provoked iOS's
-    // reveal pan. Over-estimating is the safe direction: a brief gap that
-    // the mirror closes, header stable.
-    if (cover > 80 && cover > cachedKb) {
-      cachedKb = cover;
-      try { localStorage.setItem('cocono.kb-h', String(cover)); } catch { /* private mode */ }
-    }
+    // Learn the TALLEST keyboard seen, never a shorter one (the numeric
+    // pad's 386 overwriting the letter keyboard's 413 made pre-flight
+    // under-shrink — which provoked the reveal scroll). Over-estimating
+    // is the safe direction. The commit is STABILITY-FILTERED (~100ms
+    // unchanged): iOS emits chaotic transient covers mid-transition, and
+    // a max-cache would enshrine a one-frame spike forever.
+    if (cover > 80 && cover > cachedKb) scheduleLearn(cover);
     if (document.activeElement?.id === 'chat-input') pinBottom();
     sample(src);
   }
 
-  // Pre-flight shrink — runs AFTER focus is granted, BEFORE the keyboard
-  // (and its pan decision) arrives. `el` is the focused field: once the
-  // shell fits the future keyboard, WE reveal the field inside its own
-  // scroller (the settings drawer, the auth view) synchronously — iOS only
-  // starts its animated reveal scroll (the shove that drags the header)
-  // when the field is still covered at its check; finding it already in
-  // view, it has nothing to animate. 'nearest' keeps the nudge minimal and
-  // can never scroll the window (the document has nothing to scroll).
   // Native-slide suppression (STANDALONE): at focus, WKWebView animates
   // its OWN contentOffset to "reveal" the first responder — a compositor-
   // level motion that no JS channel observes (device traces: pristine
@@ -318,6 +308,29 @@ export function initKeyboardFit() {
 
   function setScrollRoom(px) {
     root.style.setProperty('--kb-room', `${px}px`);
+  }
+
+  // Stability-filtered cache commit (see apply): a candidate must hold
+  // for LEARN_STABLE_MS before it becomes the cached keyboard height.
+  let learnTimer = 0;
+  let learnVal = 0;
+  const LEARN_STABLE_MS = 100;
+  function scheduleLearn(cover) {
+    if (Math.abs(cover - learnVal) > 8) { // new candidate: restart the clock
+      clearTimeout(learnTimer);
+      learnVal = cover;
+      learnTimer = 0;
+    }
+    if (!learnTimer) {
+      learnTimer = setTimeout(() => {
+        learnTimer = 0;
+        if (learnVal > cachedKb) {
+          cachedKb = learnVal;
+          try { localStorage.setItem('cocono.kb-h', String(learnVal)); } catch { /* private mode */ }
+          sample(`learn:${learnVal}`);
+        }
+      }, LEARN_STABLE_MS);
+    }
   }
 
   // Pre-flight shrink — runs AFTER focus is granted, BEFORE the keyboard
@@ -370,6 +383,45 @@ export function initKeyboardFit() {
       sample(`tap:${t.id || t.tagName}`);
     }
   }, { capture: true, passive: true });
+
+  // FOCUS SURGERY — the research-backed pre-emption (pattern proven by
+  // ios-pwa-keyboard-fix on real devices): Safari runs a PRE-FOCUS
+  // VISIBILITY CHECK on the default mousedown path and predictively
+  // scrolls/pans the viewport BEFORE any focusin handler can re-fit —
+  // that prediction is the native slide every scroll API reported as
+  // pristine (hammer silent, header visibly moving). It cannot be
+  // disabled, only pre-empted: preventDefault kills Safari's path, the
+  // pre-flight fits the shell FIRST, then focus({preventScroll:true})
+  // grants focus with the check never run. Timing matters: mousedown —
+  // NOT click (fires after focus, too late) and NOT pointerdown (fires
+  // before iOS's post-touchend hit-test; moving the field there loses
+  // the focus entirely — field-proven in an earlier round).
+  const TEXTY = new Set(['text', 'search', 'tel', 'email', 'number', 'password', 'url', '']);
+  let surgeryFailed = false;
+  document.addEventListener('mousedown', (e) => {
+    if (surgeryFailed || !IS_IOS) return;
+    const el = e.target;
+    if (!el || el.disabled || el.readOnly) return;
+    const isText = el.tagName === 'TEXTAREA' ||
+      (el.tagName === 'INPUT' && TEXTY.has(el.type ?? 'text'));
+    if (!isText) return;
+    if (el === document.activeElement) return; // caret-placement re-tap: native path
+    e.preventDefault();
+    preflight(el);
+    if (lastCover > 80) el.scrollIntoView?.({ block: 'nearest' }); // focus switch while keyboard up
+    el.focus({ preventScroll: true });
+    sample(`surgery:${el.id || el.tagName}`);
+    // Guard: if the manual focus never summoned a keyboard, STOP
+    // interfering (some contexts reject non-default focus) and blur so
+    // the next tap takes the browser's natural path.
+    setTimeout(() => {
+      if (lastCover <= 80 && document.activeElement === el) {
+        surgeryFailed = true;
+        sample('surgery-nokeys');
+        el.blur();
+      }
+    }, 600);
+  }, { capture: true });
   document.addEventListener('focusin', (e) => {
     sample(`focusin:${e.target?.id || e.target?.tagName}${e.target === tapTarget ? '' : ' (no-tap)'}`);
     const isField = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA');

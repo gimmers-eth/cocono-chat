@@ -189,6 +189,10 @@ img.logo { object-fit: cover; background: none; }
      WITH its Verified sub — a fixed one-line height clipped it */
   min-height: var(--head-h); flex: none; display: flex; align-items: center;
   justify-content: space-between; padding: .35rem 1rem; gap: .6rem;
+  /* Non-scrollable chrome must not be a scroll candidate: iOS otherwise
+     lets a drag here pull the layout viewport (and everything anchored
+     to it) around — research: ios-pwa-keyboard-fix mistake #3. */
+  touch-action: none;
 }
 .me { display: flex; align-items: center; gap: .5rem; min-width: 0; cursor: pointer; border-radius: 10px; padding: .15rem .3rem; }
 .me:hover, .me:focus-visible { background: var(--panel-raised); outline: none; }
@@ -368,6 +372,7 @@ img.own-avatar { border-radius: 50%; }
 .chat-head {
   height: var(--head-h); flex: none; display: flex; align-items: center; gap: .6rem;
   padding: 0 1rem; background: var(--panel); border-bottom: 1px solid var(--border);
+  touch-action: none; /* see .side-head — chrome is not a scroll candidate */
 }
 .chat-peer { display: grid; }
 /* THE name surface is the uname component (userline.js) — inline flow with
