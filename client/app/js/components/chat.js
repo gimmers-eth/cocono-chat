@@ -1040,7 +1040,11 @@ export function createChat({ client, onHomeRefresh }) {
     try {
       await client.setProfile({ displayBadge: id });
       window.dispatchEvent(new CustomEvent('cocono:badges-changed'));
-    } catch { /* offline — poll/picker will resync */ }
+    } catch (err) {
+      // 429 from rapid wearing / offline — the toast names it (silent
+      // catches read as broken buttons)
+      toast(humanError(err), 'error');
+    }
   });
   $('btn-badge-nowear')?.addEventListener('click', closeBadgeModal);
 

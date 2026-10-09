@@ -18,7 +18,7 @@ export const ERROR_TEXT = {
   blocked: 'Your message could not be delivered.',
   self_blocked: 'You blocked this user — unblock them (chat menu or Settings > Relationships) to send messages.',
   verify_required: 'You need to get verified before messaging new people.',
-  rate_limited: 'Too many messages — wait a moment.',
+  rate_limited: 'Too many requests — try again later.',
   not_connected: 'Not connected right now.',
   no_peer_devices: 'That user has no devices to receive.',
   internal: 'Server hiccup — try again.',

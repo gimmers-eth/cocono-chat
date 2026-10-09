@@ -2,7 +2,7 @@
 // list, new-chat launcher and the devices panel (list + approve pairing +
 // theme picker).
 
-import { $, setStatus, fmtTime, confirmModal, openLightbox } from '../ui.js';
+import { $, setStatus, fmtTime, confirmModal, openLightbox, toast } from '../ui.js';
 import { humanError } from '../errors.js';
 import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
@@ -127,7 +127,11 @@ export function createHome({ client, chat, onLogout }) {
           await client.setProfile({ displayBadge: b.id });
           myDisplay = b.id;
           paintMyLine();
-        } catch { /* offline */ }
+        } catch (err) {
+          // rapid badge toggling trips the stage guards — say so plainly
+          // (a silent swallow made 429s look like dead buttons)
+          toast(humanError(err), 'error');
+        }
         renderOwnBadges();
       });
       cSel.append(btn);
@@ -992,7 +996,8 @@ export function createHome({ client, chat, onLogout }) {
     });
 
     $('btn-badge-none')?.addEventListener('click', async () => {
-      try { await client.setProfile({ displayBadge: '' }); myDisplay = ''; } catch { /* offline */ }
+      try { await client.setProfile({ displayBadge: '' }); myDisplay = ''; }
+      catch (err) { toast(humanError(err), 'error'); }
       paintMyLine();
       renderOwnBadges();
     });
