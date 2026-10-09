@@ -54,7 +54,7 @@ const BLOCK_REASON_META = {
 // icon + text as one inline-flex chip; unknown ids degrade to the raw id
 function reasonChip(id) {
   const m = BLOCK_REASON_META[id];
-  if (!m) return `<span class="reason-chip dim">${esc(id ?? 'blocked')}</span>`;
+  if (!m) return `<span class="reason-chip dim" title="this wall predates the reason field — re-block to state one">${esc(id ?? 'no reason stored')}</span>`;
   return `<span class="reason-chip ${m.cls}" title="${esc(m.text)}">${m.icon}${esc(m.text)}</span>`;
 }
 
@@ -229,7 +229,7 @@ async function loadBlockers() {
           <thead><tr><th>Blocked by</th><th>Reason (the blocker’s words)</th><th>When</th></tr></thead>
           <tbody>${blockers.map((r) => `<tr class="${r.reason === 'scam' ? 'rel-blocked' : ''}">
             <td><button class="linkish" data-view-user="${esc(r.ul)}">@${esc(r.ul)}</button>${r.premium ? ' <span class="badge gold-badge">★</span>' : ''}</td>
-            <td>${r.reason ? reasonChip(r.reason) : '<span class="dim">no reason stored</span>'}</td>
+            <td>${r.reason ? reasonChip(r.reason) : '<span class="dim" title="this wall predates the reason field — re-block to state one">no reason stored</span>'}</td>
             <td class="dim">${esc(when(r.at))}</td>
           </tr>`).join('')}</tbody>
         </table>`
