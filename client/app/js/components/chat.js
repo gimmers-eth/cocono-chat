@@ -950,7 +950,7 @@ export function createChat({ client, onHomeRefresh }) {
         trusted ? 'Social: Trusted' : 'Social: Not yet trusted',
         trusted
           ? 'Other people vouch for this account. Every vouch is a risk for the voucher — scammer contacts get their trustors reported and removed.'
-          : 'Nobody vouches for this account yet. Be extra careful: trust must be earned here, not assumed.');
+          : 'This user has not gained enough social trust just yet. Be extra careful: trust is earned, not assumed.');
       rep.textContent = `Vouched by ${stats.addedBy} added · ${stats.verifiedBy} verified · ${stats.trustedBy} trusted`;
       rep.hidden = false;
       coco.textContent = `CoCo: ${stats.coco}`;
