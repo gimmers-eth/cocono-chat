@@ -1130,7 +1130,9 @@ export function createHome({ client, chat, onLogout }) {
       th.textContent = h;
       thead.append(th);
     }
-    table.append(document.createElement('thead')).append(thead);
+    const theadEl = document.createElement('thead');
+    theadEl.append(thead);
+    table.append(theadEl);
     const tbody = document.createElement('tbody');
     for (const r of rows) {
       const tr = document.createElement('tr');
