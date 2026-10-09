@@ -36,6 +36,13 @@ export function toast(message, kind = '') {
   if (!message) { el.hidden = true; return; } // empty = dismiss, never show
   el.textContent = message;
   el.className = `toast ${kind}`;
+  // iOS keyboards cover the LAYOUT viewport, so a body-level fixed pill can
+  // sit under the keys (this used to be solved by living inside the chat
+  // pane — impossible now: toasts must show with no chat open). Measure the
+  // visual viewport and lift the pill above any keyboard actually shown.
+  const vv = window.visualViewport;
+  const kb = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
+  el.style.bottom = kb > 4 ? `calc(.9rem + ${kb}px)` : '';
   el.hidden = false;
   toastTimer = setTimeout(() => { el.hidden = true; }, 4500);
 }

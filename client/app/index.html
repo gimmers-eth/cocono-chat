@@ -160,11 +160,6 @@
                  autocomplete="off" maxlength="4096" />
           <button id="btn-send" class="btn btn-accent round" title="Send" data-icon="send"></button>
         </footer>
-        <!-- transient toast (errors & confirmations) — lives INSIDE the chat
-             view so it floats above the composer even with the iOS keyboard
-             open (the shell shrinks to the visual viewport; fixed elements
-             would hide under the keys) -->
-        <p id="toast" class="toast" hidden role="status"></p>
       </section>
     </main>
   </div>
@@ -543,5 +538,11 @@
   <img id="lightbox-img" class="lightbox" alt="" hidden />
 
   <script type="module" src="/js/main.js"></script>
+  <!-- Transient toast: BODY level — the chat view (and the whole app view)
+       toggle [hidden], and a fixed element inside a display:none ancestor
+       still vanishes. Toasts belong to no pane: they must show with no chat
+       open, on the auth screens, over drawers. ui.js keeps it above the iOS
+       keyboard by measuring the visual viewport. -->
+  <p id="toast" class="toast" hidden role="status"></p>
 </body>
 </html>
