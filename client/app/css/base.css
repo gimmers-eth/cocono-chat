@@ -1,4 +1,4 @@
-/* ==========================================================================
+/* ==========================================================================body { position: fixed; inset: 0; overflow: hidden; height: var(--app-h, 100dvh); }
    cocono-chat — structural stylesheet.
    Never hard-codes colors: everything visual comes from the theme tokens
    below (defaults = Dark). A theme file (themes/<id>/theme.css) overrides
