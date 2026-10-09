@@ -480,10 +480,10 @@ export function createChat({ client, onHomeRefresh }) {
 
   function forwardCurrentMsg() {
     if (!msgId) return;
-    const id = msgId; // capture BEFORE close: closeMsgModal() nulls the state
-    const text = $('msg-modal-text').textContent ?? '';
-    closeMsgModal();
-    openForward(id, text);
+    // the OLD forward was a second modal, so this closed the message modal
+    // first. Forwarding is now the panel's SECOND CAROUSEL SLIDE: the panel
+    // stays open and the track slides — closing it here hid everything.
+    openForward(msgId, $('msg-modal-text').textContent ?? '');
   }
 
   // --- chat-options modal (header ⋮): clear chat today; report/block land

@@ -902,17 +902,21 @@ body[data-view="blocked"] .page-footer { display: none; }
    visible while the settings drawer / profile sheets / modals (z 50) and the
    lightbox (z 70) are on screen — the toast is the status channel, so it
    floats above all of them (75). */
-/* ---- two-pane message panel (view <-> forward slide in ONE side menu) ----
-   Panes are side-by-side on a 200% track; showing forward slides the track
-   left by exactly one pane. Cancel slides it back right. */
-.msg-panes {
-  display: flex; width: 100%; height: 100%;
+/* ---- message panel: fixed-height carousel, two stacked slides ----
+   The slides share ONE box (absolute, inset 0) whose height the panel
+   dictates; only the transforms animate. Forward enters from the right and
+   pushes the message slide LEFT; cancel reverses exactly (forward exits
+   right). No track-width gymnastics — a real carousel. */
+#msg-modal { display: flex; flex-direction: column; overflow: hidden; }
+.msg-panes { position: relative; flex: 1 1 auto; min-height: 0; }
+.msg-pane {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; gap: .35rem;
   transition: transform .24s cubic-bezier(.2, .8, .3, 1);
 }
-.msg-panes.showing-fwd { transform: translateX(-100%); }
-.msg-pane { flex: none; width: 100%; min-width: 0; display: flex; flex-direction: column; gap: .35rem; }
-#msg-modal { display: flex; flex-direction: column; overflow: hidden; }
-#msg-modal .msg-panes { flex: 1; min-height: 0; }
+.msg-pane-fwd { transform: translateX(100%); }
+.msg-panes.showing-fwd .msg-pane-view { transform: translateX(-100%); }
+.msg-panes.showing-fwd .msg-pane-fwd { transform: translateX(0); }
 /* the message text scrolls and takes the rest of the page (pane A too) */
 #msg-modal .msg-modal-text { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .fwd-preview { flex: none; max-height: 22dvh; overflow-y: auto; }
