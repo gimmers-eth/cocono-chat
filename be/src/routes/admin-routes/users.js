@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { fail } from '../shared.js';
-import { cleanupAccountState, purgeFriendReferences } from '../../lib/accountState.js';
+import { deleteAccountFully } from '../../lib/accountState.js';
 import { createNotifier } from '../../lib/notify.js';
 import { pushBadgeHint } from '../../lib/push.js';
 import { effectiveLimit, readLimitsDoc } from '../../lib/limits.js';
@@ -14,7 +14,7 @@ const MAX_DEVICES_CAP = 1000;
 
 // GET /api/admin/users, PATCH max-devices, DELETE user, DELETE device,
 // PUT verified (identity-verification toggle), GET/DELETE id-doc (review).
-export default async function usersRoutes(app, { users, redis, config, messages, idDocs, profiles, settings }) {
+export default async function usersRoutes(app, { users, redis, config, messages, idDocs, profiles, settings, diagnostics }) {
   // account-review outcomes are invisible to the reviewed user otherwise —
   // content-free 'identity' nudges (lib/notify.js) make the app re-pull
   const { notify: notifyAccount, notifyPeers } = createNotifier({ redis, users });
@@ -327,17 +327,11 @@ export default async function usersRoutes(app, { users, redis, config, messages,
 
   app.delete('/api/admin/users/:username', async (request, reply) => {
     const ul = request.params.username.toLowerCase();
-    const { deletedCount } = await users.deleteOne({ ul });
-    if (!deletedCount) {
-      return fail(reply, 'unknown_account', 'No such user', 404);
-    }
-    await idDocs.deleteOne({ ul }); // never orphan an ID photo
-    await profiles.deleteOne({ ul });
-    await cleanupAccountState(redis, ul);
-    await purgeFriendReferences(users, ul, redis);
-    if (messages) {
-      await messages.deleteMany({ $or: [{ 'to.ul': ul }, { 'from.ul': ul }] });
-    }
+    const existing = await users.findOne({ ul }, { projection: { _id: 1 } });
+    if (!existing) return fail(reply, 'unknown_account', 'No such user', 404);
+    // THE full teardown (friends refs + OTHERS' blocked/blockReasons walls,
+    // diagnostics, photos, messages, redis) — one helper, no per-path gaps
+    await deleteAccountFully({ users, profiles, idDocs, messages, diagnostics, redis }, ul);
     return { deleted: ul };
   });
 
@@ -360,12 +354,7 @@ export default async function usersRoutes(app, { users, redis, config, messages,
     // reserved usernames). Bearer tokens need no explicit revocation — the
     // hook re-checks membership and the account is gone.
     if (after.devices.length === 0) {
-      await users.deleteOne({ ul });
-      await idDocs.deleteOne({ ul }); // never orphan an ID photo
-      await profiles.deleteOne({ ul });
-      await cleanupAccountState(redis, ul);
-      await purgeFriendReferences(users, ul, redis);
-      if (messages) await messages.deleteMany({ $or: [{ 'to.ul': ul }, { 'from.ul': ul }] });
+      await deleteAccountFully({ users, profiles, idDocs, messages, diagnostics, redis }, ul);
       return { removed: deviceId, devices: 0, accountDeleted: true };
     }
     return { removed: deviceId, devices: after.devices.length };

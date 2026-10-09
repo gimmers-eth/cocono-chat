@@ -5,7 +5,7 @@ import { importRawPublicKey, importRawX25519PublicKey, verifySignature } from '.
 import { rateLimit } from '../../lib/rateLimit.js';
 import { isValidUsername, isValidDeviceId } from '../../lib/username.js';
 import { fail, limited, requireAuth, isReplayedSignature, payloadTooOld } from '../shared.js';
-import { cleanupAccountState, purgeFriendReferences } from '../../lib/accountState.js';
+import { deleteAccountFully } from '../../lib/accountState.js';
 import { effectiveLimit } from '../../lib/limits.js';
 import { effectiveMaxDevices } from '../../lib/devicePolicy.js';
 
@@ -42,7 +42,7 @@ function validateDevicePayload(body) {
   return null;
 }
 
-export default async function deviceRoutes(app, { users, redis, config, messages, profiles, settings }) {
+export default async function deviceRoutes(app, { users, redis, config, messages, profiles, settings, idDocs, diagnostics }) {
   // POST /api/devices/enroll — a new device asks to join an existing account.
   // Body is shaped like signup: { u, p, a, d, t, s }, signed by the NEW
   // device's key. An already-registered device must then approve the 6-digit
@@ -279,11 +279,9 @@ export default async function deviceRoutes(app, { users, redis, config, messages
     // Last device leaving => the account is deleted outright (no orphaned
     // docs, no reserved usernames); its queues and Redis state are swept.
     if (user.devices.length === 0) {
-      await users.deleteOne({ ul });
-      await cleanupAccountState(redis, ul);
-      await purgeFriendReferences(users, ul, redis);
-      if (profiles) await profiles.deleteOne({ ul }); // bio + avatar die too
-      await messages.deleteMany({ $or: [{ 'to.ul': ul }, { 'from.ul': ul }] });
+      // full teardown incl. ID photo, diagnostics and OTHERS' blocks/
+      // blockReasons aimed at this name (the old inline purge missed those)
+      await deleteAccountFully({ users, profiles, idDocs, messages, diagnostics, redis }, ul);
       return { removed: deviceId, devices: 0, accountDeleted: true };
     }
     return { removed: deviceId, devices: user.devices.length };

@@ -8,6 +8,7 @@ import { createPeerSuggestions, makeTrustDecorator } from './peers.js';
 import { iconEl } from '../icons.js';
 import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, clearAllMessages, loadPeerVerifications, loadPeerPremiums, loadPeerAvatars, rememberPeerAvatar, rememberPeerVerified, rememberPeerChip, loadPeerChips, AVATARS_EVENT, FRIENDS_EVENT, loadPeerBlocked, saveBlockedSet } from '../store.js';
 import { blockUserWithConfirm, unblockUser, blockReasonLabel, blockReasonIcon } from '../blocks.js';
+import { purgeLocalAccount } from '../accountPurge.js';
 import { mountLine, avatarStack, setAvatar, verifiedSubEl, doubleLine } from './userline.js';
 import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl } from './peername.js';
 import { guessDeviceName, humanPlatform } from '../devices.js';
@@ -1010,8 +1011,20 @@ export function createHome({ client, chat, onLogout }) {
         danger: true,
       });
       if (!ok) return;
+      // capture BEFORE the call: removing the CURRENT device makes the SDK
+      // drop identity immediately, so client.username is null afterwards
+      const myUl = client.username;
       try {
-        await client.removeDevice(deviceId);
+        const res = await client.removeDevice(deviceId);
+        if (res?.accountDeleted) {
+          // THIS was the last device: the server just ran deleteAccountFully.
+          // Mirror it locally — scrub the whole account from this browser
+          // (transcript + mirrors + keys) and drop to the sign-in screen. No
+          // device list to re-render: the account is gone.
+          await purgeLocalAccount(client, myUl);
+          onLogout();
+          return;
+        }
         setStatus($('drawer-status'), `Device ${deviceId.slice(0, 8)}… removed.`);
       } catch (err) {
         setStatus($('drawer-status'), `Could not remove device: ${err?.message ?? err}`);

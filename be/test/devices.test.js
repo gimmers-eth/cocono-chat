@@ -13,6 +13,8 @@ const LIMITS = {
   verifyAccountLimit: 1000,
   deviceEnrollIpLimit: 1000,
   deviceApproveAccountLimit: 1000,
+  friendsIpLimit: 1000,
+  friendsChangeIpLimit: 1000,
 };
 
 async function signupUser(app, client, u, d) {
@@ -458,6 +460,67 @@ test('device removal: detaching the LAST device deletes the account outright', a
     // The old JWT is dead (account gone -> membership re-check).
     const me = await app.inject({ method: 'GET', url: '/api/me', headers: { authorization: `Bearer ${token}` } });
     assert.equal(me.statusCode, 401);
+  } finally {
+    await teardown();
+  }
+});
+
+test('device removal: last-device detach sweeps EVERY trace (blocks, reasons, diagnostics, profile, id-doc)', async () => {
+  const { app, mongo, teardown } = await setupApp(LIMITS);
+  const users = mongo.db.collection('users');
+  try {
+    const victim = 'gimmers';
+    const c1 = makeClient();
+    const d1 = 'device-last-0001';
+    assert.equal((await signupUser(app, c1, victim, d1)).statusCode, 201);
+    const vTok = await getToken(app, c1, victim, d1);
+
+    // someone who BLOCKED the victim (wall lives on the blocker's doc, with a
+    // stated reason) — the reverse references deleteAccountFully must purge
+    const wallaby = makeClient();
+    const wd = 'device-wall-0001';
+    assert.equal((await signupUser(app, wallaby, 'wallaby', wd)).statusCode, 201);
+    const wTok = await getToken(app, wallaby, 'wallaby', wd);
+    const block = await app.inject({
+      method: 'PUT', url: `/api/me/friends/${victim}/block`,
+      headers: { authorization: `Bearer ${wTok}` }, payload: { r: 'scam' },
+    });
+    assert.equal(block.statusCode, 200, 'wallaby blocks gimmers');
+
+    // seed the victim's scattered data across every collection the sweep owns
+    await mongo.db.collection('profiles').insertOne({ ul: victim, bio: 'hi' });
+    await mongo.db.collection('id_docs').insertOne({ ul: victim, contentType: 'image/jpeg', data: 'x' });
+    await mongo.db.collection('diagnostics').insertOne({ account: victim, report: 'boom', ts: new Date() });
+    await mongo.db.collection('messages').insertOne({
+      'from.ul': victim, from: { fd: d1 }, 'to.ul': 'wallaby', to: { dv: wd }, env: {}, ts: new Date(),
+    });
+
+    // pre-delete: blocker's wall really references the victim
+    const beforeWall = await users.findOne({ ul: 'wallaby' });
+    assert.deepEqual(beforeWall.blocked, [victim]);
+    assert.equal(beforeWall.blockReasons[victim].r, 'scam');
+
+    // detach the victim's LAST device -> accountDeleted + full teardown
+    const res = await app.inject({
+      method: 'DELETE', url: `/api/devices/${d1}`, headers: { authorization: `Bearer ${vTok}` },
+    });
+    assert.equal(res.json().accountDeleted, true);
+
+    // NO orphans anywhere the victim touched
+    assert.equal(await users.findOne({ ul: victim }), null, 'account gone');
+    assert.equal(await mongo.db.collection('profiles').findOne({ ul: victim }), null, 'profile gone');
+    assert.equal(await mongo.db.collection('id_docs').findOne({ ul: victim }), null, 'id photo gone');
+    assert.equal(await mongo.db.collection('diagnostics').countDocuments({ account: victim }), 0, 'diagnostics gone');
+    assert.equal(await mongo.db.collection('messages').countDocuments({ 'from.ul': victim }), 0, 'messages gone');
+
+    // the blocker's wall against the dead name is swept (blocked[] + reason)
+    const afterWall = await users.findOne({ ul: 'wallaby' });
+    assert.ok(!(afterWall.blocked ?? []).includes(victim), 'blocked list purged');
+    assert.equal(afterWall.blockReasons?.[victim], undefined, 'block reason purged');
+
+    // username released — a fresh signup must NOT inherit any cached trace
+    const re = await signupUser(app, makeClient(), victim, 'device-fresh-002');
+    assert.equal(re.statusCode, 201, 'username free again');
   } finally {
     await teardown();
   }

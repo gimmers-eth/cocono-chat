@@ -10,6 +10,7 @@ import { createAuth } from './components/auth.js';
 import { createHome } from './components/home.js';
 import { createChat } from './components/chat.js';
 import { setScope, setFriends, loadFriends } from './store.js';
+import { purgeLocalAccount } from './accountPurge.js';
 import { initKeyboardFit } from './keyboard.js';
 import { mountDiagnostics } from './diag.js';
 import { applyIcons } from './icons.js';
@@ -330,8 +331,15 @@ client.on('notice', ({ what, by }) => {
 // Permanent WS rejection (detached device / deleted account): surface it —
 // without this the open app looks alive but deaf.
 client.on('authFailed', ({ error }) => {
-  setStatus($('auth-status'), error.message, true);
-  showAuth();
+  // A live session the server no longer recognises (device detached, or the
+  // whole account removed). This device's credentials are already invalid, so
+  // its cached copy of the account is orphaned — scrub it. (The username is
+  // read BEFORE forget() drops the identity.)
+  const gone = client.username;
+  purgeLocalAccount(client, gone).finally(() => {
+    setStatus($('auth-status'), error.message, true);
+    showAuth();
+  });
 });
 
 try {

@@ -57,3 +57,29 @@ export async function purgeFriendReferences(users, deletedUl, redis) {
     { $pull: { friends: deletedUl } },
   );
 }
+
+// THE account teardown — every deletion entry point (admin user delete,
+// admin removing the LAST device, a user detaching the last device) funnels
+// through here so no path can orphan a trace of the account:
+//   * friends entries everywhere (with the 'gone' nudge BEFORE pulling)
+//   * OTHER accounts' walls against this username: blocked lists AND the
+//     blockReasons they stated (a dead account must not linger in anyone's
+//     Relationships view — and re-registering a name must never inherit
+//     old blocks or reasons aimed at its previous owner)
+//   * own profile+avatar doc, ID photo, ALL messages both directions,
+//     diagnostics reports, Redis state (nonces, enrollments, limiters)
+//   * the account doc itself last (the reverse scans read from it)
+export async function deleteAccountFully({ users, profiles, idDocs, messages, diagnostics, redis }, ul) {
+  await purgeFriendReferences(users, ul, redis);
+  await users.updateMany({ blocked: ul }, { $pull: { blocked: ul } });
+  await users.updateMany(
+    { [`blockReasons.${ul}`]: { $exists: true } },
+    { $unset: { [`blockReasons.${ul}`]: '' } },
+  );
+  if (diagnostics) await diagnostics.deleteMany({ account: ul });
+  if (idDocs) await idDocs.deleteOne({ ul });
+  if (profiles) await profiles.deleteOne({ ul });
+  if (messages) await messages.deleteMany({ $or: [{ 'to.ul': ul }, { 'from.ul': ul }] });
+  await cleanupAccountState(redis, ul);
+  await users.deleteOne({ ul });
+}
