@@ -748,16 +748,45 @@ export function createChat({ client, onHomeRefresh }) {
     // (live from the stats endpoint) right where the decision is made
     let stats = null;
     try { stats = await client.userStats(currentPeer); } catch { /* offline: unknown */ }
-    const app = !peerIdentityKnown ? 'App: unknown'
-      : peerIdentityVerified ? 'App: Verified' : 'App: UNVERIFIED';
-    const social = stats ? (stats.socialTrusted ? 'Social: Trusted' : 'Social: Untrusted') : 'Social: unknown';
+    // Facts table (green/red pills, at a glance) instead of the old dot-line:
+    // this is the evidence for a trust DECISION, it should read like one.
+    const fact = (label, value, cls) => {
+      const tr = document.createElement('tr');
+      const th = document.createElement('th');
+      th.textContent = label;
+      const td = document.createElement('td');
+      const v = document.createElement('span');
+      v.className = `tf-val ${cls}`;
+      v.textContent = value;
+      td.append(v);
+      tr.append(th, td);
+      return tr;
+    };
+    const facts = document.createElement('table');
+    facts.className = 'trust-facts';
+    facts.append(
+      fact('App', peerIdentityKnown ? (peerIdentityVerified ? '✓ Verified' : '✗ Unverified') : '· Unknown',
+        !peerIdentityKnown ? 'dim' : peerIdentityVerified ? 'ok' : 'bad'),
+      fact('Social', stats ? (stats.socialTrusted ? '✓ Trusted' : '✗ Untrusted') : '· Unknown',
+        stats ? (stats.socialTrusted ? 'ok' : 'bad') : 'dim'),
+      fact('CoCo', stats ? String(stats.coco) : '—', stats ? 'num' : 'dim'),
+    );
+    const bodyP = document.createElement('p');
+    bodyP.className = 'muted';
+    bodyP.textContent = 'Trusting someone is also vouching for them on this platform — your '
+      + 'vouch counts toward this profile’s reputation. Only trust people you '
+      + 'actually know, after comparing safety numbers.';
+    const wrap = document.createElement('div');
+    wrap.append(facts, bodyP);
+    // the consequence sits BELOW the button, in a box: read it last, right
+    // where the commitment happens
+    const box = document.createElement('div');
+    box.className = 'tf-consequence';
+    box.textContent = 'Only trust people you know. Trusting scammers can get YOU banned.';
     const ok = await confirmModal({
       title: `Trust ${currentPeer}?`,
-      subline: `${app} · ${social}${stats ? ` · CoCo: ${stats.coco}` : ''}`,
-      body: 'Trusting someone is also vouching for them on this platform — your '
-        + 'vouch counts toward this profile’s reputation. Only trust people you '
-        + 'actually know, after comparing safety numbers.',
-      warning: 'Only trust people you know. Trusting scammers can get YOU banned.',
+      bodyEl: wrap,
+      footerEl: box,
       okLabel: 'I know and trust them', danger: true,
     });
     if (!ok) return;
