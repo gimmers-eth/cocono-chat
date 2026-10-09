@@ -560,8 +560,12 @@ img.own-avatar { border-radius: 50%; }
 /* sheet header: photo beside name+joined+description, whole block above Safety */
 .profile-hero { align-items: center; text-align: left; gap: 1rem; margin: .5rem 0 1rem; }
 .profile-hero .profile-nameline { font-size: 1.05rem; }
-/* profile hero avatars inherit the base .avatar size — same as the
-   sidebar head, chat head and conversation rows */
+/* profile surfaces (sheet, preview, settings hero) render the avatar a few
+   px larger — the hero has the vertical room (name line + sub line) and the
+   zoom magnifier corner wants breathing space. Sidebar/chat/rows stay at
+   the base .avatar size. */
+.profile-id .avatar-stack .avatar { width: 44px; height: 44px; font-size: 1.15rem; }
+.profile-id .avatar-stack img.avatar { border-radius: 50%; object-fit: cover; }
 .profile-preview-row { margin-top: 1.1rem; }
 .profile-preview-row .btn { margin-left: auto; margin-right: auto; }
 .profile-idtext { display: flex; flex-direction: column; min-width: 0; }
