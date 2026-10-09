@@ -236,3 +236,10 @@ details.diag summary { display: flex; gap: 0.6rem; align-items: center; flex-wra
 .badge-hero-art { text-align: center; margin: .3rem 0 .6rem; }
 .badge-modal-blurb { line-height: 1.45; }
 .badge-modal-facts { margin: .2rem 0 .4rem; align-items: center; }
+
+/* block-reason chips: glyph + the blocker's stated reason (colored by kind) */
+.reason-chip { display: inline-flex; align-items: center; gap: .4em; }
+.reason-icon { width: 1em; height: 1em; flex: none; }
+.reason-nospeak { color: #b78b57; }
+.reason-unknown { color: #8a93a6; }
+.reason-scam { color: #e5484d; font-weight: 700; }

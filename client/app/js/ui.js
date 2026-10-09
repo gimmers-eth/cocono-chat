@@ -80,6 +80,11 @@ export function confirmModal({ title, body, bodyEl, okLabel = 'Confirm', danger 
   const ok = $('btn-confirm-ok');
   ok.textContent = okLabel;
   ok.classList.toggle('btn-danger', danger);
+  // EVERY modal opens from a clean OK state: a previous validated modal
+  // (block reason) may have left the button disabled — the flag belongs to
+  // the CURRENT modal only. validate() below re-disables instantly if this
+  // modal's own predicate says so.
+  ok.disabled = false;
   if (validate) {
     // drop any PREVIOUS validate wiring before hooking: stale listeners on
     // the persistent #confirm-body would fire against an old modal's state
@@ -96,6 +101,10 @@ export function confirmModal({ title, body, bodyEl, okLabel = 'Confirm', danger 
     const done = (value) => {
       overlay.hidden = true;
       modal.hidden = true;
+      // leave NO residue for the next modal: drop the change-listener and
+      // hand the disabled flag back neutral
+      clearValidateHook();
+      ok.disabled = false;
       ok.removeEventListener('click', onOk);
       $('btn-confirm-cancel').removeEventListener('click', onCancel);
       overlay.removeEventListener('click', onCancel);

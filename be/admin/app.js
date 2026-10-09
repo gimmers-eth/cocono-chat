@@ -39,12 +39,24 @@ const fmtDuration = (sec) => {
 };
 const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-// mirrors the client's block-reason enum (ids enforced by the server)
-const BLOCK_REASON_TEXT = {
-  nospeak: 'does not want to speak to them',
-  unknown: 'does not know them',
-  scam: 'reports a scam attempt',
+// mirrors the client's block-reason enum (ids enforced by the server).
+// Glyphs mirror the client's FA choices (message / circle-question /
+// warning-triangle); the panel carries no font dependency, so they are
+// inline SVG.
+const BLOCK_REASON_META = {
+  nospeak: { text: 'does not want to speak to them', cls: 'reason-nospeak', icon:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="reason-icon" aria-hidden="true"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1.5 0-2.9-.38-4.11-1.05L3 20l1.05-5.39A8.5 8.5 0 1 1 21 11.5Z"/></svg>' },
+  unknown: { text: 'does not know them', cls: 'reason-unknown', icon:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="reason-icon" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' },
+  scam: { text: 'reports a scam attempt', cls: 'reason-scam', icon:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="reason-icon" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' },
 };
+// icon + text as one inline-flex chip; unknown ids degrade to the raw id
+function reasonChip(id) {
+  const m = BLOCK_REASON_META[id];
+  if (!m) return `<span class="reason-chip dim">${esc(id ?? 'blocked')}</span>`;
+  return `<span class="reason-chip ${m.cls}" title="${esc(m.text)}">${m.icon}${esc(m.text)}</span>`;
+}
 
 function renderLimits(limits) {
   const body = $('limits-body');
@@ -151,11 +163,16 @@ function showUserTab(tab) {
     t.classList.toggle('active', on);
     t.setAttribute('aria-selected', String(on));
   }
-  $('user-panel-body').hidden = tab === 'relations';
+  $('user-panel-body').hidden = tab === 'relations' || tab === 'blockers';
   $('user-relations').hidden = tab !== 'relations';
+  $('user-blockers').hidden = tab !== 'blockers';
   if (tab === 'relations') {
     loadRelations();
-    return; // the sections dispatcher doesn't own this tab
+    return; // the sections dispatcher doesn't own these tabs
+  }
+  if (tab === 'blockers') {
+    loadBlockers();
+    return;
   }
   renderPanel();
 }
@@ -185,13 +202,40 @@ async function loadRelations() {
           <tbody>${relationships.map((r) => `<tr class="${r.blocks || r.blockedBy ? 'rel-blocked' : ''}">
             <td><button class="linkish" data-view-user="${esc(r.ul)}">@${esc(r.ul)}</button>${r.premium ? ' <span class="badge gold-badge">★</span>' : ''}</td>
             <td>${mark(r.added)}</td><td>${mark(r.theyAddedMe)}</td><td>${mark(r.verified)}</td><td>${mark(r.trust)}</td>
-            <td>${r.blocks ? '<span class="rel-block" title="' + esc(BLOCK_REASON_TEXT[r.blockReason] ?? 'blocked') + '">⛔ ' + esc(BLOCK_REASON_TEXT[r.blockReason] ?? 'blocked') + '</span>' : '<span class="dim">—</span>'}</td>
-            <td>${r.blockedBy ? '<span class="rel-block" title="blocked by @' + esc(r.ul) + '">⛔</span>' : '<span class="dim">—</span>'}</td>
+            <td>${r.blocks ? '<span class="rel-block" title="blocked by this account">⛔</span> ' + reasonChip(r.blockReason) : '<span class="dim">—</span>'}</td>
+            <td>${r.blockedBy ? '<span class="rel-block" title="this account is walled off here">⛔</span>' : '<span class="dim">—</span>'}</td>
           </tr>`).join('')}</tbody>
         </table>`
       : '<p class="dim">No relationships yet — this account has added nobody, and nobody has added it.</p>';
   } catch (err) {
     el.innerHTML = `<p class="dim">Relationships failed: ${esc(err.message)}</p>`;
+  }
+}
+
+// "Blocked by": every account that walled this one off, with the reason the
+// blocker chose at block time (stored on THEIR doc) and when. Reasons are
+// the blocker's stated opinion — shown as said, verdicts belong to the
+// operator; scam claims are highlighted.
+async function loadBlockers() {
+  const el = $('user-blockers');
+  if (!selectedUl) return;
+  const ul = selectedUl;
+  try {
+    const { blockers } = await api(`/api/admin/users/${encodeURIComponent(ul)}/blockers`);
+    if (ul !== selectedUl || userTab !== 'blockers') return; // stale response guard
+    const when = (v) => (v ? new Date(v).toLocaleDateString() : '—');
+    el.innerHTML = blockers.length
+      ? `<table class="rel-table">
+          <thead><tr><th>Blocked by</th><th>Reason (the blocker’s words)</th><th>When</th></tr></thead>
+          <tbody>${blockers.map((r) => `<tr class="${r.reason === 'scam' ? 'rel-blocked' : ''}">
+            <td><button class="linkish" data-view-user="${esc(r.ul)}">@${esc(r.ul)}</button>${r.premium ? ' <span class="badge gold-badge">★</span>' : ''}</td>
+            <td>${r.reason ? reasonChip(r.reason) : '<span class="dim">no reason stored</span>'}</td>
+            <td class="dim">${esc(when(r.at))}</td>
+          </tr>`).join('')}</tbody>
+        </table>`
+      : `<p class="dim">Nobody has blocked @${esc(ul)}.</p>`;
+  } catch (err) {
+    el.innerHTML = `<p class="dim">Blockers failed: ${esc(err.message)}</p>`;
   }
 }
 
@@ -347,6 +391,7 @@ const PANEL_SECTIONS = {
     </div>`,
 
   relations: () => '',
+  blockers: () => '',
 };
 
 // Account-scoped limiters for the user panel's limits table (IP-subject
@@ -511,6 +556,7 @@ async function refresh() {
     lastBadgeDefs = badgeDefs.badges ?? [];
     renderUsers(users);
     if (!$('user-panel').hidden && userTab === 'relations') loadRelations();
+    if (!$('user-panel').hidden && userTab === 'blockers') loadBlockers();
     renderDiags(diags);
     renderBranding(branding);
     renderOps(ops);

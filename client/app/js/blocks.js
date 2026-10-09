@@ -5,14 +5,20 @@
 // where it powers the blocker's recall in Settings and admin context.
 // The blocked party never sees any of it.
 import { confirmModal, toast } from './ui.js';
+import { iconEl } from './icons.js';
 import { humanError } from './errors.js';
 import { rememberPeerBlocked, friendDel } from './store.js';
 
 export const BLOCK_REASONS = [
-  ['nospeak', (p) => `I don’t want to speak to @${p}`],
-  ['unknown', (p) => `I don’t know @${p}`],
-  ['scam', (p) => `@${p} is trying to scam me`],
+  ['nospeak', (p) => `I don’t want to speak to @${p}`, 'reasonNospeak'],
+  ['unknown', (p) => `I don’t know @${p}`, 'reasonUnknown'],
+  ['scam', (p) => `@${p} is trying to scam me`, 'reasonScam'],
 ];
+
+/** The reason's glyph as an <i> element (choice list + recall pills share
+    the same icon language as the admin panel's mirrored SVGs). */
+export const blockReasonIcon = (id) =>
+  iconEl(BLOCK_REASONS.find(([k]) => k === id)?.[2] ?? 'ban');
 
 export const blockReasonLabel = (id, peer) =>
   (BLOCK_REASONS.find(([k]) => k === id)?.[1] ?? (() => `blocked @${peer}`))(peer);
@@ -30,7 +36,7 @@ export async function blockUserWithConfirm(client, peer) {
     radio.name = 'block-reason';
     radio.value = id;
     radio.addEventListener('change', () => { chosen.r = id; list.dispatchEvent(new Event('change')); });
-    label.append(radio, document.createTextNode(` ${mk(ul)}`));
+    label.append(radio, iconEl(BLOCK_REASONS.find(([k]) => k === id)?.[2] ?? 'ban', 'reason-icon'), document.createTextNode(` ${mk(ul)}`));
     list.append(label);
   }
   const ok = await confirmModal({

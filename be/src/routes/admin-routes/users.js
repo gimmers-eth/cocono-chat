@@ -251,6 +251,30 @@ export default async function usersRoutes(app, { users, redis, config, messages,
     return { ul, relationships: rows };
   });
 
+  // GET /api/admin/users/:username/blockers — who built a wall AROUND this
+  // account, and why. The reasons live on the BLOCKER's doc (privacy), so
+  // this is the reverse scan: Mongo's array-contains match on `blocked`
+  // finds every doc naming this ul in one indexed query.
+  app.get('/api/admin/users/:username/blockers', async (request, reply) => {
+    const ul = request.params.username.toLowerCase();
+    const me = await users.findOne({ ul }, { projection: { _id: 1 } });
+    if (!me) return fail(reply, 'unknown_account', 'No such user', 404);
+    const docs = await users
+      .find({ blocked: ul }, { projection: { ul: 1, blockReasons: 1, premium: 1 } })
+      .toArray();
+    const rows = docs.map((d) => ({
+      ul: d.ul,
+      premium: d.premium === true,
+      reason: d.blockReasons?.[ul]?.r ?? null,
+      at: d.blockReasons?.[ul]?.at ?? null,
+    }));
+    // newest walls first (a fresh scam block is the interesting one);
+    // no-time rows sink alphabetically
+    rows.sort((a, b) => (b.at ? new Date(b.at).getTime() : 0) - (a.at ? new Date(a.at).getTime() : 0)
+      || a.ul.localeCompare(b.ul));
+    return { ul, blockers: rows };
+  });
+
   // GET /api/admin/users/:username/id-doc — the photo itself (admin-only,
   // token-gated + loopback-bound surface).
   app.get('/api/admin/users/:username/id-doc', async (request, reply) => {

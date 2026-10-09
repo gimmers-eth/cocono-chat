@@ -7,7 +7,7 @@ import { humanError } from '../errors.js';
 import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
 import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, clearAllMessages, loadPeerVerifications, loadPeerPremiums, loadPeerAvatars, rememberPeerAvatar, rememberPeerVerified, rememberPeerChip, loadPeerChips, AVATARS_EVENT, FRIENDS_EVENT, loadPeerBlocked, saveBlockedSet } from '../store.js';
-import { blockUserWithConfirm, unblockUser, blockReasonLabel } from '../blocks.js';
+import { blockUserWithConfirm, unblockUser, blockReasonLabel, blockReasonIcon } from '../blocks.js';
 import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl } from './peername.js';
 import { guessDeviceName, humanPlatform } from '../devices.js';
 import { BADGE_UI, nameChipEl } from '../badges.js';
@@ -1051,7 +1051,7 @@ export function createHome({ client, chat, onLogout }) {
       info.className = 'rel-info';
       if (r.blocked) {
         info.append(pill('Blocked', 'blocked'));
-        if (r.entry.reason) info.append(pill(blockReasonLabel(r.entry.reason, r.peer), 'reason'));
+        if (r.entry.reason) { const rp = pill(blockReasonLabel(r.entry.reason, r.peer), 'reason'); rp.prepend(blockReasonIcon(r.entry.reason)); info.append(rp); }
         if (r.entry.addedBack) info.append(pill('they added you back', 'dim'));
         info.append(action('Unblock', async () => {
           if (await unblockUser(client, r.peer)) { await renderRelationships(); renderConversationList().catch(() => {}); }

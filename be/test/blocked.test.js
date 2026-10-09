@@ -169,5 +169,16 @@ test('admin relationships: a pure block (no friends ever) still shows in the pan
     const backRow = back.relationships.find((r) => r.ul === 'edith');
     assert.ok(backRow, 'the wall is visible from BOTH sides of the panel');
     assert.equal(backRow.blockedBy, true);
+
+    // the dedicated "Blocked by" tab endpoint: who walled frank off, with
+    // the reason stored on the BLOCKER's doc (privacy: reverse scan)
+    const fr = (await admin.inject({ method: 'GET', url: '/api/admin/users/frank/blockers' })).json();
+    assert.deepEqual(fr.blockers.map((b) => b.ul), ['edith']);
+    assert.equal(fr.blockers[0].reason, 'scam');
+    assert.ok(fr.blockers[0].at, 'wall has a date');
+    const ed = (await admin.inject({ method: 'GET', url: '/api/admin/users/edith/blockers' })).json();
+    assert.deepEqual(ed.blockers, [], 'the blocker is not blocked by anyone');
+    const ghost = await admin.inject({ method: 'GET', url: '/api/admin/users/nosuchuser/blockers' });
+    assert.equal(ghost.statusCode, 404);
   } finally { await teardown(); }
 });

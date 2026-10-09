@@ -349,6 +349,8 @@ img.own-avatar { border-radius: 50%; }
 .block-reasons label:hover { background: rgba(255, 255, 255, 0.05); }
 .block-reasons input { margin-top: .15rem; accent-color: var(--danger); }
 .block-reasons label:has(input:checked) { border-color: var(--danger); }
+.block-reasons .reason-icon { margin-top: .1rem; opacity: .85; }
+.rel-pill .reason-icon { margin-right: .35em; }
 
 /* ---- Settings > Relationships ---- */
 .rel-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-bottom: .6rem; }
