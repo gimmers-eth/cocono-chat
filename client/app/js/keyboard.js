@@ -28,6 +28,12 @@ export function initKeyboardFit() {
     // never under the keys; the chat shell doesn't need it (it resizes).
     const covered = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
     root.style.setProperty('--kb-h', `${covered}px`);
+    // Safari STILL offsets the visual viewport past a fixed body when an
+    // input near the keys takes focus (vv.offsetTop > 0 — exactly the
+    // "composer at top, header off page" state). Undo it every event: with
+    // the document locked this snaps instantly and cannot animate — the
+    // shell already fits the visible area, so there is nothing to reveal.
+    if (vv.offsetTop > 0 || window.scrollY > 0) window.scrollTo(0, 0);
     // Keep the newest messages above the keys as the shell resizes.
     if (document.activeElement?.id === 'chat-input') pinBottom();
   }

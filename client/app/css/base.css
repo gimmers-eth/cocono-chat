@@ -44,7 +44,7 @@
 
 * { box-sizing: border-box; margin: 0; }
 
-html, body { height: 100%; }
+html, body { height: 100%; overflow: hidden; }
 /* Lock the DOCUMENT: with plain height:100% the page itself is scrollable,
    and iOS pans the whole document when a near-edge input takes focus — the
    header slides out of frame and the old scrollTo(0,0) correction then
