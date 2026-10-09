@@ -20,7 +20,7 @@ export function createHome({ client, chat, onLogout }) {
   let settingsOpen = false;
 
   // ---- settings drawer tabs ----
-  const SETTINGS_TABS = ['profile', 'verify', 'devices', 'limits', 'general', 'diagnostics'];
+  const SETTINGS_TABS = ['profile', 'verify', 'devices', 'limits', 'relationships', 'general', 'diagnostics'];
   let settingsTab = 'devices';
   try { settingsTab = localStorage.getItem('cocono.settings.tab') || 'devices'; } catch { /* private mode */ }
   if (!SETTINGS_TABS.includes(settingsTab)) settingsTab = 'devices';
