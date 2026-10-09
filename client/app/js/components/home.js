@@ -261,6 +261,12 @@ export function createHome({ client, chat, onLogout }) {
     paintMyLine(); // in-line red mark (unverified) / green Verified sub
     const profileTabBtn = $('tabbtn-profile');
     if (profileTabBtn) profileTabBtn.hidden = !me.verified;
+    // the Verify tab is FOR verified users what it's for: nothing. Once the
+    // badge is earned the tab hides itself (and if you're parked on it,
+    // Settings routes you to Profile)
+    const verifyTabBtn = $('tabbtn-verify');
+    if (verifyTabBtn) verifyTabBtn.hidden = !!me.verified;
+    if (me.verified && settingsOpen && settingsTab === 'verify') selectSettingsTab('profile');
     if (me.verified && settingsOpen && settingsTab === 'profile') renderProfileTab();
     // our own name carries the same red mark contacts see — until verified
     link.hidden = !!me.verified; // the top-left entry only while unverified
@@ -848,9 +854,11 @@ export function createHome({ client, chat, onLogout }) {
     $('btn-self-verify').addEventListener('click', (e) => { e.stopPropagation(); openSettings('verify'); });
     // the whole identity block opens settings (verified → Profile tab,
     // unverified → Verify tab; handled inside openSettings)
-    $('btn-my-settings').addEventListener('click', () => openSettings());
+    // clicking MY name/avatar opens my profile PREVIEW (what others see);
+    // the gear icon next to it remains the way into Settings
+    $('btn-my-settings').addEventListener('click', () => chat.openSelfProfile?.());
     $('btn-my-settings').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openSettings(); }
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chat.openSelfProfile?.(); }
     });
 
     $('btn-profile-avatar').addEventListener('click', () => $('profile-avatar-input').click());
