@@ -1313,7 +1313,10 @@ export function createChat({ client, onHomeRefresh }) {
     const search = $('fwd-search');
     const results = $('fwd-results');
     const send = $('btn-forward-send');
-    setStatus($('forward-status'), '');
+    const fst = $('forward-status');
+    // an empty status line still reserves min-height — hide it for real
+    setStatus(fst, '');
+    fst.hidden = true;
     if (fwdPeer) {
       const c = fwdContacts.find((x) => x.peer === fwdPeer) ?? { peer: fwdPeer };
       const line = document.createElement('span');
@@ -1381,6 +1384,7 @@ export function createChat({ client, onHomeRefresh }) {
 
   async function sendForward() {
     const status = $('forward-status');
+    status.hidden = false;
     const target = fwdPeer; // LOCKED recipient only — free-text sending is gone
     if (!target) { setStatus(status, 'Pick a contact first.', true); return; }
     const rec = forwardId && (await getMessage(forwardId));

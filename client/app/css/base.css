@@ -914,7 +914,8 @@ body[data-view="blocked"] .page-footer { display: none; }
    dictates; only the transforms animate. Forward enters from the right and
    pushes the message slide LEFT; cancel reverses exactly (forward exits
    right). No track-width gymnastics — a real carousel. */
-#msg-modal { display: flex; flex-direction: column; overflow: hidden; }
+#msg-modal { display: flex; flex-direction: column; overflow: hidden;
+  padding-bottom: calc(.7rem + env(safe-area-inset-bottom, 0px)); }
 /* the message text is the STATIONARY star: it fills the panel above the
    bottom carousel and never slides or resizes. */
 #msg-modal .msg-modal-text { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
@@ -922,7 +923,10 @@ body[data-view="blocked"] .page-footer { display: none; }
    box height (search + 3-row floor + action bar); the action slide is an
    absolute overlay. Height never changes when swapping, so the message
    above it does not move either. */
-.msg-panes { position: relative; flex: none; }
+.msg-panes { position: relative; flex: none; overflow: hidden; }
+/* overflow MUST live on the carousel box itself: the modal clips at its
+   PADDING box, so a translated slide peeked through the panel's right
+   padding (the 1rem strip of search field visible beside Copy/Forward). */
 .msg-pane { display: flex; flex-direction: column; gap: .35rem;
   transition: transform .24s cubic-bezier(.2, .8, .3, 1); }
 .msg-pane-fwd { transform: translateX(100%); }
