@@ -99,7 +99,9 @@ export const config = {
   signupIpWindowSec: numOf(env.SIGNUP_IP_WINDOW_SEC, IP_TIME_WINDOW),
   challengeIpLimit: numOf(env.CHALLENGE_IP_LIMIT, 60),
   challengeIpWindowSec: numOf(env.CHALLENGE_IP_WINDOW_SEC, IP_TIME_WINDOW),
-  verifyAccountLimit: numOf(env.VERIFY_ACCOUNT_LIMIT, 20),
+  // 40/15min: a household or shared NAT signing several devices in
+  // kept generous after the 2026-10 doubling — login churn should not 429
+  verifyAccountLimit: numOf(env.VERIFY_ACCOUNT_LIMIT, 40),
   verifyAccountWindowSec: numOf(env.VERIFY_ACCOUNT_WINDOW_SEC, DEFAULT_TIME_WINDOW),
   verifyIpLimit: numOf(env.VERIFY_IP_LIMIT, 100),
   verifyIpWindowSec: numOf(env.VERIFY_IP_WINDOW_SEC, IP_TIME_WINDOW),

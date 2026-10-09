@@ -14,6 +14,7 @@ import { initKeyboardFit } from './keyboard.js';
 import { mountDiagnostics } from './diag.js';
 import { applyIcons } from './icons.js';
 import { initInstallAndNotify } from './install.js';
+import { initBadgeNotify } from './notify.js';
 import { putAppTitle, takePendingChat } from './swkv.js';
 
 // Debug console logging: flip localStorage.setItem('cocono.debug','1') or use
@@ -140,7 +141,7 @@ async function enterApp({ gesture = false, offline = false } = {}) {
   showView('app');
   home.paintMe(client.username);
   if (!offline) client.connect(); // offline mode: browse the local store only
-  if (!offline) pollBadges();     // badges the queue awarded since last seen
+  if (!offline) badgeNotify.poll(); // badges the queue awarded since last seen
   await home.renderConversationList();
 
   // Friends mirror: the SERVER list is the source of truth — reconcile on
@@ -250,17 +251,7 @@ auth.wire();
 // doubles as the dispatch queue — `new` carries awards this account has not
 // seen in a modal yet (the read acks them); chat.js turns each into a queued
 // badge modal.
-async function pollBadges() {
-  if (!client.token) return;
-  try {
-    const res = await client.pollBadges();
-    if (res.new?.length) {
-      window.dispatchEvent(new CustomEvent('cocono:newbadges', { detail: res.new }));
-    }
-  } catch { /* offline: next tick retries */ }
-}
-let badgePollTimer = setInterval(pollBadges, 60_000);
-badgePollTimer.unref?.();
+const badgeNotify = initBadgeNotify({ client }); // poll loop + modal dispatch + OS-notification dedup in js/notify.js
 
 client.on('notice', ({ what }) => {
   if (!client.token) return;
@@ -281,7 +272,7 @@ client.on('notice', ({ what }) => {
     // admin awarded/revoked a badge on MY account: skip the 60s wait —
     // poll now (dispatches any unseen-grant modal on whichever device wins
     // the ack race) and resync the picker/chip
-    pollBadges().then(() => window.dispatchEvent(new Event('cocono:badges-changed'))).catch(() => {});
+    badgeNotify.onNotice(what); // one module owns poll + dedup + resync
   } else {
     client.logger.debug('notice: unhandled what', JSON.stringify(what));
   }

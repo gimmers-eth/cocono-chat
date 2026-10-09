@@ -1537,19 +1537,12 @@ export function createChat({ client, onHomeRefresh }) {
     $('premium-overlay')?.addEventListener('click', closeBadgeModal);
     // fresh awards from the main.js poll → one modal per badge, queued;
     // plus an OS notification (best-effort: permission/standalone dependent)
+    // fresh awards (dispatched by js/notify.js) → one modal per badge,
+    // queued. The OS-notification decision lives in notify.js now — one
+    // brain, one dedup rule (visible app = modal only, no double-fire)
     window.addEventListener('cocono:newbadges', (e) => {
       const owner = String(client.username ?? '');
-      for (const b of (e.detail ?? [])) {
-        showBadgeModal(b.id, { at: b.at, owner, offerWear: true });
-        // generic on purpose: the notification says only THAT a badge
-        // arrived — which badge, its points and blurb appear solely in the
-        // modal (the tag is an invisible de-dupe key, never displayed)
-        if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-          try {
-            new Notification('You have a new badge', { tag: `badge-${b.id}` });
-          } catch { /* notification rejected — the modal still fires */ }
-        }
-      }
+      for (const b of (e.detail ?? [])) showBadgeModal(b.id, { at: b.at, owner, offerWear: true });
     });
     window.addEventListener(FRIENDS_EVENT, () => { updateTrustUI(); });
     window.addEventListener(AVATARS_EVENT, () => { renderChatAvatar(); });

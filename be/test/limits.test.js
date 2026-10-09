@@ -17,6 +17,8 @@ test('limits: config defaults — IP limiters doubled with 300s windows', () => 
   assert.equal(config.msgIpWindowSec, 300);
   // account-scoped message send: same 300s window (per-account limit 120)
   assert.equal(config.msgAccountLimit, 120);
+  // login-verify budget doubled 20 → 40 (devbox NAT/household churn)
+  assert.equal(config.verifyAccountLimit, 40);
   assert.equal(config.msgAccountWindowSec, 300);
   assert.equal(config.userKeysIpLimit, 120);
   // account budgets: 4/day, 10/week verify AND trust
