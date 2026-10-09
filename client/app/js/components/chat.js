@@ -520,8 +520,9 @@ export function createChat({ client, onHomeRefresh }) {
     // blocked peer has NO friend entry — the cascade would call them a
     // stranger, which is not the whole story.
     const blockedMap = await loadPeerBlocked();
-    if (blockedMap.get(currentPeer)) {
-      headStatus.replaceChildren(iconEl('ban', 'icon-danger'));
+    const blockedByMe = blockedMap.get(currentPeer);
+    if (blockedByMe) {
+      headStatus.replaceChildren(peerStateIcon(PS.BLOCKED));
       warn.classList.toggle('danger', true);
       warn.classList.toggle('warn', false);
       warn.hidden = false;
@@ -547,7 +548,7 @@ export function createChat({ client, onHomeRefresh }) {
       return;
     }
 
-    headStatus.replaceChildren(peerStateIcon(state));
+    headStatus.replaceChildren(peerStateIcon(blockedByMe ? PS.BLOCKED : state));
     $('chat-peer').parentElement.classList.toggle('gone', gone);
 
     // plain-language strips, tiered: red (danger) / orange (warn).
@@ -758,7 +759,8 @@ export function createChat({ client, onHomeRefresh }) {
     const pin = await getPin(currentPeer);
     const state = trustState(ent, pin);
     menuActionLabel(state, currentPeer);
-    $('chatopts-peer-status').replaceChildren(peerStateIcon(state));
+    const optsBlocked = (await loadPeerBlocked()).get(currentPeer);
+    $('chatopts-peer-status').replaceChildren(peerStateIcon(optsBlocked ? PS.BLOCKED : state));
     $('chatopts-menu-view').hidden = false;
     $('chatopts-identity-view').hidden = true;
     $('chatopts-overlay').hidden = false;
@@ -807,7 +809,8 @@ export function createChat({ client, onHomeRefresh }) {
     const ent = await friendEntryFor(currentPeer);
     const pin = await getPin(currentPeer);
     const state = trustState(ent, pin);
-    $('profile-status-icon').replaceChildren(peerStateIcon(state));
+    const profileBlocked = (await loadPeerBlocked()).get(currentPeer);
+    $('profile-status-icon').replaceChildren(peerStateIcon(profileBlocked ? PS.BLOCKED : state));
     renderAccountStage(peerJoinedAt ? new Date(peerJoinedAt).getTime() : null);
 
     // peer profile (bio public; avatar ONLY on mutual add — server rule):
@@ -894,8 +897,10 @@ export function createChat({ client, onHomeRefresh }) {
       setRow(socialState, socialNote, '', 'Social: Unknown', 'Reputation counts need a connection.');
     }
 
-    // You (the local ladder)
-    const [cls, title, desc] = YOU_STAGES[state] ?? YOU_STAGES[PS.STRANGER];
+    // You (the local ladder) — MY OWN BLOCK outranks the ladder: the
+    // relation is severed, so "Not added" alone would be a half-truth
+    const YOU_BLOCKED = ['bad', 'You: Blocked', 'You have blocked this account. They cannot message you, and you cannot message them. Unblock from the chat to rebuild the relation.'];
+    const [cls, title, desc] = profileBlocked ? YOU_BLOCKED : (YOU_STAGES[state] ?? YOU_STAGES[PS.STRANGER]);
     setRow(youState, youNote, `trust ${cls}`, title, desc);
   }
 
@@ -1107,7 +1112,9 @@ export function createChat({ client, onHomeRefresh }) {
     const ent = await friendEntryFor(currentPeer);
     const verified = !!ent?.verified;
     const mutual = !!ent?.addedBack;
-    statusIcon.replaceChildren(peerStateIcon(trustState(ent, pin)));
+    // blocked peers sit OUTSIDE the ladder — show the wall mark here too
+    const safetyBlocked = (await loadPeerBlocked()).get(currentPeer);
+    statusIcon.replaceChildren(peerStateIcon(safetyBlocked ? PS.BLOCKED : trustState(ent, pin)));
     $('identity-since').textContent = pin
       ? `Key remembered on this device since ${new Date(pin.firstSeenAt).toLocaleString()}`
         + (pin.changedAt ? ` — it changed ${new Date(pin.changedAt).toLocaleString()}, verification was reset` : '')

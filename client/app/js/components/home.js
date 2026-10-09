@@ -537,13 +537,12 @@ export function createHome({ client, chat, onLogout }) {
         trusted: !!ent?.trust,
         conflict: !!pin && !!ent?.pub && pin.p !== ent.pub,
       });
-      name.replaceChildren(peerStateIcon(state));
+      name.replaceChildren(peerStateIcon(peerBlocked.get(peer) ? PS.BLOCKED : state));
       name.append(peer);
       // red circle for accounts WITHOUT admin identity verification;
       // only when we actually looked the peer up (Map value false, not undefined)
       { const chip = nameChipEl(peerChips.get(peer)); if (chip) { chip.classList.add('name-chip-inline'); name.append(chip); } }
       if (peerVerified.get(peer) === false) name.append(unverifiedBadgeEl());
-      if (peerBlocked.get(peer)) { const b = iconEl('ban', 'icon-danger'); b.title = 'Blocked'; name.append(b); }
       name.classList.toggle('gone', state === PS.GONE);
       const preview = document.createElement('span');
       preview.className = 'convo-last';

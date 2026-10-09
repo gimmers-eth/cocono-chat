@@ -22,6 +22,10 @@ export const PS = {
   VERIFIED: 'verified',
   TRUSTED: 'trusted',
   GONE: 'gone',
+
+  // pseudo-state: MY OWN block (see peerStateIcon) — replaces the stranger
+  // mark wherever the surface knows the wall exists
+  BLOCKED: 'blocked',
 };
 
 /**
@@ -53,7 +57,23 @@ const MARKS = {
 };
 
 /** <i> element carrying the state icon. */
+/**
+ * THE ONE RENDER CHOKE-POINT for peer trust icons.
+ *
+ * PS.BLOCKED is a pseudo-state (not part of resolvePeerState's ladder):
+ * blocking severs the friends relation both ways, so trustState() can only
+ * ever say STRANGER about a blocked peer — the wall itself lives on YOUR
+ * account (the blocked mirror). Any surface that knows the peer is blocked
+ * passes PS.BLOCKED instead, and gets a distinct trust icon that REPLACES
+ * the stranger mark everywhere (sidebar rows, profile sheets, chat head,
+ * options menu, safety view) — never a second badge stacked next to it.
+ */
 export function peerStateIcon(state) {
+  if (state === PS.BLOCKED) {
+    const el = iconEl('ban', 'icon-danger');
+    el.title = 'Blocked';
+    return el;
+  }
   const [key, cls] = MARKS[state] ?? MARKS[PS.STRANGER];
   return iconEl(key, cls);
 }
