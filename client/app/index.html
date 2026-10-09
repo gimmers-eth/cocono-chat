@@ -362,19 +362,20 @@
   <!-- Message modal (tap a bubble): right-hand side menu — readable
        scrollable text, actions fixed underneath. -->
   <div id="msg-overlay" class="overlay" hidden></div>
-  <!-- Message panel: TWO sliding panes in one side menu. Forwarding never
-       opens a second modal — the options pane slides LEFT and the forward
-       pane slides in from the right, keeping the message text on screen. -->
+  <!-- Message panel: the message itself is FIXED (always visible, same
+       height); only the bottom section is a carousel — the action row and
+       the forward controls swap by horizontal slide beneath the message. -->
+  <div id="msg-overlay" class="overlay" hidden></div>
   <section id="msg-modal" class="side-menu" role="dialog" aria-modal="true" aria-labelledby="msg-modal-title" hidden>
+    <header class="drawer-head">
+      <h2 id="msg-modal-title">Message</h2>
+      <button id="btn-msg-close" class="icon-btn" title="Close" data-icon="close"></button>
+    </header>
+    <p id="msg-modal-time" class="muted small"></p>
+    <div id="msg-modal-text" class="msg-modal-text" tabindex="0"></div>
+    <p id="msg-modal-status" class="status" role="status"></p>
     <div id="msg-panes" class="msg-panes">
       <div class="msg-pane msg-pane-view">
-        <header class="drawer-head">
-          <h2 id="msg-modal-title">Message</h2>
-          <button id="btn-msg-close" class="icon-btn" title="Close" data-icon="close"></button>
-        </header>
-        <p id="msg-modal-time" class="muted small"></p>
-        <div id="msg-modal-text" class="msg-modal-text" tabindex="0"></div>
-        <p id="msg-modal-status" class="status" role="status"></p>
         <div class="row-actions msg-modal-actions">
           <button id="btn-msg-copy" class="linkish" data-icon="copy">Copy</button>
           <button id="btn-msg-fwd" class="linkish" data-icon="forward">Forward</button>
@@ -382,16 +383,11 @@
         </div>
       </div>
       <div class="msg-pane msg-pane-fwd">
-        <header class="drawer-head">
-          <h2>Forward</h2>
-        </header>
-        <p id="forward-preview" class="msg-modal-text fwd-preview"></p>
         <label class="field">
           <input id="forward-username" type="text" placeholder="Send to username" maxlength="64"
                  spellcheck="false" autocomplete="off" />
         </label>
-        <!-- the results area is a FIXED floor (3 names tall) and grows with
-             the page; Send/Cancel below it NEVER move when it changes -->
+        <!-- fixed 3-name floor; Send/Cancel never move when results change -->
         <div class="fwd-results">
           <ul id="forward-peers" class="peer-list" hidden></ul>
         </div>

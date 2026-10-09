@@ -908,18 +908,21 @@ body[data-view="blocked"] .page-footer { display: none; }
    pushes the message slide LEFT; cancel reverses exactly (forward exits
    right). No track-width gymnastics — a real carousel. */
 #msg-modal { display: flex; flex-direction: column; overflow: hidden; }
-.msg-panes { position: relative; flex: 1 1 auto; min-height: 0; }
-.msg-pane {
-  position: absolute; inset: 0;
-  display: flex; flex-direction: column; gap: .35rem;
-  transition: transform .24s cubic-bezier(.2, .8, .3, 1);
-}
+/* the message text is the STATIONARY star: it fills the panel above the
+   bottom carousel and never slides or resizes. */
+#msg-modal .msg-modal-text { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+/* Bottom carousel: the FORWARD slide lays out in flow and thus FIXES the
+   box height (search + 3-row floor + action bar); the action slide is an
+   absolute overlay. Height never changes when swapping, so the message
+   above it does not move either. */
+.msg-panes { position: relative; flex: none; }
+.msg-pane { display: flex; flex-direction: column; gap: .35rem;
+  transition: transform .24s cubic-bezier(.2, .8, .3, 1); }
 .msg-pane-fwd { transform: translateX(100%); }
+.msg-pane-view { position: absolute; inset: 0; }
 .msg-panes.showing-fwd .msg-pane-view { transform: translateX(-100%); }
 .msg-panes.showing-fwd .msg-pane-fwd { transform: translateX(0); }
-/* the message text scrolls and takes the rest of the page (pane A too) */
-#msg-modal .msg-modal-text { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
-.fwd-preview { flex: none; max-height: 22dvh; overflow-y: auto; }
+/* (message-text sizing lives with the carousel block above) */
 /* fixed 3-row floor, expands with the page; buttons below never shift */
 .fwd-results { flex: 1 1 auto; min-height: calc(3 * 44px); overflow-y: auto; }
 .fwd-actions {

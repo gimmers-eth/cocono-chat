@@ -1256,7 +1256,9 @@ export function createChat({ client, onHomeRefresh }) {
 
   async function openForward(id, text) {
     forwardId = id;
-    $('forward-preview').textContent = text;
+    // no preview clone needed: the message text stays STATIONARY above the
+    // sliding bottom section — the panel itself is the preview
+    void text;
     setStatus($('forward-status'), '');
     $('forward-username').value = '';
     $('btn-forward-send').classList.remove('ready');
