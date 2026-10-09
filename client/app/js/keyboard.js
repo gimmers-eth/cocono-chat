@@ -90,6 +90,16 @@ export function initKeyboardFit() {
   // so re-tapping a field mid-conversation can't cause a second shrink.
   let lastCover = 0;
 
+  // Resting layout-viewport height — the baseline for the keyboard math.
+  // iOS lies about window.innerHeight WHILE the keyboard is up: the device
+  // trace showed iH shrink from 894 to 796 the moment iOS scrolled the
+  // document 98px (and to 481 outright when the layout viewport resized),
+  // which poisoned cover = iH - vvH - vvT into learning 217/355 instead of
+  // the true 413 keyboard height — and a too-small cache made pre-flight
+  // under-shrink, which is exactly what provoked the scroll. Track the
+  // at-rest value and measure the keyboard against IT.
+  let restH = window.innerHeight;
+
   function pinBottom() {
     const list = document.getElementById('chat-messages');
     if (!list) return;
@@ -115,13 +125,16 @@ export function initKeyboardFit() {
   }
 
   function apply(src = 'vv') {
-    const cover = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    const cover = Math.max(0, restH - vv.height);
     lastCover = cover;
     // Keyboard closed but iOS left a phantom document scroll behind: reset
     // it (nothing can legitimately scroll — html is overflow:hidden, body
     // fixed). While the keyboard is UP we never fight the scroll — yanking
     // it mid-animation is the old snap-back hop.
     if (cover <= 80 && window.scrollY !== 0) window.scrollTo(0, 0);
+    // At genuine rest (no keyboard, no scroll, no pan): relearn the
+    // baseline so toolbar show/hide doesn't leave a stale restH.
+    if (cover <= 80 && window.scrollY === 0 && vv.offsetTop === 0) restH = window.innerHeight;
     fit(vv.height, cover, vv.offsetTop);
     if (cover > 80 && Math.abs(cover - cachedKb) > 8) { // the keyboard revealed itself: learn it
       cachedKb = cover;
@@ -138,7 +151,7 @@ export function initKeyboardFit() {
     if (!IS_IOS) return;            // Android resizes itself; desktop has no soft keyboard
     if (lastCover > 80) return;     // keyboard already up: nothing to pre-fit
     const est = cachedKb || DEFAULT_KB;
-    fit(Math.max(MIN_APP_H, window.innerHeight - est - PRE_MARGIN), est + PRE_MARGIN, 0);
+    fit(Math.max(MIN_APP_H, restH - est - PRE_MARGIN), est + PRE_MARGIN, 0);
     // Speculative shrink: if no keyboard actually arrives (focus stolen,
     // programmatic focus that iOS declines to honour), restore the true fit
     // instead of leaving the shell stranded mid-screen.

@@ -1219,7 +1219,12 @@ export function createChat({ client, onHomeRefresh }) {
     $('forward-overlay').hidden = false;
     $('forward-modal').hidden = false;
     await forwardSuggestions.refresh(); // local users, filtered as you type
-    $('forward-username').focus?.();
+    // Autofocus on DESKTOP only. On a touch device it does nothing useful
+    // (iOS raises no keyboard for programmatic focus — device trace proved
+    // it) and it actively breaks the keyboard fit: the field is already
+    // focused when the user taps it, so no focusin fires and the pre-flight
+    // shrink that keeps the header pinned never runs.
+    if (matchMedia('(pointer: fine)').matches) $('forward-username').focus?.();
   }
 
   function closeForward() {
@@ -1477,7 +1482,11 @@ export function createChat({ client, onHomeRefresh }) {
       // 'ahead', which would leave the unread dot stubbornly on.
       markRead(currentPeer, last?.ts ?? Date.now());
       onHomeRefresh?.(); // repaint the list NOW: the dot must go with it
-      if (!peerGone) $('chat-input').focus();
+      // No autofocus on touch: iOS raises no keyboard for programmatic
+      // focus, but the field being ALREADY focused means the user's tap
+      // fires no focusin — and the keyboard pre-flight (which keeps the
+      // header pinned) only runs for a tap-earned focus. Desktop keeps it.
+      if (!peerGone && matchMedia('(pointer: fine)').matches) $('chat-input').focus();
     } catch (err) {
       setStatus(status, humanError(err), true);
     }
