@@ -274,6 +274,34 @@ export function initKeyboardFit() {
   // when the field is still covered at its check; finding it already in
   // view, it has nothing to animate. 'nearest' keeps the nudge minimal and
   // can never scroll the window (the document has nothing to scroll).
+  // Native-slide suppression (STANDALONE): at focus, WKWebView animates
+  // its OWN contentOffset to "reveal" the first responder — a compositor-
+  // level motion that no JS channel observes (device traces: pristine
+  // sY/vvT throughout, win-scroll events arriving only AFTER the offset
+  // self-restored, yet the header visibly slides). It is triggered from
+  // the geometry at the focus instant — before any focusin handler can
+  // re-fit — so it cannot be prevented, only interrupted: setting
+  // window.scrollTo(0,0) EVERY FRAME through the animation window
+  // overrides the native offset as it animates (the community remedy for
+  // the standalone keyboard slide; a single call loses to the animation).
+  // Bounded windows around focus/blur only — no idle rAF cost.
+  let suppressRaf = 0;
+  function suppressNativeSlide(ms) {
+    if (!IS_STANDALONE) return;
+    const until = performance.now() + ms;
+    cancelAnimationFrame(suppressRaf);
+    const tick = () => {
+      window.scrollTo(0, 0);
+      if (performance.now() < until) suppressRaf = requestAnimationFrame(tick);
+    };
+    suppressRaf = requestAnimationFrame(tick);
+  }
+
+  // Pre-flight shrink — runs AFTER focus is granted, BEFORE the keyboard
+  // (and its pan decision) arrives. `el` is the focused field: once the
+  // shell fits the future keyboard, WE reveal the field inside its own
+  // scroller (the settings drawer, the auth view) synchronously — iOS
+  // finding it already in view has no reveal scroll left to animate.
   let revertTimer = 0;
   function preflight(el) {
     if (!IS_IOS) return;            // Android resizes itself; desktop has no soft keyboard
@@ -321,12 +349,19 @@ export function initKeyboardFit() {
   }, { capture: true, passive: true });
   document.addEventListener('focusin', (e) => {
     sample(`focusin:${e.target?.id || e.target?.tagName}${e.target === tapTarget ? '' : ' (no-tap)'}`);
-    if (e.target === tapTarget && performance.now() - tapAt < 700) preflight(e.target);
+    const isField = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA');
+    if (isField) suppressNativeSlide(700); // covers the native reveal animation window
+    if (isField && e.target === tapTarget && performance.now() - tapAt < 700) preflight(e.target);
     tapTarget = null;
   });
 
   document.addEventListener('focusout', (e) => {
     sample(`focusout:${e.target?.id || e.target?.tagName}`);
+    // The keyboard-close side of the native slide: WKWebView animates the
+    // offset restore too — suppress through that window as well.
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+      suppressNativeSlide(600);
+    }
     // Classic standalone-PWA hygiene: the WKWebView can keep a residual
     // content offset after the keyboard closes that JS scroll values never
     // report (blank band / stuck-shifted view). One delayed settle pass
