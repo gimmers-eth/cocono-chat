@@ -219,7 +219,7 @@ export default async function usersRoutes(app, { users, redis, config, messages,
     const mine = new Map(toList(actor).map((f) => [String(f.u).toLowerCase(), f]));
     const others = await users.find(
       { ul: { $ne: ul } },
-      { projection: { ul: 1, friends: 1, verified: 1, premium: 1, blocked: 1 } },
+      { projection: { ul: 1, friends: 1, verified: 1, premium: 1, blocked: 1, blockReasons: 1 } },
     ).toArray();
     const rows = [];
     for (const other of others) {
@@ -240,6 +240,11 @@ export default async function usersRoutes(app, { users, redis, config, messages,
         blocks: myBlocked.has(other.ul),
         blockReason: myBlocked.has(other.ul) ? (actor.blockReasons?.[other.ul]?.r ?? null) : null,
         blockedBy: (other.blocked ?? []).some((u) => String(u).toLowerCase() === ul),
+        // the wall's stated reason travels WITH the wall — operators see it
+        // from either side of the relation (it is the blocker's own words)
+        blockedByReason: (other.blocked ?? []).some((u) => String(u).toLowerCase() === ul)
+          ? (other.blockReasons?.[ul]?.r ?? null)
+          : null,
         theyAddedMe: !!theirs,
         added: !!m,
         verified: !!(m?.v && mutual),   // same mutuality gate the app enforces

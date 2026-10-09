@@ -203,7 +203,7 @@ async function loadRelations() {
             <td><button class="linkish" data-view-user="${esc(r.ul)}">@${esc(r.ul)}</button>${r.premium ? ' <span class="badge gold-badge">★</span>' : ''}</td>
             <td>${mark(r.added)}</td><td>${mark(r.theyAddedMe)}</td><td>${mark(r.verified)}</td><td>${mark(r.trust)}</td>
             <td>${r.blocks ? '<span class="rel-block" title="blocked by this account">⛔</span> ' + reasonChip(r.blockReason) : '<span class="dim">—</span>'}</td>
-            <td>${r.blockedBy ? '<span class="rel-block" title="this account is walled off here">⛔</span>' : '<span class="dim">—</span>'}</td>
+            <td>${r.blockedBy ? '<span class="rel-block" title="this account is walled off here">⛔</span> ' + reasonChip(r.blockedByReason) : '<span class="dim">—</span>'}</td>
           </tr>`).join('')}</tbody>
         </table>`
       : '<p class="dim">No relationships yet — this account has added nobody, and nobody has added it.</p>';

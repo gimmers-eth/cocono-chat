@@ -169,6 +169,7 @@ test('admin relationships: a pure block (no friends ever) still shows in the pan
     const backRow = back.relationships.find((r) => r.ul === 'edith');
     assert.ok(backRow, 'the wall is visible from BOTH sides of the panel');
     assert.equal(backRow.blockedBy, true);
+    assert.equal(backRow.blockedByReason, 'scam', 'the reason travels with the wall to either side');
 
     // the dedicated "Blocked by" tab endpoint: who walled frank off, with
     // the reason stored on the BLOCKER's doc (privacy: reverse scan)
