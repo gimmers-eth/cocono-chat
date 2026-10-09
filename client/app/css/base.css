@@ -925,6 +925,25 @@ body[data-view="blocked"] .page-footer { display: none; }
   border-top: 1px solid var(--border); opacity: .75; user-select: none;
 }
 
+/* trust-modal evidence table + consequence box */
+.trust-facts { width: 100%; border-collapse: collapse; margin: .25rem 0 .6rem; }
+.trust-facts th {
+  text-align: left; font-weight: 600; color: var(--muted);
+  font-size: .82rem; padding: .28rem .4rem .28rem 0;
+}
+.trust-facts td { text-align: right; padding: .28rem 0; }
+.tf-val { display: inline-block; padding: .12rem .6rem; border-radius: 999px; font-size: .82rem; font-weight: 700; border: 1px solid transparent; }
+.tf-val.ok  { color: var(--success); border-color: currentColor; background: rgba(0, 168, 132, 0.10); }
+.tf-val.bad { color: var(--danger); border-color: currentColor; background: rgba(239, 105, 117, 0.10); }
+.tf-val.dim { color: var(--muted); border-color: var(--border); }
+.tf-val.num { color: var(--accent, #7d6ce0); border-color: currentColor; background: rgba(125, 108, 224, 0.10); }
+.tf-consequence {
+  margin-top: .8rem; padding: .6rem .8rem;
+  border: 1px solid var(--danger); border-radius: 10px;
+  background: rgba(239, 105, 117, 0.10); color: var(--danger);
+  font-size: .85rem; font-weight: 600; text-align: center;
+}
+
 /* Transient toast pill. FIXED (not absolute inside .chat-view): it must be
    visible while the settings drawer / profile sheets / modals (z 50) and the
    lightbox (z 70) are on screen — the toast is the status channel, so it

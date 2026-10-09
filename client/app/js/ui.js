@@ -81,7 +81,7 @@ export function setBusy(busy) {
 let validateCleanup = null;
 const clearValidateHook = () => { validateCleanup?.(); validateCleanup = null; };
 
-export function confirmModal({ title, body, bodyEl, okLabel = 'Confirm', danger = false, warning = '', subline = '', validate = null }) {
+export function confirmModal({ title, body, bodyEl, footerEl = null, okLabel = 'Confirm', danger = false, warning = '', subline = '', validate = null }) {
   const overlay = $('confirm-overlay');
   const modal = $('confirm-modal');
   if (!modal || !overlay) return Promise.resolve(window.confirm(`${title}\n\n${body}`));
@@ -97,6 +97,13 @@ export function confirmModal({ title, body, bodyEl, okLabel = 'Confirm', danger 
   if (warnEl) {
     warnEl.textContent = warning;
     warnEl.hidden = !warning;
+  }
+  // footerEl: content BELOW the action row (the trust modal's warning box
+  // belongs under the button — it's a consequence statement, not a prompt)
+  const footEl = $('confirm-footer');
+  if (footEl) {
+    footEl.replaceChildren(footerEl ?? '');
+    footEl.hidden = !footerEl;
   }
   const subEl = $('confirm-subline');
   if (subEl) {
@@ -131,6 +138,7 @@ export function confirmModal({ title, body, bodyEl, okLabel = 'Confirm', danger 
       // hand the disabled flag back neutral
       clearValidateHook();
       ok.disabled = false;
+      if (footEl) { footEl.replaceChildren(); footEl.hidden = true; }
       ok.removeEventListener('click', onOk);
       $('btn-confirm-cancel').removeEventListener('click', onCancel);
       overlay.removeEventListener('click', onCancel);
