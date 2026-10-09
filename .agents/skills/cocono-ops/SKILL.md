@@ -165,6 +165,7 @@ than the code it should be running. update.sh does this bounce itself.
 
 ## UI conventions (any client/admin styling change)
 - **Think about spacing before declaring done.** Every new element gets checked against its container's existing rhythm: alignment (centered bar → centered contents), gaps/padding on the same rem scale already used there, and symmetric breathing room when an element adds a line. Trailing/inline crowding (a button hugging the last word, mixed px/rem margins, uneven top-vs-bottom space) is a bug, not a detail.
+- **Shared visuals have ONE source.** Badge artwork lives in `client/app/js/badges-art.js` and the admin panel loads it as-is (served at `/badges-art.js`, hydrated into `.badge-art` slots) — NEVER copy an SVG string into `admin/app.js`. Same rule for anything visual crossing between the two apps: serve/import, don't duplicate.
 - Prefer the **existing local pattern** (icon `margin-right: .45em`, bar padding `rem`, `gap` in flex rows) over inventing per-component magic numbers; if the pattern breaks for the new case, state why in a comment.
 - Buttons inside text bars/strips (e.g. trust-warning actions): **own line, centered, `width: max-content`** with a clear top margin (`margin: .6rem auto .15rem`-style) — never an inline tail on flowing text.
 - When touching drawer/modal headers with multiple actions: group them (`display:inline-flex; gap:6px`) so icon buttons share one rhythm.
