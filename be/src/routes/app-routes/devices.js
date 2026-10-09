@@ -281,7 +281,7 @@ export default async function deviceRoutes(app, { users, redis, config, messages
     if (user.devices.length === 0) {
       // full teardown incl. ID photo, diagnostics and OTHERS' blocks/
       // blockReasons aimed at this name (the old inline purge missed those)
-      await deleteAccountFully({ users, profiles, idDocs, messages, diagnostics, redis }, ul);
+      await deleteAccountFully({ users, profiles, idDocs, messages, diagnostics, settings, redis }, ul);
       return { removed: deviceId, devices: 0, accountDeleted: true };
     }
     return { removed: deviceId, devices: user.devices.length };

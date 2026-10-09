@@ -107,7 +107,10 @@ export function createAuth({ client, onLoggedIn }) {
         if (username.length < 4) throw new Error('Username must be at least 4 characters.');
         setStatus(els.status, 'Creating account and keys on this device…');
         const res = await client.register(username);
-        await onLoggedIn(res);
+        // FRESH identity: a brand-new keypair/device — main.js purges any
+        // local data this username's PREVIOUS owner left behind (see
+        // store.ensureScoped)
+        await onLoggedIn({ ...res, fresh: true });
       }),
     );
 
@@ -137,7 +140,7 @@ export function createAuth({ client, onLoggedIn }) {
 
         // Resolves once an existing device approves the code.
         const res = await client.completePairing({ pollIntervalMs: 2000 });
-        await onLoggedIn(res);
+        await onLoggedIn({ ...res, fresh: true }); // new device identity too
       }).catch(() => {}),
     );
 

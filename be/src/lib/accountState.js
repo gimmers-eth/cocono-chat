@@ -8,6 +8,14 @@ import { createNotifier } from './notify.js';
 // instead of leaving it to TTL expiry.
 export async function cleanupAccountState(redis, ul) {
   await redis.del(`rl:verify:${ul}`, `rl:dapprove:${ul}`, `rl:dpending:${ul}`);
+  // per-account message budget + ALL device-scoped flap/presence keys:
+  // a re-registered name must not inherit spend, flap history, or a
+  // ghost-presence that silently suppresses push to a stranger's devices.
+  for (const pat of [`rl:msg:${ul}`, `rl:ipflap:${ul}:*`, `devip:${ul}:*`, `presence:${ul}:*`]) {
+    for await (const batch of redis.scanIterator({ MATCH: pat, COUNT: 100 })) {
+      for (const key of batch) await redis.del(key);
+    }
+  }
 
   for await (const batch of redis.scanIterator({ MATCH: `denroll:c:${ul}:*`, COUNT: 100 })) {
     for (const key of batch) {
@@ -69,8 +77,11 @@ export async function purgeFriendReferences(users, deletedUl, redis) {
 //   * own profile+avatar doc, ID photo, ALL messages both directions,
 //     diagnostics reports, Redis state (nonces, enrollments, limiters)
 //   * the account doc itself last (the reverse scans read from it)
-export async function deleteAccountFully({ users, profiles, idDocs, messages, diagnostics, redis }, ul) {
+export async function deleteAccountFully({ users, profiles, idDocs, messages, diagnostics, settings, redis }, ul) {
   await purgeFriendReferences(users, ul, redis);
+  // admin-set limit overrides (per-user caps, device IP-flap budgets) are
+  // keyed by USERNAME — the new owner of the name must start clean
+  if (settings) await settings.updateOne({ _id: 'limits' }, { $unset: { [`users.${ul}`]: '' } });
   await users.updateMany({ blocked: ul }, { $pull: { blocked: ul } });
   await users.updateMany(
     { [`blockReasons.${ul}`]: { $exists: true } },

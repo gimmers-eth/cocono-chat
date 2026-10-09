@@ -9,7 +9,7 @@ import { startSingleTabGuard } from './components/blocked.js';
 import { createAuth } from './components/auth.js';
 import { createHome } from './components/home.js';
 import { createChat } from './components/chat.js';
-import { setScope, setFriends, loadFriends } from './store.js';
+import { setScope, setFriends, loadFriends, ensureScoped } from './store.js';
 import { purgeLocalAccount } from './accountPurge.js';
 import { initKeyboardFit } from './keyboard.js';
 import { mountDiagnostics } from './diag.js';
@@ -77,7 +77,7 @@ export const client = new CoconoClient({
 
 const chat = createChat({ client, onHomeRefresh: () => home.renderConversationList() });
 const home = createHome({ client, chat, onLogout: () => showAuth() });
-const auth = createAuth({ client, onLoggedIn: () => enterApp({ gesture: true }) });
+const auth = createAuth({ client, onLoggedIn: (res) => enterApp({ gesture: true, fresh: res?.fresh === true }) });
 
 // Phase 1 push: service worker (registered eagerly; permission is only asked
 // for after a login click). iOS additionally requires the app to be added to
@@ -154,7 +154,7 @@ function openChatFromNotice(peer) {
   chat.openChat(ul).catch(() => {});
 }
 
-async function enterApp({ gesture = false, offline = false } = {}) {
+async function enterApp({ gesture = false, offline = false, fresh = false } = {}) {
   // Durability: ask the browser to keep our IndexedDB (identity + message
   // store) out of eviction under storage pressure. Best-effort: Chrome/
   // Android honours it (reported as persistent=true in Storage
@@ -165,7 +165,11 @@ async function enterApp({ gesture = false, offline = false } = {}) {
   );
 
   // Decrypt-history store and read markers are per-account: scope them to
-  // the logged-in username before anything reads or writes them.
+  // the logged-in username before anything reads or writes them. The
+  // guard FIRST: a fresh identity (signup/pairing) or a changed deviceId
+  // under a known name purges any previous owner's local data — usernames
+  // must never bleed account state across identities.
+  await ensureScoped(client.username, client.deviceId, { fresh });
   setScope(client.username);
   showView('app');
   home.paintMe(client.username);

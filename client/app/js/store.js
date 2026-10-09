@@ -37,12 +37,44 @@ export function setScope(username) {
 
 // Hard-remove one account's local app data: message DB + read markers.
 // Used by 'Forget this device' so no decrypted transcript survives the keys.
+const ownerKey = (ul) => `cocono.owner.${ul}`;
+
+/**
+ * THE encapsulation guard: every piece of per-account browser state is
+ * keyed by USERNAME (the app DB, read marks, owner record) — so a name that
+ * is deleted and re-registered (or re-paired after 'forget') must never
+ * inherit the previous identity's data. The owner record remembers which
+ * DEVICE identity created this browser's copy; entering as any other
+ * identity purges the account store first.
+ *
+ *   fresh   — signup/pairing: a brand-new identity. Purge unconditionally:
+ *             anything stored under this name belongs to someone else (or
+ *             a previous owner of the name). A genuinely clean browser
+ *             pays an idempotent no-op.
+ *   resume  — same deviceId as recorded: keep everything. A different
+ *             deviceId (forget+re-pair, stolen-name scenarios): purge.
+ *
+ * deviceId is random per keypair/registration and never reused, which is
+ * exactly the identity signal we need. Called from enterApp BEFORE setScope.
+ */
+export async function ensureScoped(username, deviceId, { fresh = false } = {}) {
+  const ul = String(username ?? '').toLowerCase();
+  if (!ul) return;
+  let prev = null;
+  try { prev = localStorage.getItem(ownerKey(ul)); } catch { /* private mode */ }
+  if (fresh || (prev && deviceId && prev !== deviceId)) {
+    await deleteAccountData(ul).catch(() => {});
+  }
+  try { if (deviceId) localStorage.setItem(ownerKey(ul), String(deviceId)); } catch { /* private mode */ }
+}
+
 // Resolves once deletion finished (or was attempted); rejects only on error.
 export async function deleteAccountData(username) {
   const ul = String(username ?? '').toLowerCase();
   if (!ul) return;
   try {
     localStorage.removeItem(`cocono.reads.${ul}`);
+    localStorage.removeItem(ownerKey(ul));
   } catch { /* storage unavailable — nothing to clean */ }
   if (scope === ul) {
     if (dbPromise) await dbPromise.then((db) => db.close()).catch(() => {});

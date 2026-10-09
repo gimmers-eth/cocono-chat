@@ -466,7 +466,7 @@ test('device removal: detaching the LAST device deletes the account outright', a
 });
 
 test('device removal: last-device detach sweeps EVERY trace (blocks, reasons, diagnostics, profile, id-doc)', async () => {
-  const { app, mongo, teardown } = await setupApp(LIMITS);
+  const { app, mongo, redis, teardown } = await setupApp(LIMITS);
   const users = mongo.db.collection('users');
   try {
     const victim = 'gimmers';
@@ -495,6 +495,13 @@ test('device removal: last-device detach sweeps EVERY trace (blocks, reasons, di
       'from.ul': victim, from: { fd: d1 }, 'to.ul': 'wallaby', to: { dv: wd }, env: {}, ts: new Date(),
     });
 
+    // admin per-user overrides + device-scoped redis trackers, seeded to die
+    await mongo.db.collection('settings').updateOne({ _id: 'limits' },
+      { $set: { [`users.${victim}`]: { msg: { limit: 999 } } } }, { upsert: true });
+    await redis.set(`devip:${victim}:dev-x`, 'v');
+    await redis.set(`rl:ipflap:${victim}:dev-x`, '1');
+    await redis.set(`presence:${victim}:dev-x`, '1');
+
     // pre-delete: blocker's wall really references the victim
     const beforeWall = await users.findOne({ ul: 'wallaby' });
     assert.deepEqual(beforeWall.blocked, [victim]);
@@ -514,6 +521,11 @@ test('device removal: last-device detach sweeps EVERY trace (blocks, reasons, di
     assert.equal(await mongo.db.collection('messages').countDocuments({ 'from.ul': victim }), 0, 'messages gone');
 
     // the blocker's wall against the dead name is swept (blocked[] + reason)
+    const limitsDoc = await mongo.db.collection('settings').findOne({ _id: 'limits' });
+    assert.equal(limitsDoc.users?.[victim], undefined, 'per-user limit overrides purged');
+    assert.equal(await redis.exists(`devip:${victim}:dev-x`), 0, 'devip history purged');
+    assert.equal(await redis.exists(`rl:ipflap:${victim}:dev-x`), 0, 'flap budget purged');
+    assert.equal(await redis.exists(`presence:${victim}:dev-x`), 0, 'presence ghost purged');
     const afterWall = await users.findOne({ ul: 'wallaby' });
     assert.ok(!(afterWall.blocked ?? []).includes(victim), 'blocked list purged');
     assert.equal(afterWall.blockReasons?.[victim], undefined, 'block reason purged');
