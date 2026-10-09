@@ -51,11 +51,7 @@ html, body { height: 100%; overflow: hidden; }
    yanked it back (visible "jump down, animate up" keyboard jank). The app
    owns all scrolling (app-shell clips; lists scroll internally), so the
    body is fixed and the document can NEVER be panned. */
-/* --vv-top mirroring: the body (fixed → the entire app) shifts DOWN by
-   exactly Safari's visual-viewport pan. Net effect on screen: nothing
-   moves. Drawers/modals are fixed children of this body, so the whole
-   layer cake rides the pan together. */
-body { position: fixed; inset: 0; overflow: hidden; height: var(--app-h, 100dvh); transform: translateY(var(--vv-top, 0px)); }
+body { position: fixed; inset: 0; overflow: hidden; height: var(--app-h, 100dvh); }
 /* Mobile: no double-tap zoom anywhere (tap targets are app chrome, not a
    document). Panning stays alive — .drawer-tabs swipe and the message list
    scroll depend on it; pinch is off via viewport meta + gesturestart guard. */
