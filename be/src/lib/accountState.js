@@ -83,6 +83,9 @@ export async function deleteAccountFully({ users, profiles, idDocs, messages, di
   // keyed by USERNAME — the new owner of the name must start clean
   if (settings) await settings.updateOne({ _id: 'limits' }, { $unset: { [`users.${ul}`]: '' } });
   await users.updateMany({ blocked: ul }, { $pull: { blocked: ul } });
+  // first-add memories of the dead name too: whoever registers it next is a
+  // NEW person and deserves their own single first-add notice
+  await users.updateMany({ hadAdded: ul }, { $pull: { hadAdded: ul } });
   await users.updateMany(
     { [`blockReasons.${ul}`]: { $exists: true } },
     { $unset: { [`blockReasons.${ul}`]: '' } },

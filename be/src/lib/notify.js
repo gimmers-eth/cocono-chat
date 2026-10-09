@@ -37,8 +37,11 @@
 //               verified/unverified you): re-read GET /api/me.
 //   'badges'   YOUR badge set changed (admin award/revoke): poll
 //               GET /api/me/badges immediately instead of the 60s tick.
-//   'request'  SOMEONE ADDED you as a contact. Carries `by` (their ul): the
-//               client OS-notifies "@by added you" and a tap opens the chat.
+//   'request'  SOMEONE ADDED you as a contact — and it is the FIRST time
+//               that account has ever added you (hadAdded memory server-side;
+//               unadd/readd loops stay silent, so the notice can't be farmed).
+//               Carries `by`: the client OS-notifies "@by added you", a tap
+//               opens the chat.
 //   'verify'   A contact CONFIRMED your safety number (their v-flag on you).
 //               Carries `by`. Headline event: always OS-notified.
 //   'trusts'   A contact EXTENDED TRUST to you (their t-flag on you).

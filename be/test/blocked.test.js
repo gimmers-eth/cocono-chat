@@ -227,3 +227,26 @@ test('mute: silences notifications without touching the relation; mirrors via re
     assert.equal(bDoc.blocked, undefined);
   } finally { await teardown(); }
 });
+
+test('add notice: headline only on the FIRST-ever add; unadd/readd stays silent', async () => {
+  const { app, mongo, teardown } = await setupApp(LIMITS);
+  try {
+    const alice = makeClient();
+    const bobby = makeClient();
+    const dA = randomUUID();
+    const dB = randomUUID();
+    await signupUser(app, alice, 'addyn01', dA);
+    await signupUser(app, bobby, 'addyn02', dB);
+    const aTok = await getToken(app, alice, 'addyn01', dA);
+
+    await app.inject({ method: 'PUT', url: '/api/me/friends/addyn02', headers: aTok });
+    let doc = await mongo.db.collection('users').findOne({ ul: 'addyn01' });
+    assert.deepEqual(doc.hadAdded, ['addyn02'], 'first add records the memory');
+
+    await app.inject({ method: 'DELETE', url: '/api/me/friends/addyn02', headers: aTok });
+    await app.inject({ method: 'PUT', url: '/api/me/friends/addyn02', headers: aTok });
+    doc = await mongo.db.collection('users').findOne({ ul: 'addyn01' });
+    assert.deepEqual(doc.hadAdded, ['addyn02'], 're-add does NOT reset the memory');
+    assert.ok(doc.friends.some((f) => f.u === 'addyn02'), 'relation itself re-established');
+  } finally { await teardown(); }
+});

@@ -189,7 +189,7 @@ export default async function friendsRoutes(app, { users, redis, config, setting
     // read-modify-write (single-account scale; unique-ul index protects the
     // doc, and the operation is idempotent: re-add = RE-BIND, and a new key
     // is never "verified" until the numbers are compared again)
-    const user = await users.findOne({ ul }, { projection: { friends: 1 } });
+    const user = await users.findOne({ ul }, { projection: { friends: 1, hadAdded: 1 } });
     const list = normalize(user?.friends);
     const existing = list.find((f) => f.u === target);
     let freshAdd = false;
@@ -205,10 +205,17 @@ export default async function friendsRoutes(app, { users, redis, config, setting
       freshAdd = true;
     }
     await users.updateOne({ ul }, { $set: { friends: list.sort((a, b) => a.u.localeCompare(b.u)) } });
-    // the peer's view of THIS relation just moved — nudge. A brand-new add
-    // gets its own kind so the client can raise a real OS notification
-    // ("someone added you"); a re-bind is just ordinary list churn.
-    await notifyAccount(target, freshAdd ? 'request' : 'friends', { by: ul });
+    // The 'request' HEADLINE (client OS-notifies "@by added you") fires only
+    // on the first time this account has EVER added that peer. hadAdded is
+    // the actor's persistent memory — unadd/readd loops keep it, so the
+    // notice can never be farmed by toggling the add (the harassment this
+    // gate exists for). Later adds are ordinary silent 'friends' churn.
+    if (freshAdd && !(user?.hadAdded ?? []).includes(target)) {
+      await users.updateOne({ ul }, { $addToSet: { hadAdded: target } });
+      await notifyAccount(target, 'request', { by: ul });
+    } else {
+      await notifyAccount(target, 'friends', { by: ul });
+    }
     return { friends: await enriched(ul) };
   });
 
