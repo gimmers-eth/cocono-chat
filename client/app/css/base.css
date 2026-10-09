@@ -45,6 +45,13 @@
 * { box-sizing: border-box; margin: 0; }
 
 html, body { height: 100%; }
+/* Lock the DOCUMENT: with plain height:100% the page itself is scrollable,
+   and iOS pans the whole document when a near-edge input takes focus — the
+   header slides out of frame and the old scrollTo(0,0) correction then
+   yanked it back (visible "jump down, animate up" keyboard jank). The app
+   owns all scrolling (app-shell clips; lists scroll internally), so the
+   body is fixed and the document can NEVER be panned. */
+body { position: fixed; inset: 0; overflow: hidden; }
 /* Mobile: no double-tap zoom anywhere (tap targets are app chrome, not a
    document). Panning stays alive — .drawer-tabs swipe and the message list
    scroll depend on it; pinch is off via viewport meta + gesturestart guard. */
@@ -108,6 +115,10 @@ ul { list-style: none; padding: 0; }
 
 
 /* ---------- auth ---------- */
+/* The document is locked (body fixed) — the auth view is its OWN scroller
+   and pads above the keyboard (--kb-h from keyboard.js) so focused inputs
+   are never stranded under the keys. */
+#view-auth { overflow-y: auto; padding-bottom: calc(1rem + var(--kb-h, 0px)); }
 
 .view { height: 100%; display: grid; place-items: center; padding: 1rem; }
 

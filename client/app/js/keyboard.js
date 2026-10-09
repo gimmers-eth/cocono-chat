@@ -23,20 +23,16 @@ export function initKeyboardFit() {
 
   function apply() {
     root.style.setProperty('--app-h', `${Math.round(vv.height)}px`);
-    // iOS pans the document when focusing an input near the bottom edge:
-    // the shell is now short enough that the input is visible anyway —
-    // undo the pan so the header stays on screen.
-    if (document.activeElement?.tagName === 'INPUT') window.scrollTo(0, 0);
-    // Keep the newest messages above the keys while the height animates.
+    // keyboard height the DOCUMENT can no longer scroll away from (body is
+    // fixed): auth forms pad themselves by --kb-h so focused inputs are
+    // never under the keys; the chat shell doesn't need it (it resizes).
+    const covered = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+    root.style.setProperty('--kb-h', `${covered}px`);
+    // Keep the newest messages above the keys as the shell resizes.
     if (document.activeElement?.id === 'chat-input') pinBottom();
   }
 
   vv.addEventListener('resize', apply);
   vv.addEventListener('scroll', apply);
-  // The shell height eases over ~180ms (css transition); the rAF pin above
-  // can land mid-animation, so re-pin once the transition settles too.
-  document.querySelector('.app-shell')?.addEventListener('transitionend', (e) => {
-    if (e.propertyName === 'height' && document.activeElement?.id === 'chat-input') pinBottom();
-  });
   apply();
 }
