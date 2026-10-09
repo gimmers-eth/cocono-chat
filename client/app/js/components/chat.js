@@ -554,17 +554,26 @@ export function createChat({ client, onHomeRefresh }) {
         iconEl(iconKey ?? 'notFriend', tier === 'danger' ? 'icon-danger' : 'icon-warn'),
         document.createTextNode(` ${text}`),
       ];
-      // STRANGER bar carries a direct Add button — the warning's whole
-      // message is "add them", so let the bar finish the job. Suppressed
-      // whenever a key conflict/change is on screen (never fast-track
-      // straight past a live security alert).
-      if (state === PS.STRANGER && !conflictAlert(ent, pin) && pinState !== 'changed') {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'warn-action';
-        btn.textContent = `Add ${currentPeer}`;
-        btn.addEventListener('click', () => { btn.disabled = true; addUser().finally(() => { btn.disabled = false; }); });
-        kids.push(btn);
+      // STRANGER bar carries its own actions on a NEW centered line:
+      // look them up before deciding ("View profile") and the bar's whole
+      // point ("Add X"). The Add pill is suppressed while a key
+      // conflict/change alert is on screen — never fast-track a user past a
+      // live security warning; viewing the profile stays honest either way.
+      if (state === PS.STRANGER) {
+        const actions = document.createElement('span');
+        actions.className = 'warn-actions';
+        const mk = (label, fn, disabled = false) => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'warn-action';
+          btn.textContent = label;
+          btn.disabled = disabled;
+          btn.addEventListener('click', () => { btn.disabled = true; Promise.resolve(fn()).finally(() => { btn.disabled = false; }); });
+          return btn;
+        };
+        actions.append(mk('View profile', openProfileView));
+        if (!conflictAlert(ent, pin) && pinState !== 'changed') actions.append(mk(`Add ${currentPeer}`, addUser));
+        kids.push(actions);
       }
       warn.replaceChildren(...kids);
     }

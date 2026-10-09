@@ -338,13 +338,17 @@ img.own-avatar { border-radius: 50%; }
 #msg-modal .msg-modal-text { flex: 1 1 auto; max-height: none; }
 .linkish.danger { color: var(--danger); }
 
-/* action pill inside the trust warning bars (e.g. "Add <user>") */
-.chat-warn .warn-action {
-  // the bar's text is centered — a trailing inline button would crowd the
-  // last word; give it its own centered line with symmetric breathing room
-  display: block;
-  width: max-content;
+/* trust-warning actions: a NEW centered line of pills under the bar text
+   (the bar itself is text-align:center — inline tails would crowd the last
+   word). One rem rhythm: .6rem above, .15rem below the symmetric .4rem bar
+   padding. */
+.chat-warn .warn-actions {
+  display: flex;
+  justify-content: center;
+  gap: .6rem;
   margin: .6rem auto .15rem;
+}
+.chat-warn .warn-action {
   padding: 4px 14px;
   border-radius: 999px;
   border: 1px solid currentColor;
@@ -355,6 +359,7 @@ img.own-avatar { border-radius: 50%; }
   cursor: pointer;
 }
 .chat-warn .warn-action:hover { background: rgba(255, 255, 255, 0.12); }
+.chat-warn .warn-action:disabled { opacity: .55; cursor: default; }
 
 /* drawer head: logout + close sit together as a pair */
 .drawer-actions { display: inline-flex; align-items: center; gap: 6px; }
