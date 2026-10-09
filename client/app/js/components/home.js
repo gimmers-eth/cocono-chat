@@ -965,7 +965,10 @@ export function createHome({ client, chat, onLogout }) {
     });
 
     // Settings drawer: opens from the top over a click-to-dismiss scrim.
-    $('btn-devices').addEventListener('click', openSettings);
+    // wrap in an arrow: passing openSettings DIRECTLY hands it the click
+    // EVENT as the `tab` argument — the event is truthy, invalid, and made
+    // routing fall back to the persisted tab (the 'always devices' bug)
+    $('btn-devices').addEventListener('click', () => openSettings());
     $('btn-settings-close').addEventListener('click', closeSettings);
     $('drawer-overlay').addEventListener('click', closeSettings);
     document.addEventListener('keydown', (e) => {
