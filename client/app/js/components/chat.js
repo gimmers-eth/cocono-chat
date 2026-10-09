@@ -10,7 +10,7 @@
 // click-triggered catchUp re-render wiped within the same gesture.
 
 import { $, setStatus, setChatOpen, fmtTime, confirmModal, toast, animateSheetClose } from '../ui.js';
-import { createPeerSuggestions } from './peers.js';
+
 import { iconEl } from '../icons.js';
 import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl, premiumBadgeEl } from './peername.js';
 import { safetyNumber } from '../identity.js';
@@ -22,7 +22,7 @@ import {
   saveMessage, updateMessage, messagesWith, markRead, allMessages,
   getMessage, deleteMessage, clearMessages,
   loadPeerAvatars, rememberPeerAvatar, AVATARS_EVENT,
-  loadFriends, friendAdd, friendDel, friendMarkFlags, setFriends, FRIENDS_EVENT, loadPeerBlocked,
+  loadFriends, friendAdd, friendDel, friendMarkFlags, setFriends, FRIENDS_EVENT, loadPeerBlocked, loadPeerChips,
   getPin, recordPinSeen, markPeerGone, rememberPeerVerified,
 } from '../store.js';
 
@@ -1252,20 +1252,95 @@ export function createChat({ client, onHomeRefresh }) {
   // --- forward dialog ---
 
   let forwardId = null;
-  const forwardSuggestions = createPeerSuggestions($('forward-peers'));
+  // Forward recipients: ONLY contacts on my list (server cold-send aside,
+  // forwarding targets people you actually have). Blocked and deleted peers
+  // never appear. Tapping a name LOCKS it (row with ✕); Send needs a lock.
+  let fwdPeer = null;
+  let fwdContacts = [];
+
+  async function refreshFwdContacts() {
+    const [friends, chips, blocked] = await Promise.all([loadFriends(), loadPeerChips(), loadPeerBlocked()]);
+    fwdContacts = friends
+      .filter((f) => !blocked.get(f.peer) && !f.gone)
+      .map((f) => ({ ...f, chip: chips.get(f.peer) ?? null }))
+      .sort((a, b) => a.peer.localeCompare(b.peer));
+  }
+
+  function fwdLineOpts(c) {
+    const state = resolvePeerState({
+      gone: !!c.gone, bound: !!c.trusted, verified: !!c.verified, trusted: !!c.trust,
+    });
+    const chip = nameChipEl(c.chip ?? null);
+    if (chip) chip.classList.add('name-chip-inline');
+    return { peer: c.peer, state, chipEl: chip };
+  }
+
+  function paintFwdList() {
+    const ul = $('forward-peers');
+    if (!ul) return;
+    const q = $('forward-username').value.trim().toLowerCase();
+    ul.replaceChildren();
+    for (const c of fwdContacts.filter((x) => !q || (x.peer !== q && x.peer.includes(q)))) {
+      const li = document.createElement('li');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      const av = document.createElement('span');
+      av.className = 'avatar';
+      av.textContent = c.peer.slice(0, 1);
+      const nameEl = document.createElement('span');
+      mountLine(nameEl, fwdLineOpts(c));
+      btn.append(av, nameEl);
+      btn.addEventListener('click', () => { fwdPeer = c.peer; renderFwdPane(); });
+      li.append(btn);
+      ul.append(li);
+    }
+  }
+
+  function renderFwdPane() {
+    const picked = $('fwd-picked');
+    const search = $('fwd-search');
+    const results = $('fwd-results');
+    const send = $('btn-forward-send');
+    setStatus($('forward-status'), '');
+    if (fwdPeer) {
+      const c = fwdContacts.find((x) => x.peer === fwdPeer) ?? { peer: fwdPeer };
+      const line = document.createElement('span');
+      mountLine(line, fwdLineOpts(c));
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'linkish';
+      x.title = 'Cancel selection';
+      x.append(iconEl('close'));
+      x.addEventListener('click', () => {
+        fwdPeer = null;
+        renderFwdPane();
+        $('forward-username').focus?.();
+      });
+      picked.replaceChildren(line, x);
+      picked.hidden = false;
+      search.hidden = true;
+      results.hidden = true;
+      send.disabled = false;
+    } else {
+      picked.hidden = true;
+      picked.replaceChildren();
+      search.hidden = false;
+      results.hidden = false;
+      send.disabled = true;
+      paintFwdList();
+    }
+  }
 
   async function openForward(id, text) {
     forwardId = id;
     // no preview clone needed: the message text stays STATIONARY above the
     // sliding bottom section — the panel itself is the preview
     void text;
-    setStatus($('forward-status'), '');
+    fwdPeer = null;
     $('forward-username').value = '';
-    $('btn-forward-send').classList.remove('ready');
-    // same panel, second pane: the track slides LEFT, options enter from the
-    // right — message text stays visible through the transition
-    $('msg-panes').classList.add('showing-fwd');
-    await forwardSuggestions.refresh(); // local users, filtered as you type
+    $('msg-panes').classList.add('showing-fwd'); // pane slides LEFT, fwd enters right
+    await refreshFwdContacts();
+    renderFwdPane();
     // Autofocus on DESKTOP only. On a touch device it does nothing useful
     // (iOS raises no keyboard for programmatic focus — device trace proved
     // it) and it actively breaks the keyboard fit: the field is already
@@ -1276,6 +1351,7 @@ export function createChat({ client, onHomeRefresh }) {
 
   function closeForward() {
     forwardId = null;
+    fwdPeer = null;
     // cancel slides the forward pane back out to the RIGHT
     $('msg-panes').classList.remove('showing-fwd');
   }
@@ -1284,10 +1360,10 @@ export function createChat({ client, onHomeRefresh }) {
     return $('msg-panes')?.classList.contains('showing-fwd');
   }
 
-  async function sendForward(targetArg) {
+  async function sendForward() {
     const status = $('forward-status');
-    const target = String(targetArg ?? $('forward-username').value).trim().toLowerCase();
-    if (!target) { setStatus(status, 'Enter a username to forward to.', true); return; }
+    const target = fwdPeer; // LOCKED recipient only — free-text sending is gone
+    if (!target) { setStatus(status, 'Pick a contact first.', true); return; }
     const rec = forwardId && (await getMessage(forwardId));
     if (!rec) { closeForward(); return; }
     const btn = $('btn-forward-send');
@@ -1750,22 +1826,17 @@ export function createChat({ client, onHomeRefresh }) {
     // Fat-finger save: tapping a suggestion SELECTS (fills the field, the
     // list filters to show the pick) — sending requires the explicit Send
     // button / Enter, so there is a beat to check and cancel.
-    forwardSuggestions.wireInput($('forward-username'), (p) => {
-      const input = $('forward-username');
-      if (input.value.trim().toLowerCase() === p) {
-        input.value = ''; // tapping the already-selected name un-selects
-      } else {
-        input.value = p;
-      }
-      forwardSuggestions.paint();
-      $('btn-forward-send').classList.toggle('ready', !!input.value.trim());
-      input.focus?.();
+    $('forward-username').addEventListener('input', () => paintFwdList());
+    $('forward-username').addEventListener('keydown', (e) => {
+      // Enter locks the single visible/best match, like tapping it
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const q = $('forward-username').value.trim().toLowerCase();
+      const hit = fwdContacts.find((c) => c.peer === q) ?? fwdContacts.find((c) => c.peer.includes(q));
+      if (hit && !fwdPeer) { fwdPeer = hit.peer; renderFwdPane(); }
     });
     $('btn-forward-cancel').addEventListener('click', closeForward);
     $('btn-forward-send').addEventListener('click', () => sendForward());
-    $('forward-username').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') sendForward();
-    });
 
     // Catch up on attention: when the window becomes visible/focused (or the
     // user clicks into the conversation/input) with a chat open, the messages

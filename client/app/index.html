@@ -383,13 +383,16 @@
         </div>
       </div>
       <div class="msg-pane msg-pane-fwd">
-        <label class="field">
-          <input id="forward-username" type="text" placeholder="Send to username" maxlength="64"
+        <!-- you can only forward to contacts on YOUR list: the search picks,
+             a pick LOCKS (row with ✕ to release), Send only fires when locked -->
+        <div id="fwd-picked" class="fwd-picked" hidden></div>
+        <label class="field" id="fwd-search">
+          <input id="forward-username" type="text" placeholder="Send to…" maxlength="64"
                  spellcheck="false" autocomplete="off" />
         </label>
         <!-- fixed 3-name floor; Send/Cancel never move when results change -->
-        <div class="fwd-results">
-          <ul id="forward-peers" class="peer-list" hidden></ul>
+        <div class="fwd-results" id="fwd-results">
+          <ul id="forward-peers" class="peer-list"></ul>
         </div>
         <p id="forward-status" class="status" role="status"></p>
         <div class="fwd-actions">

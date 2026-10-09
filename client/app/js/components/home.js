@@ -4,7 +4,7 @@
 
 import { $, setStatus, fmtTime, confirmModal, openLightbox, toast, animateSheetClose } from '../ui.js';
 import { humanError } from '../errors.js';
-import { createPeerSuggestions } from './peers.js';
+import { createPeerSuggestions, makeTrustDecorator } from './peers.js';
 import { iconEl } from '../icons.js';
 import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, clearAllMessages, loadPeerVerifications, loadPeerPremiums, loadPeerAvatars, rememberPeerAvatar, rememberPeerVerified, rememberPeerChip, loadPeerChips, AVATARS_EVENT, FRIENDS_EVENT, loadPeerBlocked, saveBlockedSet } from '../store.js';
 import { blockUserWithConfirm, unblockUser, blockReasonLabel, blockReasonIcon } from '../blocks.js';
@@ -781,7 +781,9 @@ export function createHome({ client, chat, onLogout }) {
     // 'New chat' shows the users known on this device, filtered by typing;
     // tapping one opens that conversation directly.
     const peerInput = $('chat-peer-name');
-    const newChat = createPeerSuggestions($('chat-peer-suggestions'), { max: 3, floating: true });
+    const newChat = createPeerSuggestions($('chat-peer-suggestions'), {
+      max: 3, floating: true, decorate: makeTrustDecorator(), // trust icon + badge per name
+    });
     newChat.wireInput(peerInput, (p) => {
       peerInput.value = '';
       newChat.paint();

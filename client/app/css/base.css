@@ -716,8 +716,11 @@ span.avatar.chat-avatar { display: inline-grid; place-items: center; font-size: 
 #profile-trust { margin: 0 0 .2rem; }
 
 /* Chat options: right-hand side menu over the translucent scrim. */
+/* height follows --app-h: when the keyboard shrinks the visible viewport,
+   the panel shrinks WITH it (the stationary message area compresses via its
+   flex:1) instead of the keys covering the recipient list. */
 .side-menu {
-  position: fixed; top: 0; right: 0; bottom: 0; z-index: 50;
+  position: fixed; top: 0; right: 0; height: var(--app-h, 100dvh); z-index: 50;
   width: min(320px, 84vw);
   background: var(--panel); border-left: 1px solid var(--border);
   box-shadow: var(--shadow); overflow-y: auto; overflow-x: hidden;
@@ -919,7 +922,11 @@ body[data-view="blocked"] .page-footer { display: none; }
 .msg-pane { display: flex; flex-direction: column; gap: .35rem;
   transition: transform .24s cubic-bezier(.2, .8, .3, 1); }
 .msg-pane-fwd { transform: translateX(100%); }
-.msg-pane-view { position: absolute; inset: 0; }
+.msg-pane-view { position: absolute; inset: 0; padding-right: 16px; }
+/* the picked recipient row (locked selection with an ✕ to release it) */
+.fwd-picked { display: flex; align-items: center; gap: .6rem; padding: .3rem .1rem; }
+.fwd-picked .uname { font-size: 1rem; }
+.fwd-picked button { flex: none; }
 .msg-panes.showing-fwd .msg-pane-view { transform: translateX(-100%); }
 .msg-panes.showing-fwd .msg-pane-fwd { transform: translateX(0); }
 /* (message-text sizing lives with the carousel block above) */

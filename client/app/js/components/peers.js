@@ -9,9 +9,12 @@
 // dropdown that floats OVER the content below its (position:relative)
 // container and dismisses on outside click.
 
-import { knownPeers } from '../store.js';
+import { knownPeers, loadFriends, loadPeerChips, loadPeerBlocked, loadPeerVerifications } from '../store.js';
+import { resolvePeerState, PS } from './peername.js';
+import { lineKids } from './userline.js';
+import { nameChipEl } from '../badges.js';
 
-export function createPeerSuggestions(listEl, { max = Infinity, floating = false } = {}) {
+export function createPeerSuggestions(listEl, { max = Infinity, floating = false, decorate = null } = {}) {
   let peers = [];
   let getValue = () => '';
   let onPick = () => {};
@@ -32,6 +35,7 @@ export function createPeerSuggestions(listEl, { max = Infinity, floating = false
       const name = document.createElement('span');
       name.textContent = `${p}`;
       btn.append(av, name);
+      if (decorate) decorate(name, p); // async upgrade to the trust line (replaces text)
       btn.title = `${p}`;
       btn.addEventListener('click', () => {
         dismissed = true; // collapse after picking (re-shows on next focus)
@@ -73,4 +77,36 @@ export function createPeerSuggestions(listEl, { max = Infinity, floating = false
   }
 
   return { refresh, paint, wireInput, dismiss };
+}
+
+/**
+ * Row decorator that swaps a plain name span for THE username component
+ * (trust icon + worn badge + red-unverified mark) — used by the 'start a
+ * chat' search and any other suggestion list. Reads the local mirrors
+ * (friends/chips/blocked/verified) once per refresh; rows paint instantly
+ * and re-decorate when the maps land (usually the same frame).
+ */
+export function makeTrustDecorator() {
+  return async (nameEl, peer) => {
+    const ul = String(peer).toLowerCase();
+    const [fs, chips, blocked, verified] = await Promise.all([
+      loadFriends().catch(() => []), loadPeerChips(), loadPeerBlocked(), loadPeerVerifications(),
+    ]);
+    const ent = fs.find((f) => f.peer === ul);
+    const state = blocked.get(ul) ? PS.BLOCKED
+      : resolvePeerState({
+        gone: !!ent?.gone,
+        bound: !!ent?.trusted,
+        verified: !!ent?.verified,
+        trusted: !!ent?.trust,
+      });
+    const chip = nameChipEl(chips.get(ul) ?? null);
+    if (chip) chip.classList.add('name-chip-inline');
+    nameEl.replaceChildren(...lineKids({
+      peer: ul,
+      state,
+      chipEl: chip,
+      unverified: verified.get(ul) === false,
+    }));
+  };
 }
