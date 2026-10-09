@@ -6,8 +6,11 @@
 // off-screen while typing. Three tools, one philosophy — the HEADER NEVER
 // MOVES; only the space between header and composer changes:
 //
-//  1. PRE-FLIGHT (iOS): Safari pans only when the focused input would land
-//     UNDER the keyboard. The shrink must NOT happen on pointerdown: iOS
+//  1. PRE-FLIGHT (iOS, BROWSER TABS ONLY): tab-mode Safari pans when the
+//     focused input would land UNDER the keyboard — the installed PWA's
+//     webview RESIZES instead, so standalone skips pre-flight entirely (see
+//     IS_STANDALONE) and gets a deferred shove in the mirror pass. In tab
+//     mode the shrink must NOT happen on pointerdown: iOS
 //     dispatches the synthetic mousedown/focus only AFTER touchend,
 //     hit-tested against the by-then-moved layout — relocating the input
 //     400px away from the finger means focus never lands and the keyboard
@@ -61,6 +64,19 @@ export function keyboardLogLines() {
 const IS_IOS =
   /iP(hone|od|ad)/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+// Installed PWA (Add to Home Screen). CRITICAL behavioural fork proven by
+// the device traces: the standalone WKWebView RESIZES itself for the
+// keyboard (innerHeight 894→481 in one near-instant native step, zero
+// pan/scroll) while browser-tab Safari PANS instead. Pre-flight shrinking
+// is only needed for the panning browser mode — in standalone it fires
+// ~60ms BEFORE the native resize, so the user saw the app snap up 413px
+// with no keyboard on screen yet, then the resize arrive: two motions,
+// the reported "header jumps about". Standalone therefore skips the
+// pre-flight entirely and lets the native resize + mirror do the single,
+// keyboard-synced fit.
+const IS_STANDALONE =
+  !!window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
 
 // iPhone portrait letter keyboard ≈ 291px + QuickType ≈ 55px; emoji panels
 // run taller. Used only for the FIRST-EVER open (no measurement yet); the
@@ -156,8 +172,16 @@ export function initKeyboardFit() {
     if (log.length > LOG_MAX) log.shift();
   }
 
+  // Deferred shove (standalone's replacement for the pre-flight one): the
+  // first mirror pass of a keyboard session — i.e. right after the native
+  // webview resize landed — reveals the focused field inside its own
+  // scroller (settings drawer, auth view, modals) synchronously, so iOS
+  // finds it visible and has no reveal scroll left to animate.
+  let shovedThisSession = false;
+
   function apply(src = 'vv') {
     const cover = Math.max(0, restH - vv.height);
+    const keyboardUp = cover > 80;
     lastCover = cover;
     // SQUASH iOS's reveal scroll on EVERY event — including while the
     // keyboard is up. With pre-flight in place the focused field is already
@@ -184,6 +208,15 @@ export function initKeyboardFit() {
     // baseline so toolbar show/hide doesn't leave a stale restH.
     if (cover <= 80 && sy === 0 && vv.offsetTop === 0) restH = window.innerHeight;
     fit(vv.height, cover);
+    // Deferred shove: once per keyboard session, when the fit first lands.
+    if (keyboardUp && !shovedThisSession) {
+      shovedThisSession = true;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) {
+        ae.scrollIntoView({ block: 'nearest' });
+      }
+    }
+    if (!keyboardUp) shovedThisSession = false;
     // RIDE — DEBOUNCED. Device traces showed the remaining offsetTop pans
     // are TRANSIENT overshoots: iOS pans (98/201px) computed from the
     // pre-shrink geometry and cancels ~16ms later, animating the restore
@@ -230,6 +263,7 @@ export function initKeyboardFit() {
   let revertTimer = 0;
   function preflight(el) {
     if (!IS_IOS) return;            // Android resizes itself; desktop has no soft keyboard
+    if (IS_STANDALONE) return;      // the webview resizes natively — pre-fitting would double-move (see IS_STANDALONE)
     if (lastCover > 80) return;     // keyboard already up: nothing to pre-fit
     const est = cachedKb || DEFAULT_KB;
     const margin = cachedKb ? 0 : PRE_MARGIN; // learned cache = device truth, no slack
