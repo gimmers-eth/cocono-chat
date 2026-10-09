@@ -25,11 +25,19 @@
 //     --app-h = vv.height (exact), --kb-h = the covered band, and
 //     --vv-top = vv.offsetTop. The cache learns the real keyboard height
 //     for the next pre-flight.
-//  3. RIDE: if Safari did pan (offsetTop > 0), the body's
-//     translateY(var(--vv-top)) shifts the WHOLE fixed layer cake down by
-//     exactly the pan amount on the same frame we learn it — net effect on
-//     screen: nothing moves, the header stays glued to the top edge.
-//     Desktop/Android: offsetTop is always 0 → the ride is a no-op.
+//  3. RIDE: if Safari did pan/scroll anyway (pre-focused fields — the
+//     composer and forward search are focused programmatically, so a tap
+//     fires no focusin; drawer/modal fields the shell shrink doesn't move),
+//     the body's translateY(var(--vv-top)) shifts the WHOLE fixed layer cake
+//     down by exactly the displacement, on the same frame we learn it —
+//     net effect on screen: nothing moves, the header stays glued to the
+//     top edge. iOS displaces fixed layers through TWO channels and the
+//     ride must sum both (the canonical pin formula is
+//     pageYOffset + vv.offsetTop): vv.offsetTop (visual-viewport pan) AND
+//     window.scrollY — iOS phantom-scrolls the DOCUMENT to reveal focused
+//     inputs even with html overflow:hidden + a fixed body, and that scroll
+//     carries fixed elements off-screen with it.
+//     Desktop/Android: both are always 0 → the ride is a no-op.
 
 // iOS soft keyboards don't resize the layout viewport — only they pan it.
 // Android Chrome resizes (interactive-widget=resizes-content in the meta),
@@ -83,7 +91,12 @@ export function initKeyboardFit() {
   function apply() {
     const cover = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
     lastCover = cover;
-    fit(vv.height, cover, vv.offsetTop);
+    // Keyboard closed but iOS left a phantom document scroll behind: reset
+    // it (nothing can legitimately scroll — html is overflow:hidden, body
+    // fixed). While the keyboard is UP we never fight the scroll — we RIDE
+    // it (below); yanking it mid-animation is the old snap-back hop.
+    if (cover <= 80 && window.scrollY !== 0) window.scrollTo(0, 0);
+    fit(vv.height, cover, vv.offsetTop + Math.max(0, window.scrollY));
     if (cover > 80 && Math.abs(cover - cachedKb) > 8) { // the keyboard revealed itself: learn it
       cachedKb = cover;
       try { localStorage.setItem('cocono.kb-h', String(cover)); } catch { /* private mode */ }
@@ -129,5 +142,8 @@ export function initKeyboardFit() {
 
   vv.addEventListener('resize', apply);
   vv.addEventListener('scroll', apply);
+  // iOS's phantom DOCUMENT scroll (the scrollY ride channel) fires window
+  // scroll events that the visualViewport listeners never see.
+  window.addEventListener('scroll', apply, { passive: true });
   apply();
 }
