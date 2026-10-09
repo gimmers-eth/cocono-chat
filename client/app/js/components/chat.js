@@ -1259,10 +1259,12 @@ export function createChat({ client, onHomeRefresh }) {
   let fwdContacts = [];
 
   async function refreshFwdContacts() {
-    const [friends, chips, blocked] = await Promise.all([loadFriends(), loadPeerChips(), loadPeerBlocked()]);
+    const [friends, chips, blocked, avatars] = await Promise.all(
+      [loadFriends(), loadPeerChips(), loadPeerBlocked(), loadPeerAvatars()],
+    );
     fwdContacts = friends
       .filter((f) => !blocked.get(f.peer) && !f.gone)
-      .map((f) => ({ ...f, chip: chips.get(f.peer) ?? null }))
+      .map((f) => ({ ...f, chip: chips.get(f.peer) ?? null, avatar: avatars.get(f.peer)?.avatar ?? null }))
       .sort((a, b) => a.peer.localeCompare(b.peer));
   }
 
@@ -1280,13 +1282,23 @@ export function createChat({ client, onHomeRefresh }) {
     if (!ul) return;
     const q = $('forward-username').value.trim().toLowerCase();
     ul.replaceChildren();
-    for (const c of fwdContacts.filter((x) => !q || (x.peer !== q && x.peer.includes(q)))) {
+    // exact matches stay visible, max 3 rows (the 3-name floor means the
+    // action bar below never shifts no matter what matches)
+    for (const c of fwdContacts.filter((x) => !q || x.peer.includes(q)).slice(0, 3)) {
       const li = document.createElement('li');
       const btn = document.createElement('button');
       btn.type = 'button';
-      const av = document.createElement('span');
-      av.className = 'avatar';
-      av.textContent = c.peer.slice(0, 1);
+      let av;
+      if (c.avatar) {
+        av = document.createElement('img');
+        av.className = 'avatar avatar-img';
+        av.alt = '';
+        av.src = `data:image/jpeg;base64,${c.avatar}`;
+      } else {
+        av = document.createElement('span');
+        av.className = 'avatar';
+        av.textContent = c.peer.slice(0, 1);
+      }
       const nameEl = document.createElement('span');
       mountLine(nameEl, fwdLineOpts(c));
       btn.append(av, nameEl);
@@ -1317,6 +1329,13 @@ export function createChat({ client, onHomeRefresh }) {
         $('forward-username').focus?.();
       });
       picked.replaceChildren(line, x);
+      if (c.avatar) {
+        const img = document.createElement('img');
+        img.className = 'avatar avatar-img';
+        img.alt = '';
+        img.src = `data:image/jpeg;base64,${c.avatar}`;
+        picked.replaceChildren(img, line, x);
+      }
       picked.hidden = false;
       search.hidden = true;
       results.hidden = true;

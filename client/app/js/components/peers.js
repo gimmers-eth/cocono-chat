@@ -9,13 +9,14 @@
 // dropdown that floats OVER the content below its (position:relative)
 // container and dismisses on outside click.
 
-import { knownPeers, loadFriends, loadPeerChips, loadPeerBlocked, loadPeerVerifications } from '../store.js';
+import { knownPeers, loadFriends, loadPeerChips, loadPeerBlocked, loadPeerVerifications, loadPeerAvatars } from '../store.js';
 import { resolvePeerState, PS } from './peername.js';
 import { lineKids } from './userline.js';
 import { nameChipEl } from '../badges.js';
 
 export function createPeerSuggestions(listEl, { max = Infinity, floating = false, decorate = null } = {}) {
   let peers = [];
+  let avatars = new Map();
   let getValue = () => '';
   let onPick = () => {};
   let dismissed = false;
@@ -23,15 +24,28 @@ export function createPeerSuggestions(listEl, { max = Infinity, floating = false
   function paint() {
     if (!listEl) return;
     const q = getValue().trim().toLowerCase();
-    const items = peers.filter((p) => (!q || p.includes(q)) && p !== q).slice(0, max);
+    // an EXACT match stays listed (it used to hide — the typing completion
+    // read as "no such user" right when the name was fully typed)
+    const items = peers.filter((p) => !q || p.includes(q)).slice(0, max);
     const frag = document.createDocumentFragment();
     for (const p of items) {
       const li = document.createElement('li');
       const btn = document.createElement('button');
       btn.type = 'button';
-      const av = document.createElement('span');
-      av.className = 'avatar';
-      av.textContent = p.slice(0, 1);
+      // profile photo when we have one (it rides the same avatar classes,
+      // so sizing stays with .peer-list .avatar), else the initial
+      let av;
+      const rec = avatars.get(p);
+      if (rec?.avatar) {
+        av = document.createElement('img');
+        av.className = 'avatar avatar-img';
+        av.alt = '';
+        av.src = `data:image/jpeg;base64,${rec.avatar}`;
+      } else {
+        av = document.createElement('span');
+        av.className = 'avatar';
+        av.textContent = p.slice(0, 1);
+      }
       const name = document.createElement('span');
       name.textContent = `${p}`;
       btn.append(av, name);
@@ -52,6 +66,7 @@ export function createPeerSuggestions(listEl, { max = Infinity, floating = false
   async function refresh() {
     dismissed = false;
     try { peers = await knownPeers(); } catch { peers = []; }
+    try { avatars = await loadPeerAvatars(); } catch { avatars = new Map(); }
     paint();
   }
 
