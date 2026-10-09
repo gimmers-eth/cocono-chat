@@ -44,7 +44,9 @@ export function mountLine(el, opts) {
     lightbox (cursor reflects it). sizeClass keeps per-surface sizing. */
 export function avatarStack(name, { src = '', zoom = false, sizeClass = 'avatar' } = {}) {
   const wrap = document.createElement('span');
-  wrap.className = `avatar-stack${zoom && src ? ' zoomable' : ''}`;
+  // zoom marks the stack HERO: profile surfaces size their avatars a step
+  // larger via .avatar-hero (own class, immune to future .avatar overrides)
+  wrap.className = `avatar-stack${zoom ? ' avatar-hero' : ''}${zoom && src ? ' zoomable' : ''}`;
   wrap.dataset.zoom = zoom ? '1' : '';
   if (src) {
     const img = document.createElement('img');
