@@ -784,11 +784,14 @@ body[data-view="blocked"] .page-footer { display: none; }
   border-top: 1px solid var(--border); opacity: .75; user-select: none;
 }
 
-/* Transient toast pill, anchored above the composer INSIDE the chat view */
+/* Transient toast pill. FIXED (not absolute inside .chat-view): it must be
+   visible while the settings drawer / profile sheets / modals (z 50) and the
+   lightbox (z 70) are on screen — the toast is the status channel, so it
+   floats above all of them (75). */
 .chat-view { position: relative; }
 .toast {
-  position: absolute; left: 50%; bottom: calc(4.4rem + var(--sa-b));
-  transform: translateX(-50%); z-index: 30;
+  position: fixed; left: 50%; bottom: calc(4.4rem + var(--sa-b));
+  transform: translateX(-50%); z-index: 75;
   max-width: min(92%, 520px);
   background: var(--panel-raised); color: var(--text);
   border: 1px solid var(--border); border-left: 3px solid var(--accent);
