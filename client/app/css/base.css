@@ -904,7 +904,17 @@ body[data-view="blocked"] .page-footer { display: none; }
 .udouble-meta { display: grid; gap: .1rem; min-width: 0; }
 
 .avatar-stack { display: inline-flex; flex: none; }
+.avatar-stack { position: relative; }
 .avatar-stack.zoomable .avatar-img { cursor: zoom-in; }
+/* magnifier corner: the zoom affordance, shown only when a real photo can
+   be enlarged (initials never advertise zoom) */
+.avatar-zoom-hint {
+  position: absolute; right: -4px; bottom: -4px;
+  font-size: .62rem; line-height: 1; padding: 3px;
+  background: var(--panel-raised); color: var(--text);
+  border: 1px solid var(--border); border-radius: 50%;
+  box-shadow: var(--shadow); pointer-events: none;
+}
 
 /* identity sub line under a name: green shield-person + "Verified" */
 .user-verified-sub {

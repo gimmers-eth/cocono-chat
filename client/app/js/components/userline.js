@@ -53,6 +53,13 @@ export function avatarStack(name, { src = '', zoom = false, sizeClass = 'avatar'
     img.src = src;
     if (zoom) img.addEventListener('click', () => openLightbox(src));
     wrap.append(img);
+    if (zoom) {
+      // visible affordance: a magnifier corner badge whenever a PHOTO (not
+      // the initial) can actually be enlarged — profile sheets & previews
+      const hint = iconEl('magnifier', 'avatar-zoom-hint');
+      hint.setAttribute('aria-hidden', 'true');
+      wrap.append(hint);
+    }
   } else {
     const span = document.createElement('span');
     span.className = `avatar ${sizeClass}`.trim();

@@ -210,13 +210,9 @@
 
       <div id="tabpanel-profile" hidden>
         <h3>My profile</h3>
-        <div class="profile-id own-profile">
-          <img id="profile-own-avatar" class="avatar own-avatar" alt="" hidden />
-          <span id="profile-own-initial" class="avatar own-avatar" aria-hidden="true"></span>
-          <span class="profile-idtext">
-            <span class="profile-nameline"><span id="profile-own-name"></span></span>
-          </span>
-        </div>
+        <!-- THE double-line component (userline.js): avatar + name line +
+             Verified sub — same grammar as the sidebar head, zoom ON -->
+        <div class="profile-id own-profile" id="profile-own-hero"></div>
         <input id="profile-avatar-input" type="file" accept="image/png,image/jpeg" hidden />
         <div class="row-actions profile-actions">
           <button id="btn-profile-avatar" class="btn btn-small">Change photo</button>

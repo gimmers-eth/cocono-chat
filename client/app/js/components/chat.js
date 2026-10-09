@@ -817,7 +817,8 @@ export function createChat({ client, onHomeRefresh }) {
       if (prof.avatar) {
         setAvatar($('profile-av'), currentPeer, {
           src: `data:${prof.avatarType || 'image/jpeg'};base64,${prof.avatar}`,
-          sizeClass: 'profile-avatar', // zoom ON here (delegation covers #profile-modal)
+          sizeClass: 'profile-avatar',
+          zoom: true, // photo set → lightbox + magnifier hint (delegation: #profile-modal)
         });
       }
     } catch { /* offline / deleted: initials + no bio */ }
@@ -939,6 +940,7 @@ export function createChat({ client, onHomeRefresh }) {
     setAvatar($('profile-av'), meUl, {
       src: prof?.avatar ? `data:image/jpeg;base64,${prof.avatar}` : '',
       sizeClass: 'profile-avatar',
+      zoom: true, // own preview zooms like any profile
     });
     const bioSec = $('profile-bio-section');
     const bioEl = $('profile-peer-bio');

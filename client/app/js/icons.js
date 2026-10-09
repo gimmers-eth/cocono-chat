@@ -31,11 +31,13 @@ export const ICONS = {
 
   // friendship (one-way trust) — sidebar + menu identity marks
   userSolid: 'fa-user',              // you (solid)
+  magnifier: 'fa-magnifying-glass-plus',
   ban: 'fa-ban',
   // block-reason glyphs (iconEl understands two-word 'fa-<style> <name>')
   reasonNospeak: 'fa-regular fa-message',
   reasonUnknown: 'fa-regular fa-circle-question',
   reasonScam: 'fa-solid fa-triangle-exclamation',
+  magnifier: 'fa-magnifying-glass-plus',
   ban: 'fa-ban',                    // blocked marker
   userGone: 'fa-user-slash',         // deleted account (red, italic name)
   friend: 'fa-regular fa-user',      // added, not verified (orange)

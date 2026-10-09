@@ -8,7 +8,7 @@ import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
 import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, clearAllMessages, loadPeerVerifications, loadPeerPremiums, loadPeerAvatars, rememberPeerAvatar, rememberPeerVerified, rememberPeerChip, loadPeerChips, AVATARS_EVENT, FRIENDS_EVENT, loadPeerBlocked, saveBlockedSet } from '../store.js';
 import { blockUserWithConfirm, unblockUser, blockReasonLabel, blockReasonIcon } from '../blocks.js';
-import { mountLine, avatarStack, setAvatar, verifiedSubEl } from './userline.js';
+import { mountLine, avatarStack, setAvatar, verifiedSubEl, doubleLine } from './userline.js';
 import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl } from './peername.js';
 import { guessDeviceName, humanPlatform } from '../devices.js';
 import { BADGE_UI, nameChipEl } from '../badges.js';
@@ -127,6 +127,7 @@ export function createHome({ client, chat, onLogout }) {
           await client.setProfile({ displayBadge: b.id });
           myDisplay = b.id;
           paintMyLine();
+          paintOwnHero(); // the WORN chip changes live, not on next entry
         } catch (err) {
           // rapid badge toggling trips the stage guards — say so plainly
           // (a silent swallow made 429s look like dead buttons)
@@ -298,38 +299,39 @@ export function createHome({ client, chat, onLogout }) {
   let pendingAvatar = null; // 'clear' | base64 jpeg | null (nothing pending)
   let pendingBioSaved = null; // last bio confirmed on the server
 
+  // Settings > My profile hero — THE double-line component, same grammar as
+  // the sidebar head (avatar + trust line + worn chip + red-unverified mark)
+  // plus the green "Verified" sub line once identity lands. Zoom ON: this is
+  // a profile surface (lightbox delegation already covers #tabpanel-profile).
+  let ownHeroAvatar = null; // b64 photo | null
+  function paintOwnHero() {
+    const host = $('profile-own-hero');
+    if (!host) return;
+    const ul = String(client.username ?? '');
+    const chip = nameChipEl(myChipId());
+    if (chip) chip.classList.add('name-chip-inline');
+    host.replaceChildren(doubleLine({
+      peer: ul,
+      avatar: avatarStack(ul, {
+        src: ownHeroAvatar ? `data:image/jpeg;base64,${ownHeroAvatar}` : '',
+        zoom: true,
+        sizeClass: 'own-avatar',
+      }),
+      line: { state: PS.SELF, chipEl: chip, unverified: myVerified === false },
+      sub: myVerified ? verifiedSubEl() : null,
+    }));
+    $('btn-profile-avatar-clear').hidden = !ownHeroAvatar;
+  }
+
   function paintOwnAvatar(b64) {
-    const img = $('profile-own-avatar');
-    const initial = $('profile-own-initial');
-    // keep the fallback letter ready + centred (.avatar grid handles it;
-    // no display overrides here)
-    initial.textContent = String(client.username ?? '?').slice(0, 1).toUpperCase();
-    if (b64) {
-      img.src = `data:image/jpeg;base64,${b64}`;
-      img.hidden = false;
-      initial.hidden = true;
-    } else {
-      img.removeAttribute('src');
-      img.hidden = true;
-      initial.hidden = false;
-    }
-    $('btn-profile-avatar-clear').hidden = !b64;
+    ownHeroAvatar = b64 ?? null;
+    paintOwnHero();
   }
 
   async function renderProfileTab() {
     try {
       const me = await client.profile();
-      { // THE component: same single-line grammar everywhere
-        const ownChip = nameChipEl(myChipId());
-        if (ownChip) ownChip.classList.add('name-chip-inline');
-        mountLine($('profile-own-name'), {
-          peer: String(client.username ?? ''),
-          state: PS.SELF,
-          chipEl: ownChip,
-          unverified: myVerified === false,
-        });
-      }
-      $('profile-own-initial').textContent = String(client.username ?? '?').slice(0, 1);
+      paintOwnHero(); // repainted again below once the photo arrives
       const bio = me.bio ?? '';
       const field = $('profile-bio');
       if (document.activeElement !== field || bio === (pendingBioSaved ?? field.value)) {
@@ -843,7 +845,6 @@ export function createHome({ client, chat, onLogout }) {
     });
 
     $('btn-profile-avatar').addEventListener('click', () => $('profile-avatar-input').click());
-    $('profile-own-avatar').addEventListener('click', (e) => { if (!e.target.hidden) openLightbox(e.target.src); });
     $('btn-profile-preview').addEventListener('click', () => {
       closeSettings();
       chat.openSelfProfile?.();
@@ -999,12 +1000,16 @@ export function createHome({ client, chat, onLogout }) {
       try { await client.setProfile({ displayBadge: '' }); myDisplay = ''; }
       catch (err) { toast(humanError(err), 'error'); }
       paintMyLine();
+      paintOwnHero();
       renderOwnBadges();
     });
     // a fresh award landed (main.js poll) or a wear choice was made from the
     // badge modal: own tab + head chip re-read
     for (const ev of ['cocono:newbadges', 'cocono:badges-changed']) {
-      window.addEventListener(ev, () => { renderIdentity().catch(() => {}); });
+      window.addEventListener(ev, () => {
+        renderIdentity().catch(() => {});
+        paintOwnHero(); // worn chip follows the badge state from ANY surface
+      });
     }
     wireApproveCode();
   }
