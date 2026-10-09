@@ -4,9 +4,11 @@
 // blurb the detail modal shows, and the chip builder used wherever a name
 // wears its badge.
 //
-// SVGs are built with createElementNS — the app bans innerHTML everywhere.
+// All ARTWORK lives in one shared module (badges-art.js) that the ADMIN
+// PANEL also loads — same code, same pixels, no mirrors to drift. Built
+// with createElementNS — the app bans innerHTML everywhere.
 
-import { iconEl } from './icons.js';
+import { drawBadgeArt } from './badges-art.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -30,7 +32,7 @@ export class BadgeDef {
     return svg;
   }
 
-  art(_svg) { /* subclass draws */ }
+  art(svg) { drawBadgeArt(this.id, svg); }
 
   /** chip = small icon + label — the profile BADGES row. Always an enabled
    *  button: clicking it opens the badge detail modal (a disabled button
@@ -57,47 +59,6 @@ export class OgBadge extends BadgeDef {
   animated = true;
   blurb = 'One of the first ten accounts on CoCoNo.';
 
-  art(svg) {
-    // the CoCoNo mark, distilled: two linked rings (the double-C) on the
-    // brand-purple plate, with OG across the base
-    const plate = document.createElementNS(NS, 'rect');
-    plate.setAttribute('x', '4'); plate.setAttribute('y', '4');
-    plate.setAttribute('width', '92'); plate.setAttribute('height', '92');
-    plate.setAttribute('rx', '24');
-    plate.setAttribute('fill', 'url(#ogGrad)');
-    const defs = document.createElementNS(NS, 'defs');
-    const grad = document.createElementNS(NS, 'linearGradient');
-    grad.setAttribute('id', 'ogGrad');
-    grad.setAttribute('x1', '0'); grad.setAttribute('y1', '0');
-    grad.setAttribute('x2', '1'); grad.setAttribute('y2', '1');
-    for (const [off, col] of [['0', '#8f7ff0'], ['1', '#4b3fa8']]) {
-      const stop = document.createElementNS(NS, 'stop');
-      stop.setAttribute('offset', off);
-      stop.setAttribute('stop-color', col);
-      grad.append(stop);
-    }
-    defs.append(grad);
-    const rings = document.createElementNS(NS, 'g');
-    rings.setAttribute('fill', 'none');
-    rings.setAttribute('stroke', '#ffffff');
-    rings.setAttribute('stroke-width', '7');
-    rings.setAttribute('stroke-linecap', 'round');
-    for (const cx of [39, 61]) {
-      const c = document.createElementNS(NS, 'path');
-      // open rings (C shapes) facing each other and interlocking
-      c.setAttribute('d', `M ${cx + 12} 36 A 15 15 0 1 0 ${cx + 12} 62`);
-      rings.append(c);
-    }
-    const txt = document.createElementNS(NS, 'text');
-    txt.setAttribute('x', '50'); txt.setAttribute('y', '88');
-    txt.setAttribute('text-anchor', 'middle');
-    txt.setAttribute('fill', '#ffe9a8');
-    txt.setAttribute('font-size', '20');
-    txt.setAttribute('font-weight', '800');
-    txt.setAttribute('font-family', 'system-ui, sans-serif');
-    txt.textContent = 'OG';
-    svg.append(defs, plate, rings, txt);
-  }
 }
 
 export class EarlyBirdBadge extends BadgeDef {
@@ -107,22 +68,6 @@ export class EarlyBirdBadge extends BadgeDef {
   cap = 1000;
   blurb = 'Joined CoCoNo before the end of 2026 — one of the first 1,000 accounts to get the word out.';
 
-  art(svg) {
-    const plate = document.createElementNS(NS, 'rect');
-    plate.setAttribute('x', '4'); plate.setAttribute('y', '4');
-    plate.setAttribute('width', '92'); plate.setAttribute('height', '92');
-    plate.setAttribute('rx', '24');
-    plate.setAttribute('fill', '#243a4d');
-    const bird = document.createElementNS(NS, 'path');
-    // a clean origami swallow in flight
-    bird.setAttribute('d', 'M18 62 L52 48 L84 24 L60 52 L88 60 L44 70 Z');
-    bird.setAttribute('fill', '#7fd4ff');
-    const sun = document.createElementNS(NS, 'circle');
-    sun.setAttribute('cx', '74'); sun.setAttribute('cy', '70');
-    sun.setAttribute('r', '7');
-    sun.setAttribute('fill', '#ffd76a');
-    svg.append(plate, bird, sun);
-  }
 }
 
 export class PremiumBadgeDef extends BadgeDef {
@@ -132,15 +77,8 @@ export class PremiumBadgeDef extends BadgeDef {
   cap = null;
   blurb = 'A premium subscriber. The gold certificate funds the platform and lifts CoCo reputation.';
 
-  icon(px) {
-    // reuse the brand's certificate glyph rather than a bespoke SVG
-    const wrap = document.createElement('span');
-    wrap.className = 'badge-ic badge-ic-premium';
-    const ic = iconEl('premium');
-    ic.style.fontSize = `${Math.round(px * 0.9)}px`;
-    wrap.append(ic);
-    return wrap;
-  }
+  // NO bespoke icon() anymore: the certificate SVG (badges-art.js) is the
+  // one image every surface — app chips, modals and the admin panel — shares
 }
 
 /** The small mark a NAME wears (chat head, sidebar row, side-head). */
@@ -166,34 +104,6 @@ class MailBadge extends BadgeDef {
   cap = null;
   blurb = 'Your first five messages went out into the world. The mailbox only fills up from here.';
 
-  art(svg) {
-    const plate = document.createElementNS(NS, 'rect');
-    plate.setAttribute('x', '4'); plate.setAttribute('y', '4');
-    plate.setAttribute('width', '92'); plate.setAttribute('height', '92');
-    plate.setAttribute('rx', '24');
-    plate.setAttribute('fill', '#3b2f14');
-    const body = document.createElementNS(NS, 'rect');
-    body.setAttribute('x', '20'); body.setAttribute('y', '36');
-    body.setAttribute('width', '60'); body.setAttribute('height', '38');
-    body.setAttribute('rx', '7');
-    body.setAttribute('fill', '#f0b954');
-    const flap = document.createElementNS(NS, 'path');
-    flap.setAttribute('d', 'M20 43 L50 62 L80 43');
-    flap.setAttribute('fill', 'none');
-    flap.setAttribute('stroke', '#3b2f14');
-    flap.setAttribute('stroke-width', '5');
-    flap.setAttribute('stroke-linecap', 'round');
-    const pips = document.createElementNS(NS, 'g');
-    pips.setAttribute('fill', '#3b2f14');
-    for (let i = 0; i < 5; i++) {
-      const dot = document.createElementNS(NS, 'circle');
-      dot.setAttribute('cx', String(30 + i * 10));
-      dot.setAttribute('cy', '80');
-      dot.setAttribute('r', '2.4');
-      pips.append(dot);
-    }
-    svg.append(plate, body, flap, pips);
-  }
 }
 
 class TeachersPetBadge extends BadgeDef {
@@ -203,23 +113,6 @@ class TeachersPetBadge extends BadgeDef {
   cap = null;
   blurb = "Hand-picked by the platform staff — a small apple for the teacher's pet.";
 
-  art(svg) {
-    const plate = document.createElementNS(NS, 'rect');
-    plate.setAttribute('x', '4'); plate.setAttribute('y', '4');
-    plate.setAttribute('width', '92'); plate.setAttribute('height', '92');
-    plate.setAttribute('rx', '24');
-    plate.setAttribute('fill', '#2c3324');
-    const apple = document.createElementNS(NS, 'path');
-    apple.setAttribute('d', 'M50 40 C64 30 82 40 80 58 C78 74 64 84 50 78 C36 84 22 74 20 58 C18 40 36 30 50 40 Z');
-    apple.setAttribute('fill', '#d05252');
-    const leaf = document.createElementNS(NS, 'path');
-    leaf.setAttribute('d', 'M52 36 C56 24 68 22 74 24 C70 34 60 38 52 36 Z');
-    leaf.setAttribute('fill', '#4c8a4f');
-    const star = document.createElementNS(NS, 'path');
-    star.setAttribute('d', 'M50 8 L54 18 L64 18 L56 24 L59 34 L50 28 L41 34 L44 24 L36 18 L46 18 Z');
-    star.setAttribute('fill', '#f0c04a');
-    svg.append(plate, apple, leaf, star);
-  }
 }
 
 export const BADGE_UI = new Map(

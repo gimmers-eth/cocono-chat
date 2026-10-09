@@ -277,7 +277,7 @@ function renderPanel() {
 const accountHead = (u) => `
   <div class="sec">
     <div class="pu-id">${unameHtml(u.u, { premium: u.premium })} <span class="dim mono">${esc(u.ul)}</span></div>
-    ${(u.badges ?? []).length ? `<div class="badge-row">${u.badges.map((b) => `<button class="badge-info" data-badge-info="${esc(b.id)}" title="badge details">${badgeArt(b.id, 20)} <span>${esc(badgeDef(b.id)?.label ?? b.id)}</span></button>`).join('')}</div>` : ''}
+    ${(u.badges ?? []).length ? `<div class="badge-row">${u.badges.map((b) => `<button class="badge-info" data-badge-info="${esc(b.id)}" title="badge details"><span class="badge-art" data-art="${esc(b.id)}" data-px="20"></span> <span>${esc(badgeDef(b.id)?.label ?? b.id)}</span></button>`).join('')}</div>` : ''}
     <div class="dim">created ${fmtDate(u.createdAt)}</div>
   </div>`;
 
@@ -387,7 +387,7 @@ const PANEL_SECTIONS = {
           const held = (u.badges ?? []).find((b) => b.id === d.id);
           const awardable = d.awardable !== false && !held;
           return `<tr>
-            <td><button class="badge-info" data-badge-info="${esc(d.id)}" title="badge details">${badgeArt(d.id, 26)} <span><strong>${esc(d.label)}</strong><br /><span class="dim mono">${esc(d.id)}</span></span></button></td>
+            <td><button class="badge-info" data-badge-info="${esc(d.id)}" title="badge details"><span class="badge-art" data-art="${esc(d.id)}" data-px="26"></span> <span><strong>${esc(d.label)}</strong><br /><span class="dim mono">${esc(d.id)}</span></span></button></td>
             <td class="mono">+${d.score}</td>
             <td class="mono">${d.holders}${d.cap != null ? ` / ${d.cap}` : ''}${d.full ? ' <span class="badge no-badge">full</span>' : ''}</td>
             <td>${held ? `<span class="rel-yes">✓</span> <span class="dim">${esc(held.at ? new Date(held.at).toLocaleDateString() : '')}</span>` : '<span class="dim">—</span>'}</td>
@@ -437,14 +437,19 @@ function panelLimitsRows(ul) {
 // Mirrors client/app/js/badges.js (SVGs as strings since admin renders via
 // innerHTML). Labels/blurbs/scores/caps come from the SERVER catalog
 // (GET /api/admin/badges) — art is the only duplication, by design.
-const BADGE_ART = {
-  og: (px) => `<svg viewBox="0 0 100 100" width="${px}" height="${px}"><defs><linearGradient id="ogGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8f7ff0"/><stop offset="1" stop-color="#4b3fa8"/></linearGradient></defs><rect x="4" y="4" width="92" height="92" rx="24" fill="url(#ogGrad)"/><g fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round"><path d="M 51 36 A 15 15 0 1 0 51 62"/><path d="M 73 36 A 15 15 0 1 1 73 62"/></g><text x="50" y="88" text-anchor="middle" fill="#ffe9a8" font-size="20" font-weight="800" font-family="system-ui, sans-serif">OG</text></svg>`,
-  earlybird: (px) => `<svg viewBox="0 0 100 100" width="${px}" height="${px}"><rect x="4" y="4" width="92" height="92" rx="24" fill="#243a4d"/><path d="M18 62 L52 48 L84 24 L60 52 L88 60 L44 70 Z" fill="#7fd4ff"/><circle cx="74" cy="70" r="7" fill="#ffd76a"/></svg>`,
-  premium: (px) => `<svg viewBox="0 0 100 100" width="${px}" height="${px}"><rect x="4" y="4" width="92" height="92" rx="24" fill="#3a2f14"/><circle cx="50" cy="42" r="26" fill="#f0c04a"/><path d="M50 26 L54 36 L65 36 L56 42 L59 50 L50 45 L41 50 L44 42 L35 36 L46 36 Z" fill="#3a2f14"/><path d="M38 62 L32 88 L50 76 L68 88 L62 62" fill="#c79a2e"/></svg>`,
-  mail: (px) => `<svg viewBox="0 0 100 100" width="${px}" height="${px}"><rect x="4" y="4" width="92" height="92" rx="24" fill="#3b2f14"/><rect x="20" y="36" width="60" height="38" rx="7" fill="#f0b954"/><path d="M20 43 L50 62 L80 43" fill="none" stroke="#3b2f14" stroke-width="5" stroke-linecap="round"/><g fill="#3b2f14">${[30, 40, 50, 60, 70].map((cx) => `<circle cx="${cx}" cy="80" r="2.4"/>`).join('')}</g></svg>`,
-  teacherspet: (px) => `<svg viewBox="0 0 100 100" width="${px}" height="${px}"><rect x="4" y="4" width="92" height="92" rx="24" fill="#2c3324"/><path d="M50 40 C64 30 82 40 80 58 C78 74 64 84 50 78 C36 84 22 74 20 58 C18 40 36 30 50 40 Z" fill="#d05252"/><path d="M52 36 C56 24 68 22 74 24 C70 34 60 38 52 36 Z" fill="#4c8a4f"/><path d="M50 8 L54 18 L64 18 L56 24 L59 34 L50 28 L41 34 L44 24 L36 18 L46 18 Z" fill="#f0c04a"/></svg>`,
-};
-const badgeArt = (id, px) => (BADGE_ART[id] ? BADGE_ART[id](px) : `<span class="dim">?</span>`);
+// Badge artwork comes from THE shared module (client/app/js/badges-art.js,
+// served by admin.js at /badges-art.js and loaded as a module script in
+// index.html — it self-registers window.badgeArtSvg). Templates place a
+// .badge-art slot; the observer hydrates every slot with the real SVG the
+// moment it enters the DOM. One artwork source, no drift.
+function hydrateBadgeArt() {
+  if (!window.badgeArtSvg) { setTimeout(hydrateBadgeArt, 60); return; }
+  for (const slot of document.querySelectorAll('.badge-art[data-art]:not([data-done])')) {
+    slot.replaceChildren(window.badgeArtSvg(slot.dataset.art, Number(slot.dataset.px) || 20));
+    slot.dataset.done = '1';
+  }
+}
+new MutationObserver(hydrateBadgeArt).observe(document.documentElement, { childList: true, subtree: true });
 const badgeDef = (id) => (lastBadgeDefs ?? []).find((d) => d.id === id);
 
 let lastDiags = [];
@@ -603,7 +608,7 @@ function openBadgeInfo(id) {
       : 'Uncapped')
     : '';
   $('badge-modal-body').innerHTML = `
-    <div class="badge-hero-art">${badgeArt(id, 84)}</div>
+    <div class="badge-hero-art badge-art" data-art="${esc(id)}" data-px="84"></div>
     <p class="badge-modal-blurb">${esc(def?.blurb ?? 'No description available.')}</p>
     <p class="row badge-modal-facts">
       ${def ? `<span class="badge gold-badge">+${def.score} CoCo</span>` : ''}

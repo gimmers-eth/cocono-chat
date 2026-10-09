@@ -1,6 +1,7 @@
 // Internal admin app — runs separately from the main server (pnpm admin).
 // Reads the same .env (MONGO_URL, REDIS_URL) via config.js. Binds to
 // 127.0.0.1 by default; ADMIN_TOKEN is mandatory for non-loopback binds.
+import fs from 'node:fs'
 import path from 'node:path';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import Fastify from 'fastify';
@@ -70,6 +71,14 @@ await app.register(async function adminScope(instance) {
     idDocs: mongo.db.collection('id_docs'),
     profiles: mongo.db.collection('profiles'),
   });
+});
+
+// THE badge artwork module lives in the client app; serve it from disk so
+// the panel renders from the exact same code (no copy, no drift).
+app.get('/badges-art.js', (request, reply) => {
+  reply.header('cache-control', 'no-cache');
+  return reply.type('application/javascript').send(
+    fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'client', 'app', 'js', 'badges-art.js')));
 });
 
 await app.register(fastifyStatic, { root: path.resolve(import.meta.dirname, '..', 'admin') ,
