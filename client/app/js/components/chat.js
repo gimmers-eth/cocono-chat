@@ -16,6 +16,7 @@ import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl, premiumBadgeEl 
 import { safetyNumber } from '../identity.js';
 import { BADGE_UI, nameChipEl } from '../badges.js';
 import { blockUserWithConfirm, unblockUser } from '../blocks.js';
+import { mountLine, setAvatar } from './userline.js';
 import { errorText, humanError } from '../errors.js';
 import {
   saveMessage, updateMessage, messagesWith, markRead, allMessages,
@@ -124,11 +125,8 @@ export function createChat({ client, onHomeRefresh }) {
   let peerJoinedAt = null; // "joined" date from the live key lookup
   let peerIdentityKnown = false;
 
-  // red circle for unverified peers, clean for verified — never pass null
-  // into replaceChildren (it stringifies to a literal "null" text node)
-  function renderIdentityBadge(badgeEl) {
-    badgeEl.replaceChildren(...(peerIdentityKnown && !peerIdentityVerified ? [unverifiedBadgeEl()] : []));
-  }
+  // (the red unverified mark now rides the name line via mountLine options —
+  // no per-slot painter needed)
 
   // Refresh a peer's public data (avatar + PREMIUM). Unthrottled on purpose:
   // opening a chat and opening the profile sheet both demand the freshest
@@ -143,33 +141,22 @@ export function createChat({ client, onHomeRefresh }) {
         if (peer === currentPeer) {
           peerIdentityPremium = !!prof.premium;
           peerDisplay = prof.displayBadge ?? null;
-          renderPremiumMarks(); // chat head only; the sheet renders from its own fetch
+          // chip state refreshed by the next updateTrustUI/openChat paint
         }
       })
       .catch(() => {});
   }
 
-  function renderNameChip(el, badgeId, heroClass) {
-    if (!el) return;
-    el.replaceChildren();
-    if (!badgeId) return;
-    const chip = nameChipEl(badgeId);
-    if (chip && heroClass) chip.classList.add(heroClass);
-    if (chip) el.append(chip);
-  }
 
   // Chat-head + open-sheet name chips follow the display badge together.
-  function renderPremiumMarks() {
-    renderNameChip($('chat-peer-premium'), peerDisplay);
-    const sheet = $('profile-premium');
-    if (sheet && !$('profile-modal').hidden && profileSubject) {
-      // '' is the explicit "no badge" choice; the premium fallback only
-      // serves peers whose view predates the displayBadge field
-      // '' is the explicit "no badge" choice; otherwise the worn badge, with
-      // the premium flag as the legacy fallback for both self and peers
-      const id = profileDisplay === '' ? null : (profileDisplay || (sheetPremium ? 'premium' : null));
-      renderNameChip(sheet, id, 'profile-premium-badge');
-    }
+  // The worn-badge chip for a peer's name LINE (component option). '' is
+  // the explicit "no badge" choice; the premium flag is the legacy fallback
+  // for views that predate displayBadge.
+  function chipFor(displayId, premium) {
+    const id = displayId === '' ? null : (displayId || (premium ? 'premium' : null));
+    const chip = nameChipEl(id);
+    if (chip) chip.classList.add('name-chip-inline');
+    return chip;
   }
 
   // chat-head avatar from the mutual-add cache (sidebar renders the same map)
@@ -177,18 +164,10 @@ export function createChat({ client, onHomeRefresh }) {
     if (!currentPeer) return;
     const avatars = await loadPeerAvatars();
     const rec = avatars.get(currentPeer);
-    const img = $('chat-peer-avatar');
-    const initial = $('chat-peer-initial');
-    if (rec?.avatar) {
-      img.src = `data:image/jpeg;base64,${rec.avatar}`;
-      img.hidden = false;
-      initial.hidden = true;
-    } else {
-      img.removeAttribute('src');
-      img.hidden = true;
-      initial.hidden = false;
-      initial.textContent = currentPeer.slice(0, 1);
-    }
+    setAvatar($('chat-peer-av'), currentPeer, {
+      src: rec?.avatar ? `data:image/jpeg;base64,${rec.avatar}` : '',
+      sizeClass: 'chat-avatar', // NO zoom: the chat top shows decoration, not content
+    });
   }
 
   // Nodes for the chat-head sub line: red "Unverified user"/"Account
@@ -503,10 +482,9 @@ export function createChat({ client, onHomeRefresh }) {
 
   async function updateTrustUI() {
     const warn = $('chat-warn');
-    const headStatus = $('chat-peer-status');
     if (!currentPeer) {
       if (warn) warn.hidden = true;
-      headStatus?.replaceChildren();
+      $('chat-peer-line')?.replaceChildren();
       return;
     }
     const ent = await friendEntryFor(currentPeer);
@@ -522,7 +500,11 @@ export function createChat({ client, onHomeRefresh }) {
     const blockedMap = await loadPeerBlocked();
     const blockedByMe = blockedMap.get(currentPeer);
     if (blockedByMe) {
-      headStatus.replaceChildren(peerStateIcon(PS.BLOCKED));
+      mountLine($('chat-peer-line'), {
+        peer: currentPeer, state: PS.BLOCKED,
+        chipEl: chipFor(peerDisplay, peerIdentityPremium),
+        unverified: peerIdentityKnown && !peerIdentityVerified,
+      });
       warn.classList.toggle('danger', true);
       warn.classList.toggle('warn', false);
       warn.hidden = false;
@@ -548,8 +530,11 @@ export function createChat({ client, onHomeRefresh }) {
       return;
     }
 
-    headStatus.replaceChildren(peerStateIcon(blockedByMe ? PS.BLOCKED : state));
-    $('chat-peer').parentElement.classList.toggle('gone', gone);
+    mountLine($('chat-peer-line'), {
+      peer: currentPeer, state,
+      chipEl: chipFor(peerDisplay, peerIdentityPremium),
+      unverified: peerIdentityKnown && !peerIdentityVerified,
+    });
 
     // plain-language strips, tiered: red (danger) / orange (warn).
     // No strip once TRUSTED (or when the chat is self/unknown state).
@@ -753,14 +738,16 @@ export function createChat({ client, onHomeRefresh }) {
 
   async function openChatOpts() {
     if (!currentPeer) return;
-    $('chatopts-title').textContent = currentPeer;
-    renderIdentityBadge($('chatopts-badge'));
     const ent = await friendEntryFor(currentPeer);
     const pin = await getPin(currentPeer);
     const state = trustState(ent, pin);
     menuActionLabel(state, currentPeer);
     const optsBlocked = (await loadPeerBlocked()).get(currentPeer);
-    $('chatopts-peer-status').replaceChildren(peerStateIcon(optsBlocked ? PS.BLOCKED : state));
+    mountLine($('chatopts-line'), {
+      peer: currentPeer, state: optsBlocked ? PS.BLOCKED : state,
+      chipEl: chipFor(peerDisplay, peerIdentityPremium),
+      unverified: peerIdentityKnown && !peerIdentityVerified,
+    });
     $('chatopts-menu-view').hidden = false;
     $('chatopts-identity-view').hidden = true;
     $('chatopts-overlay').hidden = false;
@@ -804,23 +791,22 @@ export function createChat({ client, onHomeRefresh }) {
 
   async function renderProfileView() {
     if (!currentPeer) return;
-    $('profile-name').textContent = currentPeer;
-    $('profile-avatar').textContent = currentPeer.slice(0, 1);
     const ent = await friendEntryFor(currentPeer);
     const pin = await getPin(currentPeer);
     const state = trustState(ent, pin);
     const profileBlocked = (await loadPeerBlocked()).get(currentPeer);
-    $('profile-status-icon').replaceChildren(peerStateIcon(profileBlocked ? PS.BLOCKED : state));
+    mountLine($('profile-line'), {
+      peer: currentPeer, state: profileBlocked ? PS.BLOCKED : state,
+      chipEl: chipFor(profileDisplay, sheetPremium),
+      unverified: peerIdentityKnown && !peerIdentityVerified,
+    });
     renderAccountStage(peerJoinedAt ? new Date(peerJoinedAt).getTime() : null);
 
     // peer profile (bio public; avatar ONLY on mutual add — server rule):
     // show photo when present, else the initial circle
-    const avatarEl = $('profile-avatar-img');
-    const initialEl = $('profile-avatar');
     const bioSec = $('profile-bio-section');
     const bioEl = $('profile-peer-bio');
-    avatarEl.hidden = true;
-    initialEl.hidden = false;
+    setAvatar($('profile-av'), currentPeer, { src: '', sizeClass: 'profile-avatar' });
     bioSec.hidden = true;
     try {
       const prof = await client.viewProfile(currentPeer);
@@ -829,9 +815,10 @@ export function createChat({ client, onHomeRefresh }) {
       if (prof.bio && peerIdentityVerified) { bioEl.textContent = prof.bio; bioSec.hidden = false; }
       rememberPeerAvatar(currentPeer, prof.avatar).catch(() => {});
       if (prof.avatar) {
-        avatarEl.src = `data:${prof.avatarType || 'image/jpeg'};base64,${prof.avatar}`;
-        avatarEl.hidden = false;
-        initialEl.hidden = true;
+        setAvatar($('profile-av'), currentPeer, {
+          src: `data:${prof.avatarType || 'image/jpeg'};base64,${prof.avatar}`,
+          sizeClass: 'profile-avatar', // zoom ON here (delegation covers #profile-modal)
+        });
       }
     } catch { /* offline / deleted: initials + no bio */ }
 
@@ -920,11 +907,13 @@ export function createChat({ client, onHomeRefresh }) {
     await renderProfileView();
     $('profile-overlay').hidden = false;
     $('profile-modal').hidden = false;
-    // chips/badges draw AFTER the sheet is visible — renderPremiumMarks
+    // chips/badges draw AFTER the sheet is visible (name-line component)
     // guards on visibility, so calling it earlier silently skipped the top
     // name badge (the bug: selected badge missing on the profile header)
     renderProfileBadges();
-    renderPremiumMarks(); // name chip = their chosen badge (premium fallback inside)
+    mountLine($('profile-line'), {
+      peer: meUl, state: PS.TRUSTED, chipEl: chipFor(profileDisplay, sheetPremium),
+    });
     $('profile-modal').focus?.();
   }
 
@@ -942,29 +931,20 @@ export function createChat({ client, onHomeRefresh }) {
     profileBadges = prof?.badges ?? (me?.premium ? [{ id: 'premium', at: me?.premiumAt ?? null }] : []);
     profileDisplay = prof?.displayBadge ?? me?.displayBadge ?? null;
     sheetPremium = !!prof?.premium || !!me?.premium;
-    $('profile-name').textContent = meUl;
     renderProfileBadges();
     // No me.verified gate here: the profile endpoint already IS the policy
     // (owner always sees their own photo; others only on mutual+verified),
     // and stacking a second fetch's result over it made the photo vanish
     // whenever identity() was slow or failed.
-    const avatarImg = $('profile-avatar-img');
-    const initial = $('profile-avatar');
-    if (prof?.avatar) {
-      avatarImg.src = `data:image/jpeg;base64,${prof.avatar}`;
-      avatarImg.hidden = false;
-      initial.hidden = true;
-    } else {
-      avatarImg.hidden = true;
-      initial.hidden = false;
-      initial.textContent = meUl.slice(0, 1);
-    }
+    setAvatar($('profile-av'), meUl, {
+      src: prof?.avatar ? `data:image/jpeg;base64,${prof.avatar}` : '',
+      sizeClass: 'profile-avatar',
+    });
     const bioSec = $('profile-bio-section');
     const bioEl = $('profile-peer-bio');
     const bioOk = prof?.bio && (me ? me.verified : true); // identity unknown → don't hide it
     bioSec.hidden = !bioOk;
     if (bioOk) bioEl.textContent = prof.bio;
-    $('profile-status-icon').replaceChildren(peerStateIcon(PS.TRUSTED));
     renderAccountStage(me?.createdAt ? new Date(me.createdAt).getTime() : null);
 
     const setRow = (s, n, cls, title, note) => {
@@ -1085,7 +1065,6 @@ export function createChat({ client, onHomeRefresh }) {
     if (!currentPeer) return;
     $('chatopts-menu-view').hidden = true;
     $('chatopts-identity-view').hidden = false;
-    $('identity-peer').textContent = currentPeer;
     const pin = await getPin(currentPeer);
     const peerKey = pin?.p ?? peerIdentity;
     // OUR side of the pair: the account identity key (same value on every
@@ -1094,7 +1073,6 @@ export function createChat({ client, onHomeRefresh }) {
     try {
       myKey = (await client.peerKeys(client.username))?.id ?? null;
     } catch { /* offline / lookup failed: handled as 'not available' */ }
-    const statusIcon = $('identity-status-icon');
     const numEl = $('identity-number-text');
     const box = $('identity-number');
     box.classList.remove('copied');
@@ -1112,9 +1090,13 @@ export function createChat({ client, onHomeRefresh }) {
     const ent = await friendEntryFor(currentPeer);
     const verified = !!ent?.verified;
     const mutual = !!ent?.addedBack;
-    // blocked peers sit OUTSIDE the ladder — show the wall mark here too
+    // blocked peers sit OUTSIDE the ladder — the wall mark shows here too
     const safetyBlocked = (await loadPeerBlocked()).get(currentPeer);
-    statusIcon.replaceChildren(peerStateIcon(safetyBlocked ? PS.BLOCKED : trustState(ent, pin)));
+    mountLine($('identity-line'), {
+      peer: currentPeer, state: safetyBlocked ? PS.BLOCKED : trustState(ent, pin),
+      chipEl: chipFor(peerDisplay, peerIdentityPremium),
+      unverified: peerIdentityKnown && !peerIdentityVerified,
+    });
     $('identity-since').textContent = pin
       ? `Key remembered on this device since ${new Date(pin.firstSeenAt).toLocaleString()}`
         + (pin.changedAt ? ` — it changed ${new Date(pin.changedAt).toLocaleString()}, verification was reset` : '')
@@ -1273,8 +1255,6 @@ export function createChat({ client, onHomeRefresh }) {
     peerIdentityPremium = !!peer?.premium;
     peerDisplay = peer?.displayBadge ?? null;
     $('chat-sub').replaceChildren(...chatSubNodes(peer));
-    renderIdentityBadge($('chat-peer-badge'));
-    renderPremiumMarks();
     if (peer) await rememberPeerVerified(currentPeer, peerIdentityVerified, peerIdentityPremium);
   }
 
@@ -1414,7 +1394,7 @@ export function createChat({ client, onHomeRefresh }) {
         else throw err;
       }
       currentPeer = (peer?.u ?? username).toLowerCase();
-      $('chat-peer').textContent = `${currentPeer}`;
+      $('chat-peer-line').replaceChildren(); // updateTrustUI paints the component line
       // The SERVER list is ground truth for flags that can move WITHOUT any
       // action of ours — a peer un-adding us breaks the verification on BOTH
       // sides, and nothing else refreshes our mirror mid-session. Reconcile
@@ -1606,9 +1586,11 @@ export function createChat({ client, onHomeRefresh }) {
     $('btn-profile-close')?.addEventListener('click', closeProfileView);
     $('profile-overlay')?.addEventListener('click', closeProfileView);
     // clicking a name chip or any badge chip opens its detail modal
-    $('profile-premium')?.addEventListener('click', () => {
-      if (!profileDisplay && !peerIdentityPremium) return;
-      showBadgeModal(profileDisplay ?? 'premium', { owner: profileSubject ?? currentPeer ?? '' });
+    // clicking the worn-badge chip INSIDE the profile name line opens its modal
+    $('profile-line')?.addEventListener('click', (e) => {
+      const chip = e.target.closest?.('.badge-name-chip');
+      if (!chip) return;
+      showBadgeModal(chip.dataset.badge, { owner: profileSubject ?? currentPeer ?? '' });
     });
     $('profile-badges')?.addEventListener('click', (e) => {
       const chip = e.target.closest?.('.badge-chip');

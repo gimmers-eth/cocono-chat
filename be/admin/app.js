@@ -58,6 +58,14 @@ function reasonChip(id) {
   return `<span class="reason-chip ${m.cls}" title="${esc(m.text)}">${m.icon}${esc(m.text)}</span>`;
 }
 
+// THE username component for the admin panel, mirroring the client's
+// js/components/userline.js grammar: single line = name + markers with the
+// same .3em rhythm; double line = name line over a dim detail line (the
+// tables compose it themselves: unameHtml + <br> + .dim).
+function unameHtml(ul, { premium = false, title = '' } = {}) {
+  return `<span class="uname"${title ? ` title="${esc(title)}"` : ''}><span class="uname-text">@${esc(String(ul ?? '').toLowerCase())}</span>${premium ? ' <span class="badge gold-badge" title="premium">★</span>' : ''}</span>`;
+}
+
 function renderLimits(limits) {
   const body = $('limits-body');
   $('limits-empty').hidden = limits.length > 0;
@@ -134,7 +142,7 @@ function renderUsers(users) {
   body.innerHTML = view
     .map(
       (u) => `<tr>
-        <td><strong>@${esc(u.u)}</strong>${u.premium ? ' <span class="badge gold-badge" title="premium">★ premium</span>' : ''}<br /><span class="dim mono">${esc(u.ul)}</span></td>
+        <td>${unameHtml(u.u, { premium: u.premium, title: u.premium ? 'premium — gold certificate' : '' })}<br /><span class="dim mono">${esc(u.ul)}</span></td>
         <td>${fmtDate(u.createdAt)}</td>
         <td>${u.verified
           ? '<span class="badge ok-badge">verified</span>'
@@ -200,7 +208,7 @@ async function loadRelations() {
       ? `<table class="rel-table">
           <thead><tr><th>User</th><th>Added&nbsp;them</th><th>They&nbsp;added</th><th>Verified</th><th>Trusted</th><th>Blocked&nbsp;them</th><th>Blocked&nbsp;by</th></tr></thead>
           <tbody>${relationships.map((r) => `<tr class="${r.blocks || r.blockedBy ? 'rel-blocked' : ''}">
-            <td><button class="linkish" data-view-user="${esc(r.ul)}">@${esc(r.ul)}</button>${r.premium ? ' <span class="badge gold-badge">★</span>' : ''}</td>
+            <td><button class="linkish" data-view-user="${esc(r.ul)}">${unameHtml(r.ul, { premium: r.premium })}</button></td>
             <td>${mark(r.added)}</td><td>${mark(r.theyAddedMe)}</td><td>${mark(r.verified)}</td><td>${mark(r.trust)}</td>
             <td>${r.blocks ? '<span class="rel-block" title="blocked by this account">⛔</span> ' + reasonChip(r.blockReason) : '<span class="dim">—</span>'}</td>
             <td>${r.blockedBy ? '<span class="rel-block" title="this account is walled off here">⛔</span> ' + reasonChip(r.blockedByReason) : '<span class="dim">—</span>'}</td>
@@ -228,7 +236,7 @@ async function loadBlockers() {
       ? `<table class="rel-table">
           <thead><tr><th>Blocked by</th><th>Reason (the blocker’s words)</th><th>When</th></tr></thead>
           <tbody>${blockers.map((r) => `<tr class="${r.reason === 'scam' ? 'rel-blocked' : ''}">
-            <td><button class="linkish" data-view-user="${esc(r.ul)}">@${esc(r.ul)}</button>${r.premium ? ' <span class="badge gold-badge">★</span>' : ''}</td>
+            <td><button class="linkish" data-view-user="${esc(r.ul)}">${unameHtml(r.ul, { premium: r.premium })}</button></td>
             <td>${r.reason ? reasonChip(r.reason) : '<span class="dim" title="this wall predates the reason field — re-block to state one">no reason stored</span>'}</td>
             <td class="dim">${esc(when(r.at))}</td>
           </tr>`).join('')}</tbody>
@@ -268,7 +276,7 @@ function renderPanel() {
 
 const accountHead = (u) => `
   <div class="sec">
-    <div class="pu-id"><strong>@${esc(u.u)}</strong>${u.premium ? ' <span class="badge gold-badge">★ premium</span>' : ''} <span class="dim mono">${esc(u.ul)}</span></div>
+    <div class="pu-id">${unameHtml(u.u, { premium: u.premium })} <span class="dim mono">${esc(u.ul)}</span></div>
     ${(u.badges ?? []).length ? `<div class="badge-row">${u.badges.map((b) => `<button class="badge-info" data-badge-info="${esc(b.id)}" title="badge details">${badgeArt(b.id, 20)} <span>${esc(badgeDef(b.id)?.label ?? b.id)}</span></button>`).join('')}</div>` : ''}
     <div class="dim">created ${fmtDate(u.createdAt)}</div>
   </div>`;

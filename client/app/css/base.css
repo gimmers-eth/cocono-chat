@@ -556,7 +556,7 @@ img.own-avatar { border-radius: 50%; }
 /* sheet header: photo beside name+joined+description, whole block above Safety */
 .profile-hero { align-items: center; text-align: left; gap: 1rem; margin: .5rem 0 1rem; }
 .profile-hero .profile-nameline { font-size: 1.05rem; }
-#profile-avatar-img, .profile-hero #profile-avatar { width: 60px; height: 60px; font-size: 1.7rem; flex: none; }
+.profile-hero .avatar-stack .avatar { width: 60px; height: 60px; font-size: 1.7rem; flex: none; }
 .profile-preview-row { margin-top: 1.1rem; }
 .profile-preview-row .btn { margin-left: auto; margin-right: auto; }
 .profile-idtext { display: flex; flex-direction: column; min-width: 0; }
@@ -592,7 +592,7 @@ img.own-avatar { border-radius: 50%; }
 .chat-peer-text { display: grid; gap: .05rem; min-width: 0; }
 .chat-peer-text .chat-peer-name { gap: .35rem; }
 .peer-btn:hover, .peer-btn:focus-visible { background: var(--panel-raised); outline: none; }
-#profile-avatar-img { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; flex: none; }
+.profile-hero .avatar-stack img.avatar { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; flex: none; }
 /* cached avatars rendered as circles anywhere an initial would sit */
 .avatar-img { object-fit: cover; }
 .chat-avatar { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; flex: none; }
@@ -824,7 +824,7 @@ body[data-view="blocked"] .page-footer { display: none; }
   border-radius: 50%; border: 2px solid var(--panel-raised);
   box-shadow: var(--shadow); image-rendering: auto; cursor: zoom-out;
 }
-#profile-avatar-img, #profile-own-avatar, #me-avatar-img, .chat-avatar, .peer-list .avatar-img { cursor: zoom-in; }
+#profile-own-avatar { cursor: zoom-in; } /* profile + preview zoom; chat top and sidebar head deliberately do NOT */
 
 .bio-text { margin: 0; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
 
@@ -888,6 +888,29 @@ body[data-view="blocked"] .page-footer { display: none; }
 .badge-chip-og { border-color: rgba(141, 127, 240, .6); }
 .badge-chip-earlybird { border-color: rgba(127, 212, 255, .5); }
 .badge-selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* ---- THE username component (js/components/userline.js) ----
+   Spacing truth copied from the conversation list (the reference): trust
+   icon .72rem / .5em right / .05em baseline nudge; badges and chips follow
+   the name with .3em; gone = italic name only. Every surface that names a
+   user gets these via .uname — per-context font-size stays with the host. */
+.uname { font-weight: 600; min-width: 0; }
+.uname > i { font-size: .72rem; margin-right: .5em; vertical-align: .05em; }
+.uname .premium-badge, .uname .name-chip-inline, .uname .verify-badge { margin-left: .3em; }
+.uname.gone .uname-text { font-style: italic; }
+
+.udouble { display: inline-flex; align-items: center; gap: .6rem; min-width: 0; }
+.udouble-meta { display: grid; gap: .1rem; min-width: 0; }
+
+.avatar-stack { display: inline-flex; flex: none; }
+.avatar-stack.zoomable .avatar-img { cursor: zoom-in; }
+
+/* identity sub line under a name: green shield-person + "Verified" */
+.user-verified-sub {
+  display: inline-flex; align-items: center; gap: .4em;
+  font-size: .78rem; font-weight: 600; color: var(--success, #4caf7d);
+}
+.user-verified-sub > i { font-size: .72rem; }
+
 .badge-name-chip, .name-chip-inline { display: inline-flex; vertical-align: -2px; margin-left: .3em; cursor: pointer; }
 #profile-badges .badge-chip { cursor: pointer; }
 .badge-hero { display: inline-block; }

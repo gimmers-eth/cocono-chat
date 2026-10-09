@@ -89,10 +89,10 @@
     <aside class="sidebar">
       <header class="side-head">
         <div class="me" id="btn-my-settings" role="button" tabindex="0" title="Settings">
-          <img id="me-avatar-img" class="avatar avatar-img" alt="" hidden />
-          <span id="me-avatar" class="avatar" aria-hidden="true"></span>
+          <span id="me-avatar-mount" class="avatar-stack"></span>
           <span class="me-text">
-            <span class="me-line"><span id="me-name" class="me-name"></span><span id="me-premium-badge" class="badge-slot"></span><span id="me-verify-badge"></span></span>
+            <span class="me-line"><span id="me-name" class="me-name"></span></span>
+            <span id="me-verified-sub" class="user-verified-sub-row" hidden></span>
             <button id="btn-self-verify" class="linkish verify-link" hidden title="Verify your identity">Get verified</button>
           </span>
         </div>
@@ -145,10 +145,9 @@
         <header class="chat-head">
           <button id="btn-chat-back" class="icon-btn back" title="Close conversation" data-icon="back"></button>
           <button type="button" id="btn-peer-profile" class="chat-peer peer-btn" title="View profile">
-            <img id="chat-peer-avatar" class="chat-avatar" alt="" hidden />
-            <span id="chat-peer-initial" class="avatar chat-avatar" aria-hidden="true"></span>
+            <span id="chat-peer-av" class="avatar-stack"></span>
             <span class="chat-peer-text">
-              <span class="chat-peer-name"><span id="chat-peer-status" class="peer-status"></span><span id="chat-peer"></span><span id="chat-peer-premium" class="badge-slot"></span><span id="chat-peer-badge" class="badge-slot"></span></span>
+              <span class="chat-peer-name" id="chat-peer-line"></span>
               <span id="chat-sub" class="muted small sub-preview"></span>
             </span>
           </button>
@@ -220,7 +219,7 @@
           <img id="profile-own-avatar" class="avatar own-avatar" alt="" hidden />
           <span id="profile-own-initial" class="avatar own-avatar" aria-hidden="true"></span>
           <span class="profile-idtext">
-            <span class="profile-nameline"><span id="profile-own-name"></span><span id="profile-own-premium" class="badge-slot"></span></span>
+            <span class="profile-nameline"><span id="profile-own-name"></span></span>
           </span>
         </div>
         <input id="profile-avatar-input" type="file" accept="image/png,image/jpeg" hidden />
@@ -392,7 +391,7 @@
   <div id="chatopts-overlay" class="overlay" hidden></div>
   <aside id="chatopts-modal" class="side-menu" role="dialog" aria-modal="true" aria-labelledby="chatopts-title" tabindex="-1" hidden>
     <div id="chatopts-menu-view">
-      <h2 class="side-menu-title">Chat options — <span id="chatopts-peer-status" class="peer-status"></span><span id="chatopts-title"></span><span id="chatopts-badge" class="badge-slot"></span></h2>
+      <h2 class="side-menu-title" id="chatopts-title"><span id="chatopts-line"></span></h2>
       <ul class="menu-list">
         <li class="menu-row">
           <button id="btn-chat-profile" class="menu-action" data-icon="profile">View profile</button>
@@ -413,7 +412,7 @@
       </ul>
     </div>
     <div id="chatopts-identity-view" hidden>
-      <h2 class="side-menu-title"><span class="peer-status" id="identity-status-icon"></span><span id="identity-peer"></span></h2>
+      <h2 class="side-menu-title"><span id="identity-line"></span></h2>
       <p class="muted small">You and your contact must see the SAME number — it is derived from both accounts' identity keys. Compare it over any other channel; a match proves no one is intercepting this conversation.</p>
       <div id="identity-number" class="identity-number" role="button" tabindex="0" title="Tap to copy">
         <span id="identity-number-text"></span>
@@ -446,10 +445,9 @@
     </header>
     <div class="sheet-body">
       <div class="profile-id profile-hero">
-        <img id="profile-avatar-img" alt="" hidden />
-        <span id="profile-avatar" class="avatar" aria-hidden="true"></span>
+        <span id="profile-av" class="avatar-stack"></span>
         <span class="profile-idtext">
-          <span class="profile-nameline"><span id="profile-status-icon" class="peer-status"></span><span id="profile-name"></span><span id="profile-premium" class="badge-slot"></span></span>
+          <span class="profile-nameline"><span id="profile-line"></span></span>
           <span id="profile-coco" class="coco coco-hero" hidden></span>
         </span>
       </div>

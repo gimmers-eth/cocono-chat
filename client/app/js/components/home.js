@@ -8,6 +8,7 @@ import { createPeerSuggestions } from './peers.js';
 import { iconEl } from '../icons.js';
 import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, clearAllMessages, loadPeerVerifications, loadPeerPremiums, loadPeerAvatars, rememberPeerAvatar, rememberPeerVerified, rememberPeerChip, loadPeerChips, AVATARS_EVENT, FRIENDS_EVENT, loadPeerBlocked, saveBlockedSet } from '../store.js';
 import { blockUserWithConfirm, unblockUser, blockReasonLabel, blockReasonIcon } from '../blocks.js';
+import { mountLine, avatarStack, setAvatar, verifiedSubEl } from './userline.js';
 import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl } from './peername.js';
 import { guessDeviceName, humanPlatform } from '../devices.js';
 import { BADGE_UI, nameChipEl } from '../badges.js';
@@ -82,16 +83,6 @@ export function createHome({ client, chat, onLogout }) {
     return myDisplay === '' ? null : myDisplay;
   }
 
-  function renderNameBadge(el, display) {
-    if (!el) return;
-    el.replaceChildren();
-    const badgeId = display === '' ? null : (display || null);
-    const chip = badgeId ? nameChipEl(badgeId) : null;
-    if (chip) {
-      chip.classList.add('name-chip-inline');
-      el.append(chip);
-    }
-  }
 
   // Settings > Profile badges card: a table — Badge · Received · Select.
   // Wearing a badge is a click on its row; the worn row is marked.
@@ -102,7 +93,6 @@ export function createHome({ client, chat, onLogout }) {
     const held = (myBadges ?? []).filter((b) => BADGE_UI.has(b.id));
     const none = $('own-badges-none');
     if (none) none.hidden = held.length > 0;
-    renderNameBadge($('profile-own-premium'), myChipId(), false);
     if (!held.length) return;
     const table = document.createElement('table');
     table.className = 'badge-table';
@@ -136,7 +126,7 @@ export function createHome({ client, chat, onLogout }) {
         try {
           await client.setProfile({ displayBadge: b.id });
           myDisplay = b.id;
-          renderNameBadge($('me-premium-badge'), myVerified ? myDisplay : null);
+          paintMyLine();
         } catch { /* offline */ }
         renderOwnBadges();
       });
@@ -205,10 +195,30 @@ export function createHome({ client, chat, onLogout }) {
 
   function paintMe(username) {
     username = username.toLowerCase(); // display is always lowercase
-    $('me-name').textContent = username;
-    $('me-avatar').textContent = username.slice(0, 1);
+    paintMyLine();
     paintOwnHeadAvatar();
     renderIdentity();
+  }
+
+  // THE component for my own sidebar head: solid-user trust icon + name +
+  // worn badge chip (+ the red unverified mark while myVerified is false),
+  // and once identity-verified a GREEN shield-person "Verified" line UNDER
+  // the name — same visual grammar every other name surface uses.
+  function paintMyLine() {
+    const username = String(client.username ?? '').toLowerCase();
+    if (!username) return;
+    const chip = nameChipEl(myVerified ? myChipId() : null);
+    if (chip) chip.classList.add('name-chip-inline');
+    mountLine($('me-name'), {
+      peer: username,
+      state: PS.SELF,
+      premium: false, // gold rides the worn chip; identity is the sub line
+      chipEl: chip,
+      unverified: myVerified === false,
+    });
+    const sub = $('me-verified-sub');
+    sub.hidden = !myVerified;
+    if (myVerified) sub.replaceChildren(verifiedSubEl());
   }
 
   // --- identity verification (admin-checked real person; red notice until done) ---
@@ -226,7 +236,7 @@ export function createHome({ client, chat, onLogout }) {
     myVerified = me ? !!me.verified : null;
     myPremium = me ? !!me.premium : false;
     if (me) { myBadges = me.badges ?? myBadges; myDisplay = me.displayBadge ?? myDisplay; }
-    renderNameBadge($('me-premium-badge'), myVerified ? myDisplay : null);
+    paintMyLine();
     renderOwnBadges();
     const show = (txt, cls, noteTxt) => {
       if (!state) return;
@@ -241,7 +251,7 @@ export function createHome({ client, chat, onLogout }) {
       // no facts fetched: hide all affordances, assume nothing
       link.hidden = true; btn.hidden = true; return;
     }
-    $('me-verify-badge').replaceChildren(...(me.verified ? [] : [unverifiedBadgeEl()]));
+    paintMyLine(); // in-line red mark (unverified) / green Verified sub
     const profileTabBtn = $('tabbtn-profile');
     if (profileTabBtn) profileTabBtn.hidden = !me.verified;
     if (me.verified && settingsOpen && settingsTab === 'profile') renderProfileTab();
@@ -305,8 +315,16 @@ export function createHome({ client, chat, onLogout }) {
   async function renderProfileTab() {
     try {
       const me = await client.profile();
-      $('profile-own-name').textContent = client.username ?? '';
-      renderNameBadge($('profile-own-premium'), myChipId());
+      { // THE component: same single-line grammar everywhere
+        const ownChip = nameChipEl(myChipId());
+        if (ownChip) ownChip.classList.add('name-chip-inline');
+        mountLine($('profile-own-name'), {
+          peer: String(client.username ?? ''),
+          state: PS.SELF,
+          chipEl: ownChip,
+          unverified: myVerified === false,
+        });
+      }
       $('profile-own-initial').textContent = String(client.username ?? '?').slice(0, 1);
       const bio = me.bio ?? '';
       const field = $('profile-bio');
@@ -474,16 +492,10 @@ export function createHome({ client, chat, onLogout }) {
     const avatars = await loadPeerAvatars();
     const selfUl = String(client.username ?? '').toLowerCase();
     const rec = avatars.get(selfUl);
-    const img = $('me-avatar-img');
-    const initial = $('me-avatar');
-    if (rec?.avatar) {
-      img.src = `data:image/jpeg;base64,${rec.avatar}`;
-      img.hidden = false;
-      initial.hidden = true;
-    } else {
-      img.hidden = true;
-      initial.hidden = false;
-    }
+    setAvatar($('me-avatar-mount'), selfUl, {
+      src: rec?.avatar ? `data:image/jpeg;base64,${rec.avatar}` : '',
+      zoom: false, // sidebar head: the photo is decoration, not content
+    });
   }
 
   async function renderConversationList() {
@@ -537,13 +549,17 @@ export function createHome({ client, chat, onLogout }) {
         trusted: !!ent?.trust,
         conflict: !!pin && !!ent?.pub && pin.p !== ent.pub,
       });
-      name.replaceChildren(peerStateIcon(peerBlocked.get(peer) ? PS.BLOCKED : state));
-      name.append(peer);
       // red circle for accounts WITHOUT admin identity verification;
       // only when we actually looked the peer up (Map value false, not undefined)
-      { const chip = nameChipEl(peerChips.get(peer)); if (chip) { chip.classList.add('name-chip-inline'); name.append(chip); } }
-      if (peerVerified.get(peer) === false) name.append(unverifiedBadgeEl());
-      name.classList.toggle('gone', state === PS.GONE);
+      const chip = nameChipEl(peerChips.get(peer));
+      if (chip) chip.classList.add('name-chip-inline');
+      name.className = 'convo-name uname';
+      mountLine(name, {
+        peer,
+        state: peerBlocked.get(peer) ? PS.BLOCKED : state,
+        chipEl: chip,
+        unverified: peerVerified.get(peer) === false,
+      });
       const preview = document.createElement('span');
       preview.className = 'convo-last';
       preview.textContent = '';
@@ -977,7 +993,7 @@ export function createHome({ client, chat, onLogout }) {
 
     $('btn-badge-none')?.addEventListener('click', async () => {
       try { await client.setProfile({ displayBadge: '' }); myDisplay = ''; } catch { /* offline */ }
-      renderNameBadge($('me-premium-badge'), myVerified ? myDisplay : null);
+      paintMyLine();
       renderOwnBadges();
     });
     // a fresh award landed (main.js poll) or a wear choice was made from the
