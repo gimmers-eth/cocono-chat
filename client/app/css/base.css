@@ -1,4 +1,4 @@
-/* ==========================================================================body { position: fixed; inset: 0; overflow: hidden; height: var(--app-h, 100dvh); }
+/* ==========================================================================
    cocono-chat — structural stylesheet.
    Never hard-codes colors: everything visual comes from the theme tokens
    below (defaults = Dark). A theme file (themes/<id>/theme.css) overrides
@@ -51,7 +51,13 @@ html, body { height: 100%; overflow: hidden; }
    yanked it back (visible "jump down, animate up" keyboard jank). The app
    owns all scrolling (app-shell clips; lists scroll internally), so the
    body is fixed and the document can NEVER be panned. */
-body { position: fixed; inset: 0; overflow: hidden; height: var(--app-h, 100dvh); }
+/* --vv-top ride: if iOS pans the visual viewport despite the pre-flight
+   shrink (first-ever keyboard, estimate off), the body — fixed, and with it
+   the WHOLE app incl. drawers/modals/toast — shifts down by exactly the pan
+   on the same frame keyboard.js learns it. Net effect on screen: nothing
+   moves, the header stays glued to the top edge. offsetTop is 0 on
+   desktop/Android → the transform is a no-op there. */
+body { position: fixed; inset: 0; overflow: hidden; height: var(--app-h, 100dvh); transform: translateY(var(--vv-top, 0px)); }
 /* Mobile: no double-tap zoom anywhere (tap targets are app chrome, not a
    document). Panning stays alive — .drawer-tabs swipe and the message list
    scroll depend on it; pinch is off via viewport meta + gesturestart guard. */

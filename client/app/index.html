@@ -537,8 +537,8 @@
   <!-- Transient toast: BODY level — the chat view (and the whole app view)
        toggle [hidden], and a fixed element inside a display:none ancestor
        still vanishes. Toasts belong to no pane: they must show with no chat
-       open, on the auth screens, over drawers. ui.js keeps it above the iOS
-       keyboard by measuring the visual viewport. -->
+       open, on the auth screens, over drawers. keyboard.js keeps the body
+       fitted above the iOS keyboard, so the toast rides with it. -->
   <p id="toast" class="toast" hidden role="status"></p>
 </body>
 </html>
