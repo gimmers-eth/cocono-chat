@@ -110,7 +110,10 @@ test('bubble: a pending file carries BOTH choices, a video only Download', async
 test('bubble: expired, pruned and in-flight states say what they mean', async () => {
   await fresh();
   const expired = row(); expired.state = 'expired';
-  assert.match(bubbleNodes({ dir: 'in', kind: 'image' }, expired, {}).map((x) => x.textContent).join(' '), /No longer available/);
+  const expiredNodes = bubbleNodes({ dir: 'in', kind: 'image' }, expired, {});
+  assert.match(expiredNodes.map((x) => x.textContent).join(' '), /No longer available/);
+  assert.ok(classesOf(expiredNodes).some((c) => /fa-circle-question/.test(c)),
+    'the gone glyph, not a photo glyph: mediaExpired is what that state looks like');
   assert.ok(!has(bubbleNodes({ dir: 'in', kind: 'image' }, expired, {}), /media-dl/), 'an expired blob cannot be retried');
 
   const pruned = await stored({ id: 'p1' });

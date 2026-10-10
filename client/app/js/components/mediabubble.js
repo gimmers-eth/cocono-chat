@@ -109,7 +109,10 @@ export function bubbleNodes(msg, row, { verified = false } = {}) {
   } else {
     const box = shot(row, renderableAsImage(row) && isBlurred(row, verified));
     if (box) nodes.push(box);
-    else nodes.push(iconEl(KIND_ICON[row.kind] ?? 'attachFile', 'media-gone-ic'));
+    // nothing to preview (never fetched, declined, aged out, or gone from the
+    // server): the KIND glyph for a file we still own, the question mark for
+    // bytes nobody can bring back
+    else nodes.push(iconEl(row.state === 'expired' ? 'mediaExpired' : (KIND_ICON[row.kind] ?? 'attachFile'), 'media-gone-ic'));
     if (row.name) nodes.push(mk('span', 'media-name', row.name));
   }
 
