@@ -6,6 +6,7 @@ import { canonical } from '../../lib/canon.js';
 import { b64uDecode } from '../../lib/b64u.js';
 import { importRawPublicKey, verifySignature } from '../../lib/ed25519.js';
 import { isValidUsername, isValidDeviceId } from '../../lib/username.js';
+import { attProblem } from '../../lib/media.js';
 
 const CID_RE = /^[a-zA-Z0-9_-]{8,64}$/;
 
@@ -35,6 +36,13 @@ export function verifyEnvelope(env, senderDevice, config) {
   // it is sender-authenticated. The self-only rule lives in handleSend
   // (it needs the connection identity); this is the structural gate.
   if (m.sync !== undefined && m.sync !== 1) return 'invalid_envelope';
+  // Media: the ONE plaintext field the server must be able to read (blob
+  // lifecycle bookkeeping — lib/media.js). Optional; when present it is
+  // complete and in-range. It sits inside the HMAC'd block below, so this
+  // structural gate plus the owner/kind/size check in handleSend is what
+  // stops a sender from corrupting their own attachment accounting.
+  const att = attProblem(m.att, config);
+  if (att) return att;
 
   const { h: _omit, ...rest } = m;
   const keyBytes = b64uDecode(senderDevice.aes);

@@ -53,6 +53,13 @@ export const LIMIT_CATALOG = {
   reportacct:     { ip: false, label: 'Reports (per account)',      def: (c) => ({ limit: c.reportAccountLimit, windowSec: c.reportAccountWindowSec }) },
   iddoc:          { ip: false, label: 'ID upload (per account)',    def: (c) => ({ limit: c.idDocAccountLimit, windowSec: c.idDocWindowSec }) },
   iddocip:        { ip: true,  label: 'ID upload (per IP)',         def: (c) => ({ limit: c.idDocIpLimit, windowSec: c.idDocIpWindowSec }) },
+  // media blobs (milestone 4) — the byte movers, so they get their own pair
+  // of budgets: upload (sparse, big) and download/ack (per recipient device,
+  // and thumb-only fetches count too)
+  mediaup:        { ip: true,  label: 'Media upload (per IP)',      def: (c) => ({ limit: c.mediaUpIpLimit, windowSec: c.mediaUpWindowSec }) },
+  mediaupacct:    { ip: false, label: 'Media upload (per account)', def: (c) => ({ limit: c.mediaUpAccountLimit, windowSec: c.mediaUpWindowSec }) },
+  mediadl:        { ip: true,  label: 'Media download/ack (per IP)', def: (c) => ({ limit: c.mediaDlIpLimit, windowSec: c.mediaDlWindowSec }) },
+  mediadlacct:    { ip: false, label: 'Media download/ack (per acct)', def: (c) => ({ limit: c.mediaDlAccountLimit, windowSec: c.mediaDlWindowSec }) },
   profile:        { ip: false, label: 'Profile edit (per account)', def: (c) => ({ limit: c.profileEditAccountLimit, windowSec: c.profileEditWindowSec }) },
   profileip:      { ip: true,  label: 'Profile view (per IP)',      def: (c) => ({ limit: c.userKeysIpLimit, windowSec: c.userKeysIpWindowSec }) },
   appinfo:        { ip: true,  label: 'App info (per IP)',          def: (c) => ({ limit: c.appInfoIpLimit, windowSec: c.appInfoWindowSec }) },

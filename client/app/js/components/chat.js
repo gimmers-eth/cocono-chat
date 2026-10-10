@@ -23,11 +23,24 @@ import { errorText, humanError } from '../errors.js';
 import {
   saveMessage, updateMessage, messagesWith, markRead, allMessages, isUnread,
   getMessage, deleteMessage, clearMessages,
+  saveMedia, getMedia, updateMedia, mediaWith, deleteMedia, clearMediaWith,
   loadPeerAvatars, rememberPeerAvatar, AVATARS_EVENT,
   loadFriends, friendAdd, friendDel, friendMarkFlags, setFriends, FRIENDS_EVENT, loadPeerBlocked, loadPeerMuted, rememberPeerMuted, loadPeerChips,
   loadPeerTags,
   getPin, recordPinSeen, markPeerGone, rememberPeerVerified,
 } from '../store.js';
+// M4 media: prep/policy/lifecycle in ../media.js, painting in the two
+// components beside this file. chat.js stays the ORCHESTRATOR — it owns
+// render(), the composer and the modal lifecycle; media owns what media looks
+// like and what its buttons do.
+import {
+  prepareMedia, mediaRow, mediaLabel, parseMediaPayload, applyArrivalPolicy,
+  retryFailedDownloads, pruneLocalMedia, releaseScope,
+} from '../media.js';
+import { bubbleNodes } from './mediabubble.js';
+import {
+  buildTabStrip, paintTabActive, paintTabPanel, mediaAction, openViewer,
+} from './mediaview.js';
 
 // In-app banner (visible-but-other-chat) + OS notification (app hidden or
 // unfocused) for LIVE messages. Push covers closed-app devices server-side;
@@ -208,7 +221,16 @@ export function createChat({ client, onHomeRefresh }) {
     let lastOpenAt = 0; // banner-suppression anchor: the drain right after
     // 'open' is CATCH-UP (queued backlog), not live arrivals — no per-message pills
     client.on('state', async ({ state }) => {
-      if (state === 'open') lastOpenAt = Date.now();
+      if (state === 'open') {
+        lastOpenAt = Date.now();
+        // the retry queue (plan §6.6): downloads that FAILED (offline blip, a
+        // limiter kick) come back on the next open — a small batch, because
+        // hammering the download endpoint is exactly how you trip the limiter
+        // again. 'expired' (the blob is gone) is final and never retried.
+        retryFailedDownloads(client)
+          .then((n) => { if (n && currentPeer) render().catch(() => {}); })
+          .catch(() => {});
+      }
       if (state !== 'open' || resynced) return;
       resynced = true;
       if ((await allMessages()).length === 0) client.requestResync();
@@ -242,14 +264,23 @@ export function createChat({ client, onHomeRefresh }) {
         } catch { /* unparsable system payload: ignore */ }
         return;
       }
+      // M4 MEDIA (plan §6.6): a {"media":…} payload is recognised right here,
+      // AFTER the self-sent sys check and BEFORE anything treats the text as a
+      // sentence. The transcript stores a human LABEL (never raw JSON — the
+      // sidebar, a notification and a report transcript all read that field),
+      // and the descriptor itself goes into the media row.
+      const media = parseMediaPayload(m.text);
+      const displayText = media ? mediaLabel(media.kind, media.name) : m.text;
       await saveMessage({
         id: `in:${m.mid}`,
         peer: m.peer,
         dir: 'in',
-        text: m.text,
+        text: displayText,
         ts: m.ts,
         fromDeviceId: m.fromDeviceId,
+        ...(media ? { kind: media.kind, mediaId: media.id } : {}),
       });
+      if (media) await adoptIncomingMedia(`in:${m.mid}`, m.peer, 'in', media, m.ts);
       // prime profile for new/unknown peers, but only when our cache is
       // missing or older than a day (busy chats must not hammer the server)
       loadPeerAvatars().then((avatars) => {
@@ -282,10 +313,12 @@ export function createChat({ client, onHomeRefresh }) {
       if (mutedNow) {
         // silent: no banner, no OS notice
       } else if (windowActive() && !viewingThis && !catchUp) {
-        const snippet = (m.text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+        // the LABEL, not the descriptor: an unverified sender's photo must not
+        // read as {"media":{"id":… (emitter #2 of the three)
+        const snippet = (displayText || '').replace(/\s+/g, ' ').trim().slice(0, 80);
         showBanner(`${m.peer}: ${snippet || '(message)'}`, m.peer);
       } else if (!windowActive()) {
-        notifyOS(m.peer, m.text);
+        notifyOS(m.peer, displayText);
       }
     });
 
@@ -300,7 +333,16 @@ export function createChat({ client, onHomeRefresh }) {
       const peer = String(m.peer ?? '').toLowerCase();
       if (!peer) return;
       const ts = m.ts || Date.now();
-      await saveMessage({ id, peer, dir: 'out', text: m.text, ts, state: 'synced' });
+      if (m.media) {
+        // An outgoing MEDIA send mirrored from another of my devices: store it
+        // under the same id, and let THIS device join the blob lifecycle like
+        // any recipient (download + ack) — that is what keeps the server from
+        // deleting the bytes before my phone has them (req 8).
+        await saveMessage({ id, peer, dir: 'out', text: mediaLabel(m.media.kind, m.media.name), ts, state: 'synced', kind: m.media.kind, mediaId: m.media.id });
+        await adoptIncomingMedia(id, peer, 'out', m.media, ts);
+      } else {
+        await saveMessage({ id, peer, dir: 'out', text: m.text, ts, state: 'synced' });
+      }
       // Our OWN send, mirrored from another device: it reorders the sidebar
       // like any last message but must never raise an unread dot here —
       // advance the read marker (forward-only via the isUnread guard, so a
@@ -309,6 +351,25 @@ export function createChat({ client, onHomeRefresh }) {
       if (currentPeer && currentPeer.toLowerCase() === peer) await render();
       onHomeRefresh?.();
     });
+
+  // ---- media arrivals (plan §6.6) ----
+  // One row per blob per device, then THE POLICY: an image downloads by
+  // itself, a video pulls only its POSTER (a 10 MB wait belongs behind a
+  // button), a file waits for the user. Nothing here is awaited by the message
+  // handler — a slow download must never hold up delivery, the repaint happens
+  // when the bytes land.
+  async function adoptIncomingMedia(msgId, peer, dir, media, ts) {
+    if (!media?.id) return;
+    if (await getMedia(media.id)) return; // replay/resync: keep the stored bytes
+    const row = mediaRow({ key: media.id, peer, dir, kind: media.kind, media, msgId, ts });
+    if (dir === 'out') row.state = 'synced';
+    await saveMedia(row);
+    applyArrivalPolicy(client, row)
+      .then(() => {
+        if (currentPeer && currentPeer.toLowerCase() === String(peer).toLowerCase()) render().catch(() => {});
+      })
+      .catch(() => { /* failed/expired states already landed on the record */ });
+  }
 
     client.on('peerIdentityChanged', ({ peer }) => {
       showBanner(`${peer}: key material refreshed (account re-created or device re-paired)`, peer);
@@ -381,6 +442,78 @@ export function createChat({ client, onHomeRefresh }) {
     }
   }
 
+  // ---- SENDING MEDIA (plan §6.3 / req 4) ----
+  // The order is the feature: write the sender's OWN copy (transcript row +
+  // decrypted bytes) BEFORE anything leaves the device, so a failed upload
+  // still leaves the user with their photo in the chat — and only then hand
+  // the bytes to the SDK, which encrypts, uploads and fans out. `localId` is
+  // generated HERE for the same reason: the record's id must exist first, and
+  // the ack/delivered events come back keyed to it.
+  async function sendMediaTo(peer, prepared) {
+    const localId = crypto.randomUUID();
+    const id = `out:${localId}`;
+    const ts = Date.now();
+    const size = prepared.bytes?.length ?? prepared.bytes?.size ?? 0;
+    const row = mediaRow({
+      key: id, blobId: null, peer, dir: 'out', kind: prepared.kind,
+      media: { name: prepared.name, mime: prepared.mime, size },
+      msgId: id, ts,
+    });
+    row.state = 'stored';          // we hold these bytes already — they came from this device
+    row.blurred = false;           // req 7: a sent image is never blurred
+    row.data = prepared.bytes instanceof Blob ? prepared.bytes : new Blob([prepared.bytes], { type: prepared.mime || 'application/octet-stream' });
+    row.thumb = prepared.thumb ?? null;
+    await saveMessage({ id, peer, dir: 'out', text: mediaLabel(prepared.kind, prepared.name), ts, state: 'sending', kind: prepared.kind, mediaId: id });
+    await saveMedia(row);
+    markRead(peer, ts);
+    await render();
+    onHomeRefresh?.();
+    try {
+      const { media } = await client.sendMedia(peer, {
+        kind: prepared.kind, bytes: prepared.bytes, thumb: prepared.thumb ?? null,
+        name: prepared.name, mime: prepared.mime,
+        w: prepared.w ?? null, h: prepared.h ?? null, dur: prepared.dur ?? null,
+        animated: prepared.animated === true,
+      }, { localId });
+      // the blob id exists only now: repoint the row's wire identity (and keep
+      // the crypto fields so this device could re-verify/re-download its own
+      // copy — the record is what a report hands the server, too)
+      await updateMedia(id, {
+        blobId: media.id, key: media.key, iv: media.iv,
+        thumbIv: media.thumbIv ?? null, sha256: media.sha256,
+      });
+      // A SELF-CHAT send routes a copy to this very device, which therefore
+      // lands in the blob's `pending` list. We ARE the copy — the bytes came
+      // from us — so settle the debt immediately, or the blob would sit on the
+      // server until the retention sweep for no reason (req 8).
+      if (String(peer).toLowerCase() === String(client.username ?? '').toLowerCase()) {
+        client.ackMedia(media.id, true).catch(() => {});
+      }
+    } catch (err) {
+      // upload failed → nothing was ever sent (the SDK throws BEFORE any
+      // envelope). The local copy above is what the user keeps.
+      await updateMessage(id, { state: 'failed' });
+      toast(humanError(err), 'error');
+      await render();
+      throw err;
+    }
+  }
+
+  async function pickAndSend(file) {
+    if (!currentPeer || peerGone) return;
+    let prepared;
+    try {
+      prepared = await prepareMedia(file);
+    } catch (err) {
+      // a plain sentence from the prep layer (too big, SVG, unreadable image)
+      toast(err?.message ?? 'That file could not be sent.', 'error');
+      return;
+    }
+    try {
+      await sendMediaTo(currentPeer, prepared);
+    } catch { /* reported already: the bubble shows failed, the toast said why */ }
+  }
+
   // --- rendering ---
 
   // The open-time pin can be undone by chrome that lands a few frames
@@ -418,6 +551,13 @@ export function createChat({ client, onHomeRefresh }) {
     const list = $('chat-messages');
     if (!list || !currentPeer) return;
     const msgs = (await messagesWith(currentPeer)).sort((a, b) => a.ts - b.ts);
+    // One read for the conversation's media rows, then bubble painting stays
+    // synchronous. Object URLs from the previous paint go FIRST: bubbles are
+    // rebuilt on every event and each unreleased URL pins its decrypted bytes
+    // for the life of the tab.
+    const rows = await mediaWith(currentPeer);
+    const mediaById = new Map(rows.map((r) => [r.id, r]));
+    releaseScope('bubbles');
     const frag = document.createDocumentFragment();
     for (const m of msgs) {
       const li = document.createElement('li');
@@ -430,10 +570,18 @@ export function createChat({ client, onHomeRefresh }) {
         frag.appendChild(li);
         continue;
       }
-      li.className = `msg ${m.dir}`;
+      li.className = `msg ${m.dir}${m.kind && m.kind !== 'text' ? ' msg-media' : ''}`;
       li.dataset.id = m.id; // tap -> openMsgModal (delegated listener)
       const body = document.createElement('span');
-      body.textContent = m.text;
+      if (m.kind && m.kind !== 'text') {
+        // a media message paints its preview/status/actions; `m.text` is the
+        // human label ("Photo", "File: spec.pdf") the sidebar and a
+        // notification show, never the raw descriptor
+        body.className = 'media-body';
+        body.append(...bubbleNodes(m, mediaById.get(m.mediaId), { verified: peerIdentityVerified }));
+      } else {
+        body.textContent = m.text;
+      }
       const meta = document.createElement('span');
       meta.className = 'meta';
       meta.textContent = fmtTime(m.ts);
@@ -448,21 +596,109 @@ export function createChat({ client, onHomeRefresh }) {
     list.replaceChildren(frag);
     list.scrollTop = list.scrollHeight;
     settleAtBottom(list); // hold the pin through the late-landing chrome
+    // The tab strip swaps the CONTENT area only — the composer stays put in
+    // every tab, because an attachment belongs to the conversation.
+    await paintTab();
     return msgs[msgs.length - 1]; // newest displayed message, for the read marker
+  }
+
+  // ---- conversation tabs (req 1/4): chat · images · videos · files · links --
+  // Per-open-chat UI state, deliberately NOT persisted (plan §6.1).
+  let activeTab = 'chat';
+  let tabQuery = '';
+
+  async function setTab(tab) {
+    const strip = $('chat-tabs');
+    if (!strip) return;
+    activeTab = tab;
+    tabQuery = '';
+    paintTabActive(strip, tab);
+    await render();
+  }
+
+  async function paintTab() {
+    const list = $('chat-messages');
+    const panel = $('chat-tabpanel');
+    if (!panel) return;
+    const isChat = activeTab === 'chat';
+    if (list) list.hidden = !isChat;
+    panel.hidden = isChat;
+    if (isChat) return;
+    await paintTabPanel(panel, {
+      peer: currentPeer, tab: activeTab, query: tabQuery,
+      verified: peerIdentityVerified,
+      onOpen: openMediaFromTab,
+      onAction: runMediaAction,
+    });
+  }
+
+  // A tile/row opens the SAME modal a bubble does — one viewer, one set of
+  // controls, whichever way you got there.
+  async function openMediaFromTab(row) {
+    const rec = row?.msgId ? await getMessage(row.msgId) : null;
+    if (rec) await openMsgModal(rec);
+  }
+
+  // A bubble's Download/Delete press: the message id on the <li> is the only
+  // handle the DOM carries, so resolve it to the row and let the shared
+  // action do the work (the Files tab calls the same function).
+  async function runBubbleAction(messageId, action) {
+    const rec = messageId ? await getMessage(messageId) : null;
+    const row = rec?.mediaId ? await getMedia(rec.mediaId) : null;
+    if (!row) return;
+    await mediaAction(client, row, action, { onDone: () => render().catch(() => {}) });
+  }
+
+  async function runMediaAction(row, action) {
+    if (action === 'download') await mediaAction(client, row, 'download', { onDone: () => render().catch(() => {}) });
+    else if (action === 'decline') await mediaAction(client, row, 'decline', { onDone: () => render().catch(() => {}) });
   }
 
   // --- message modal (tap a bubble): readable scrollable text + fixed actions ---
 
   let msgId = null; // message currently shown in the modal
+  // the viewer's teardown (revokes the full-size Blob URLs). Kept here because
+  // closeMsgModal — not the media module — is what the Escape chain, the scrim
+  // tap, the chat close and a re-open all funnel through.
+  let viewerCleanup = null;
 
-  function openMsgModal(rec) {
+  async function openMsgModal(rec) {
     msgId = rec.id;
     $('msg-modal-title').textContent = rec.dir === 'out' ? 'Sent message' : 'Message';
     $('msg-modal-time').textContent = `${rec.peer} · ${new Date(rec.ts).toLocaleString()}`;
-    const textEl = $('msg-modal-text');
-    textEl.textContent = rec.text;
-    textEl.scrollTop = 0;
     setStatus($('msg-modal-status'), '');
+    const textEl = $('msg-modal-text');
+    const pane = $('msg-media');
+    viewerCleanup?.();
+    viewerCleanup = null;
+    const row = rec.mediaId ? await getMedia(rec.mediaId) : null;
+    if (row) {
+      // MEDIA: the scrollable text area is REPLACED by the media pane (plan
+      // §6.4) and Copy goes — there is no text to copy. Forward stays: it
+      // re-sends the stored plaintext through a fresh key + upload.
+      textEl.hidden = true;
+      textEl.textContent = '';
+      if (pane) {
+        pane.hidden = false;
+        viewerCleanup = openViewer(pane, {
+          client,
+          msg: rec,
+          row,
+          verified: peerIdentityVerified,
+          // a blur/keep toggle or a finished download repaints the transcript
+          // underneath AND the modal title row stays honest
+          onChange: (next) => { render().catch(() => {}); },
+          onStatus: (text, isError) => setStatus($('msg-modal-status'), text, isError),
+        });
+      }
+    } else {
+      textEl.hidden = false;
+      textEl.textContent = rec.text;
+      textEl.scrollTop = 0;
+      if (pane) { pane.hidden = true; pane.replaceChildren(); }
+    }
+    $('btn-msg-copy').hidden = !!row;
+    $('btn-msg-fwd').disabled = false;
     $('msg-overlay').hidden = false;
     $('msg-modal').hidden = false;
     $('btn-msg-close').focus?.();
@@ -473,6 +709,10 @@ export function createChat({ client, onHomeRefresh }) {
   }
 
   function closeMsgModal() {
+    viewerCleanup?.();
+    viewerCleanup = null;
+    const pane = $('msg-media');
+    if (pane) { pane.hidden = true; pane.replaceChildren(); }
     msgId = null;
     forwardId = null;
     $('msg-panes').classList.remove('showing-fwd'); // always reopen on pane A
@@ -506,6 +746,12 @@ export function createChat({ client, onHomeRefresh }) {
 
   async function deleteCurrentMsg() {
     if (!msgId) return;
+    // Local delete only, for BOTH halves: the transcript row and the decrypted
+    // bytes it points at. The server's copy is the ack/sweeper's business
+    // (plan §6.4) and the peer keeps theirs — but leaving megabytes behind
+    // after a user deletes their own message would make "Deleted" a lie.
+    const rec = await getMessage(msgId);
+    if (rec?.mediaId) await deleteMedia(rec.mediaId);
     await deleteMessage(msgId);
     closeMsgModal();
     await render();
@@ -1577,6 +1823,34 @@ export function createChat({ client, onHomeRefresh }) {
     if (!rec) { closeForward(); return; }
     const btn = $('btn-forward-send');
     btn.disabled = true;
+    // MEDIA FORWARD (plan §6.4): a blob id is a pointer into SOMEONE ELSE's
+    // lifecycle, so forwarding re-SENDS the bytes this device holds — a fresh
+    // key and a fresh upload, with the sender's own copy as the source. No
+    // local plaintext (never downloaded here): say so instead of failing vague.
+    if (rec.mediaId) {
+      const row = await getMedia(rec.mediaId);
+      if (!row?.data) {
+        setStatus(status, 'This attachment is not downloaded on this device — download it before forwarding.', true);
+        btn.disabled = false;
+        return;
+      }
+      try {
+        await sendMediaTo(target, {
+          kind: row.kind, bytes: row.data, thumb: row.thumb ?? null,
+          name: row.name, mime: row.mime, w: row.w, h: row.h, dur: row.dur,
+          animated: row.animated === true,
+        });
+        closeForward();
+        toast(`Forwarded to ${target}`);
+        onHomeRefresh?.();
+        if (currentPeer === target) await render();
+      } catch (err) {
+        setStatus(status, humanError(err), true);
+      } finally {
+        btn.disabled = false;
+      }
+      return;
+    }
     try {
       const { localId } = await client.sendMessage(target, rec.text);
       await saveMessage({ id: `out:${localId}`, peer: target, dir: 'out', text: rec.text, ts: Date.now(), state: 'sending' });
@@ -1789,6 +2063,12 @@ export function createChat({ client, onHomeRefresh }) {
         else throw err;
       }
       currentPeer = (peer?.u ?? username).toLowerCase();
+      // tabs are UI state for THIS conversation, never persisted: every chat
+      // opens on the transcript, no matter where the last one left off
+      activeTab = 'chat';
+      tabQuery = '';
+      paintTabActive($('chat-tabs'), 'chat');
+      releaseScope('bubbles');   // the previous chat's previews are gone from the DOM
       $('chat-peer-line').replaceChildren(); // updateTrustUI paints the component line
       // The SERVER list is ground truth for flags that can move WITHOUT any
       // action of ours — a peer un-adding us breaks the verification on BOTH
@@ -1864,6 +2144,10 @@ export function createChat({ client, onHomeRefresh }) {
     const btn = $('btn-send');
     input.disabled = !enabled;
     btn.disabled = !enabled;
+    // an attachment is a message: a locked composer locks the + too (ghost
+    // chats / blocked / deleted accounts must not be able to open a picker)
+    const attach = $('btn-attach');
+    if (attach) attach.disabled = !enabled;
     input.placeholder = enabled ? 'Type a message' : `${currentPeer ?? 'This user'} no longer exists`;
   }
 
@@ -1903,15 +2187,75 @@ export function createChat({ client, onHomeRefresh }) {
   // — same trap that once bit playChatEnter.
 
   function wire() {
+    // the conversation tab strip — five icons, one row, under the composer
+    buildTabStrip($('chat-tabs'), { onChange: (tab) => setTab(tab).catch(() => {}) });
+
+    // LOCAL RETENTION (plan §4.5): decrypted bytes age out on this device
+    // unless pinned with Keep; records and transcript rows always stay. Run at
+    // boot and once a day while the tab lives — a device that is never opened
+    // has nothing to prune anyway (and the server already swept its blobs).
+    pruneLocalMedia().then((n) => { if (n && currentPeer) render().catch(() => {}); }).catch(() => {});
+    setInterval(() => { pruneLocalMedia().catch(() => {}); }, 24 * 3600 * 1000);
+
     const sendBtn = $('btn-send');
     // Mobile: a button tap normally moves focus off the input, tearing the
     // soft keyboard down after every send. Suppressing the pointerdown
     // DEFAULT keeps focus on the input (click still fires) — send therefore
     // does NOT hide the keyboard; tapping elsewhere/chat chrome still does.
     sendBtn.addEventListener('pointerdown', (e) => e.preventDefault());
-    sendBtn.addEventListener('click', sendCurrent);
+    sendBtn.addEventListener('click', () => {
+      $('attach-menu') && ($('attach-menu').hidden = true); // sending closes the menu
+      sendCurrent();
+    });
     $('chat-input').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') sendCurrent();
+    });
+
+    // ---- attach: + button, its menu, and the two pickers (req 2) ----
+    // The menu items are built here (not in markup) so their glyphs come from
+    // the ICONS map like every other icon in the app.
+    const attachBtn = $('btn-attach');
+    const attachMenu = $('attach-menu');
+    const attachClose = () => {
+      if (!attachMenu || attachMenu.hidden) return;
+      attachMenu.hidden = true;
+      attachBtn.setAttribute('aria-expanded', 'false');
+    };
+    $('btn-attach-photo')?.replaceChildren(iconEl('attachPhoto'), document.createTextNode(' Photo or video'));
+    $('btn-attach-file')?.replaceChildren(iconEl('attachFile'), document.createTextNode(' File'));
+    attachBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = attachMenu.hidden;
+      attachMenu.hidden = !open;
+      attachBtn.setAttribute('aria-expanded', String(open));
+      attachBtn.blur(); // the pressed look is not the open look
+    });
+    $('btn-attach-photo')?.addEventListener('click', () => {
+      attachClose();
+      const input = $('attach-photo-input');
+      input.value = '';          // re-picking the SAME file must still fire
+      input.click();
+    });
+    $('btn-attach-file')?.addEventListener('click', () => {
+      attachClose();
+      const input = $('attach-file-input');
+      input.value = '';
+      input.click();
+    });
+    for (const id of ['attach-photo-input', 'attach-file-input']) {
+      const input = $(id);
+      input?.addEventListener('change', () => {
+        const file = input.files?.[0];
+        input.value = '';
+        if (file) pickAndSend(file);
+      });
+    }
+    // dismiss: a tap anywhere outside the composer row (the menu is anchored
+    // to it), like the chat-options menu but local to the composer
+    document.addEventListener('click', (e) => {
+      if (!attachMenu || attachMenu.hidden) return;
+      if (e.target.closest('.composer')) return;
+      attachClose();
     });
     document.getElementById('notif-banner')?.addEventListener('click', (e) => {
       const peer = e.target.dataset?.peer;
@@ -1955,6 +2299,7 @@ export function createChat({ client, onHomeRefresh }) {
     // > conversation). Desktop "close" gesture otherwise.
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
+      if (!$('attach-menu')?.hidden) { $('attach-menu').hidden = true; $('btn-attach')?.setAttribute('aria-expanded', 'false'); return; }
       if (!$('lightbox-overlay')?.hidden) { closeLightbox(); return; }
       if (forwardOpen()) { closeForward(); return; }
       if (!$('premium-modal')?.hidden) { closeBadgeModal(); return; }
@@ -1972,6 +2317,15 @@ export function createChat({ client, onHomeRefresh }) {
       if ($('chat-view').hidden || paneClosing()) return;
       const li = e.target.closest('li.msg');
       if (!li) return;
+      // a bubble's own Download/Delete buttons are NOT a tap on the bubble:
+      // they act and the modal stays shut (req 6 lives right here)
+      const act = e.target.closest('.media-dl') ? 'download'
+        : e.target.closest('.media-decline') ? 'decline' : null;
+      if (act) {
+        runBubbleAction(li.dataset.id, act)
+          .catch(() => toast('That did not go through — try again.', 'error'));
+        return;
+      }
       getMessage(li.dataset.id).then((rec) => {
         if (rec && rec.id === li.dataset.id) openMsgModal(rec);
       });
@@ -2067,6 +2421,10 @@ export function createChat({ client, onHomeRefresh }) {
         okLabel: 'Clear', danger: true,
       });
       if (!ok || !currentPeer) return;
+      // the media rows of this conversation go too — same device-local
+      // contract, and decrypted bytes with no message left to show them are
+      // invisible weight (and a privacy surprise)
+      await clearMediaWith(currentPeer);
       const n = await clearMessages(currentPeer);
       await render();
       onHomeRefresh?.();

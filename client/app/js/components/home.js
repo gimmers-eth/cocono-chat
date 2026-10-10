@@ -6,8 +6,9 @@ import { $, setStatus, fmtTime, confirmModal, openLightbox, toast, animateSheetC
 import { humanError } from '../errors.js';
 import { createPeerSuggestions, makeTrustDecorator } from './peers.js';
 import { iconEl } from '../icons.js';
-import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, clearAllMessages, loadPeerVerifications, loadPeerPremiums, loadPeerAvatars, rememberPeerAvatar, rememberPeerVerified, rememberPeerChip, loadPeerChips, AVATARS_EVENT, FRIENDS_EVENT, loadPeerBlocked, saveBlockedSet, rememberPeerMuted, loadPeerMuted, loadPeerTags, saveTagServerMap } from '../store.js';
+import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, clearAllMessages, clearAllMedia, loadPeerVerifications, loadPeerPremiums, loadPeerAvatars, rememberPeerAvatar, rememberPeerVerified, rememberPeerChip, loadPeerChips, AVATARS_EVENT, FRIENDS_EVENT, loadPeerBlocked, saveBlockedSet, rememberPeerMuted, loadPeerMuted, loadPeerTags, saveTagServerMap } from '../store.js';
 import { currentFilter, wireFilterBar } from '../tags.js';
+import { localRetentionDays, setLocalRetentionDays, pruneLocalMedia } from '../media.js';
 import { blockUserWithConfirm, unblockUser, blockReasonLabel, blockReasonIcon } from '../blocks.js';
 import { purgeLocalAccount } from '../accountPurge.js';
 import { mountLine, avatarStack, setAvatar, verifiedSubEl, doubleLine } from './userline.js';
@@ -971,6 +972,20 @@ export function createHome({ client, chat, onLogout }) {
 
     // Settings → General: wipe the ENTIRE local transcript (per-device,
     // same contract as clearing a single chat — friends stay friends).
+    // Local media retention (plan §4.5): a per-DEVICE choice, kept in
+    // localStorage like the other local-only settings (read markers, theme) —
+    // the server has no idea what this browser keeps and must not.
+    const retention = $('media-retention');
+    if (retention) {
+      retention.value = String(localRetentionDays());
+      retention.addEventListener('change', () => {
+        setLocalRetentionDays(retention.value);
+        setStatus($('drawer-status'), `Attachments stay on this device for ${localRetentionDays()} days.`);
+        // sweep immediately: a user who shortens the window means it NOW
+        pruneLocalMedia().catch(() => {});
+      });
+    }
+
     $('btn-clear-all-msgs')?.addEventListener('click', async () => {
       const ok = await confirmModal({
         title: 'Are you sure?',
@@ -981,6 +996,10 @@ export function createHome({ client, chat, onLogout }) {
       });
       if (!ok) return;
       try {
+        // M4: the decrypted attachments go with the transcript they belong to.
+        // "Clear all messages" that left 100 MB of photos behind would not be
+        // the same button.
+        await clearAllMedia();
         const n = await clearAllMessages();
         await chat.render(); // open conversation (if any) repaints empty
         await renderConversationList(); // message-less friends survive

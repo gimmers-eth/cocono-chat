@@ -8,7 +8,7 @@ import ops from './ops.js';
 import graph from './graph.js';
 
 // All admin routes. ctx = { users, redis, config, diagnostics, reports,
-// settings, messages, shares, contacts, graph }, passed through from admin.js.
+// settings, messages, shares, contacts, graph, media }, passed through from admin.js.
 export default async function adminRoutes(app, ctx) {
   await app.register(users, ctx);
   await app.register(rateLimits, ctx);

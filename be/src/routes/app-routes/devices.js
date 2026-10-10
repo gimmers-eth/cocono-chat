@@ -42,7 +42,7 @@ function validateDevicePayload(body) {
   return null;
 }
 
-export default async function deviceRoutes(app, { users, redis, config, messages, profiles, settings, idDocs, diagnostics, shares, contacts }) {
+export default async function deviceRoutes(app, { users, redis, config, messages, profiles, settings, idDocs, diagnostics, shares, contacts, media }) {
   // POST /api/devices/enroll — a new device asks to join an existing account.
   // Body is shaped like signup: { u, p, a, d, t, s }, signed by the NEW
   // device's key. An already-registered device must then approve the 6-digit
@@ -309,7 +309,7 @@ export default async function deviceRoutes(app, { users, redis, config, messages
     if (user.devices.length === 0) {
       // full teardown incl. ID photo, diagnostics and OTHERS' blocks/
       // blockReasons aimed at this name (the old inline purge missed those)
-      await deleteAccountFully({ users, profiles, idDocs, messages, diagnostics, settings, redis, shares, contacts }, ul);
+      await deleteAccountFully({ users, profiles, idDocs, messages, diagnostics, settings, redis, shares, contacts, media }, ul);
       return { removed: deviceId, devices: 0, accountDeleted: true };
     }
     return { removed: deviceId, devices: user.devices.length };

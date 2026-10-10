@@ -76,6 +76,8 @@ export async function setupAdmin(overrides = {}) {
     config: { ...config, coldSendRequiresVerification: false, ...overrides },
     diagnostics: db.collection('diagnostics'),
     reports: db.collection('reports'),
+    reportMedia: db.collection('report_media'),
+    media: db.collection('media'),
     settings: db.collection('settings'),
     messages: db.collection('messages'),
     idDocs: db.collection('id_docs'),

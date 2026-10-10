@@ -7,8 +7,9 @@ import { verifyEnvelope } from './envelope.js';
 import { devKey, sendJson, PENDING_BATCH } from './protocol.js';
 import { sendBlindPush, presenceKey, pushSentKey } from '../../lib/push.js';
 import { recordContactEdge } from '../../lib/shares.js';
+import { registerDevice } from '../../lib/media.js';
 
-export function createHandlers({ users, redis, pub, config, messages, settings, counters, contacts }) {
+export function createHandlers({ users, redis, pub, config, messages, settings, counters, contacts, media }) {
   async function handleSend(socket, request, body, auth) {
     const env = body.msg;
     const m = env?.m;
@@ -85,6 +86,26 @@ export function createHandlers({ users, redis, pub, config, messages, settings, 
       // devices). handlePulled overwrites this with the resync window.
       expireAt: new Date(Date.now() + config.msgQueueMaxSec * 1000),
     };
+    // ---- MEDIA: this envelope references an uploaded blob (m.att) ----
+    // The bytes never ride the WS (64 KB frame cap) — they live in `media`,
+    // and this message is what points at them. So the ONLY new work here is
+    // bookkeeping, and it is deliberately strict: the blob must be the
+    // SENDER'S OWN upload (owner check — `att` is HMAC'd, so a forged
+    // reference to someone else's blob is refused rather than gifted), and
+    // its kind/size must match what the descriptor claims, or this sender
+    // would corrupt their own lifecycle accounting. Everything else —
+    // delivery, ordering, idempotency, receipts, push gating, resync —
+    // already works, because a media message IS a message.
+    if (m.att) {
+      const blob = await media.findOne(
+        { _id: m.att.id },
+        { projection: { owner: 1, kind: 1, ctSize: 1 } },
+      );
+      if (!blob || blob.owner.ul !== auth.sub || blob.owner.fd !== auth.d) {
+        return ack(false, 'unknown_attachment');
+      }
+      if (blob.kind !== m.att.kind || blob.ctSize !== m.att.size) return ack(false, 'invalid_envelope');
+    }
     try {
       await messages.insertOne(doc);
     } catch (err) {
@@ -92,6 +113,13 @@ export function createHandlers({ users, redis, pub, config, messages, settings, 
       if (err?.code === 11000) return ack(true);
       throw err;
     }
+    // The addressed device may now download the blob AND owes an ack for it
+    // (req 8 counts this device in `pending` — sync copies of the sender's
+    // own other devices land here exactly like a peer's does, so a blob
+    // cannot vanish before every device that was promised it has said
+    // 'downloaded' or 'declined'). $addToSet: idempotent under cid retries
+    // and under multi-copy fan-out.
+    if (m.att) await registerDevice(media, { id: m.att.id, ul: rul, dv: m.dv });
     // SENT-message counter (username-keyed, survives account deletion by
     // design): feeds the 'You've got mail' badge. Idempotent retries landed
     // in the catch above, so this increments exactly once per accepted send.

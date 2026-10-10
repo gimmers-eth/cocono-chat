@@ -44,7 +44,7 @@ import { MAX_FRAME_BYTES, sendJson } from './protocol.js';
 import { presenceKey, pushSentPattern } from '../../lib/push.js';
 import { createHandlers } from './handlers.js';
 
-export default async function wsRoutes(app, { users, redis, config, messages, settings, counters, contacts }) {
+export default async function wsRoutes(app, { users, redis, config, messages, settings, counters, contacts, media }) {
   await app.register(fastifyWebsocket);
 
   // Dedicated pub/sub clients: a redis client in subscribe mode cannot run
@@ -95,6 +95,8 @@ export default async function wsRoutes(app, { users, redis, config, messages, se
     config,
     messages,
     settings, counters, contacts,
+    // media blobs: handleSend registers recipients on a referenced blob
+    media,
   });
 
   app.get('/ws', { websocket: true }, async (socket, request) => {
@@ -111,6 +113,17 @@ export default async function wsRoutes(app, { users, redis, config, messages, se
     const ul = payload.sub;
     const dv = payload.d;
     const key = `${ul}:${dv}`;
+
+    // THE RACE FIX, PART 1 — attached BEFORE the first await. The queueing
+    // listener used to be installed after the local-registry writes below; a
+    // client that sends as soon as its socket opens (the SDK does exactly that
+    // after a login) could have its frame emitted while NO listener existed,
+    // and the message was silently dropped. Buffering first and deciding
+    // permissions after is safe: nothing is processed here, only remembered.
+    const early = [];
+    const queueEarly = (raw) => { early.push(raw); };
+    socket.on('message', queueEarly);
+    socket.on('error', () => { /* the close path below cleans up */ });
 
     // One live connection per device — newest wins.
     const prev = local.get(key);
@@ -129,14 +142,6 @@ export default async function wsRoutes(app, { users, redis, config, messages, se
     socket.on('pong', () => {
       socket.isAlive = true;
     });
-
-    // THE RACE FIX: a client may answer 'hello' faster than this handler
-    // finishes its async setup (deliverPending's Mongo query). Events with no
-    // listener are DROPPED by the emitter, so attach a queueing listener
-    // BEFORE hello and hand over to the real dispatch once setup is done.
-    const early = [];
-    const queueEarly = (raw) => { early.push(raw); };
-    socket.on('message', queueEarly);
 
     sendJson(socket, { type: 'hello' });
     try {

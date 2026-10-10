@@ -1329,3 +1329,169 @@ body[data-view="blocked"] .page-footer { display: none; }
     drop-shadow(0 8px 22px color-mix(in srgb, var(--badge-glow, var(--accent)) 55%, transparent))
     drop-shadow(0 2px 6px rgb(0 0 0 / .5));
 }
+
+/* ================= MEDIA / FILES (M4) =================
+   One rhythm as everywhere else: gaps on the .rem scale the composer and the
+   tag strip already use, icons only from icons.js, and sent-vs-received
+   expressed in BORDER COLOUR (accent vs the neutral border token) so it reads
+   in both themes. */
+
+/* ---- composer attach ---- */
+.composer { position: relative; }           /* the attach menu anchors here */
+.composer .attach-btn {
+  flex: none; width: 2.1rem; height: 2.1rem; border-radius: 50%;
+  background: var(--panel-raised); border: 1px solid var(--border);
+}
+.composer .attach-btn:disabled { opacity: .4; }
+.attach-menu {
+  /* ABOVE the composer, floating over the transcript; z under the toast (75)
+     and under the sheet tiers it must never cover (50/55) — it belongs to the
+     composer, not to the modal layers. */
+  position: absolute; left: .6rem; bottom: calc(100% + .3rem); z-index: 5;
+  display: flex; flex-direction: column; gap: .15rem; min-width: 12rem;
+  background: var(--panel-raised); border: 1px solid var(--border);
+  border-radius: var(--radius-bubble); box-shadow: var(--shadow); padding: .3rem;
+}
+.attach-item {
+  display: flex; align-items: center; gap: .55rem; text-align: left;
+  background: none; border: 0; color: var(--text); cursor: pointer;
+  font: inherit; padding: .45rem .55rem; border-radius: 6px;
+}
+.attach-item:hover { background: var(--panel); }
+.attach-item i { color: var(--accent); width: 1.1rem; text-align: center; }
+
+/* ---- bottom tab strip (chat · images · videos · files · links) ----
+   Reusable icon strip: a future sidebar filter (M7 tags) can share these
+   class names — the active treatment is the same accent logic as
+   .drawer-tab, only vertical instead of underlined. */
+.chat-tabs {
+  flex: none; display: flex; justify-content: center; gap: .2rem;
+  padding: .3rem 1rem calc(.3rem + var(--sa-b));
+  background: var(--panel); border-top: 1px solid var(--border);
+}
+.chat-tab {
+  background: none; border: 0; border-radius: 8px; color: var(--muted);
+  width: 2.6rem; height: 2rem; display: inline-flex; align-items: center;
+  justify-content: center; font-size: 1rem; cursor: pointer;
+}
+.chat-tab:hover { color: var(--text); background: var(--panel-raised); }
+.chat-tab.active { color: var(--accent); background: var(--panel-raised); }
+
+/* ---- the tab panel: replaces the transcript, never both at once ---- */
+.chat-tabpanel {
+  flex: 1; overflow-y: auto; padding: .8rem clamp(.6rem, 6vw, 4rem) 1rem;
+  display: flex; flex-direction: column; gap: .6rem;
+}
+.media-empty { color: var(--muted); font-size: .85rem; text-align: center; padding: 1rem 0; }
+/* sent vs received: border colour only, visible in every theme */
+.media-sent { border-color: var(--accent) !important; }
+.media-recv { border-color: var(--border); }
+.media-wall {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: .5rem;
+}
+.media-tile {
+  position: relative; aspect-ratio: 1; padding: 0; overflow: hidden;
+  background: var(--panel-raised); border: 2px solid var(--border);
+  border-radius: 10px; cursor: pointer; color: inherit;
+}
+.media-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.media-tile-icon {
+  display: flex; align-items: center; justify-content: center; height: 100%;
+  color: var(--muted); font-size: 1.4rem;
+}
+.media-tile-caption {
+  position: absolute; right: .3rem; bottom: .3rem; padding: .05rem .3rem;
+  background: rgb(0 0 0 / .6); color: #fff; border-radius: 6px; font-size: .68rem;
+}
+.media-list, .link-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
+.media-line, .link-line {
+  width: 100%; display: flex; align-items: center; gap: .6rem; text-align: left;
+  background: var(--panel-raised); border: 2px solid var(--border);
+  border-radius: var(--radius-bubble); padding: .5rem .6rem; cursor: pointer;
+  color: var(--text); font: inherit; text-decoration: none;
+}
+.media-line-icon, .link-icon { color: var(--muted); flex: none; width: 1.2rem; text-align: center; }
+.media-line-meta, .link-meta { min-width: 0; display: flex; flex-direction: column; gap: .1rem; }
+.media-line-name, .link-host { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-line-sub, .link-snippet {
+  color: var(--muted); font-size: .76rem; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.media-line-dl {
+  margin-left: auto; flex: none; background: none; border: 0; color: var(--accent);
+  font-size: 1rem; cursor: pointer; padding: .2rem .3rem;
+}
+.media-search { display: flex; align-items: center; gap: .5rem; color: var(--muted); }
+.media-search input { flex: 1; }
+
+/* ---- bubbles ---- */
+.msg.msg-media { padding: .35rem; max-width: min(78%, 560px); }
+.media-shot { position: relative; display: block; line-height: 0; }
+.media-thumb {
+  display: block; max-width: 100%; max-height: 260px; border-radius: 6px;
+  object-fit: cover;
+}
+.media-thumb.is-blurred, .viewer-image.is-blurred, .viewer-video.is-blurred,
+.media-tile img.is-blurred { filter: blur(14px) saturate(.85); }
+.media-play-badge {
+  position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%);
+  width: 2.4rem; height: 2.4rem; border-radius: 50%; display: flex;
+  align-items: center; justify-content: center; color: #fff;
+  background: rgb(0 0 0 / .5); pointer-events: none;
+}
+.media-duration, .media-blur-hint {
+  position: absolute; line-height: 1.2; font-size: .68rem; color: #fff;
+  background: rgb(0 0 0 / .6); border-radius: 6px; padding: .05rem .3rem;
+}
+.media-duration { right: .35rem; bottom: .35rem; }
+.media-blur-hint { left: .35rem; bottom: .35rem; }
+.media-blur-hint i { margin-right: .35em; }
+.media-name {
+  display: block; font-size: .78rem; color: var(--muted); margin: .3rem .35rem 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 16rem;
+}
+.media-status {
+  display: block; font-size: .72rem; color: var(--muted); margin: .25rem .35rem 0;
+}
+.media-missing { display: block; font-size: .85rem; }
+.media-gone-ic { color: var(--muted); font-size: 1.3rem; margin: .2rem .35rem; display: inline-block; }
+.media-actions { display: flex; gap: .4rem; margin: .4rem .35rem .1rem; }
+.media-dl, .media-decline {
+  background: var(--panel-raised); border: 1px solid var(--border);
+  color: var(--text); border-radius: 6px; padding: .25rem .5rem; font-size: .78rem;
+  cursor: pointer;
+}
+.media-dl:hover { border-color: var(--accent); color: var(--accent); }
+.media-decline:hover { border-color: var(--danger); color: var(--danger); }
+.media-dl i, .media-decline i { margin-right: .4em; }
+.media-file { display: flex; align-items: center; gap: .6rem; padding: .2rem .3rem; }
+.media-file-icon { color: var(--accent); font-size: 1.4rem; flex: none; }
+.media-file-meta { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
+.media-file-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-file-size { color: var(--muted); font-size: .74rem; }
+
+/* ---- the viewer (inside the message modal) ---- */
+.msg-media { display: flex; flex-direction: column; gap: .6rem; margin: .4rem 0 0; }
+.viewer-pane {
+  display: flex; flex-direction: column; align-items: center; gap: .5rem;
+  max-height: 46vh; overflow: auto; background: rgba(127, 127, 127, .08);
+  border-radius: 10px; padding: .5rem;
+}
+.viewer-image, .viewer-video, .viewer-poster {
+  max-width: 100%; max-height: 40vh; border-radius: 8px; display: block;
+}
+.viewer-waiting { color: var(--muted); display: flex; align-items: center; gap: .5rem; font-size: .85rem; }
+.viewer-waiting i { font-size: 1.4rem; }
+.viewer-file { text-align: center; padding: .8rem .4rem; }
+.viewer-file-icon { font-size: 2.2rem; color: var(--accent); display: block; margin-bottom: .4rem; }
+.viewer-file-name { font-weight: 600; word-break: break-all; }
+.viewer-controls { display: flex; flex-wrap: wrap; gap: .4rem; justify-content: center; }
+.viewer-toggle {
+  background: var(--panel-raised); border: 1px solid var(--border); color: var(--text);
+  border-radius: 8px; padding: .35rem .6rem; font-size: .8rem; cursor: pointer;
+}
+.viewer-toggle:hover:not(:disabled) { border-color: var(--accent); }
+.viewer-toggle:disabled { opacity: .5; cursor: default; }
+.viewer-toggle i { margin-right: .4em; }
+.viewer-keep-on { border-color: var(--accent); color: var(--accent); }

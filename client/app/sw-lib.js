@@ -198,7 +198,7 @@ self.SwLib = (function () {
             hk, { name: 'AES-GCM', length: 256 }, false, ['decrypt'],
           );
           const buf = b64uBytes(m.d);
-          const text = new TextDecoder().decode(await crypto.subtle.decrypt(
+          let text = new TextDecoder().decode(await crypto.subtle.decrypt(
             { name: 'AES-GCM', iv: buf.subarray(0, 12) }, convKey, buf.subarray(12),
           ));
           // Intra-account copies are never banner-worthy: outgoing SYNC
@@ -207,6 +207,20 @@ self.SwLib = (function () {
           // notification snippets, and an all-sync queue makes peek return
           // null → the worker stays silent (existing empty-queue contract).
           if (/^\{"(?:sync|sys)":/.test(text)) return;
+          // A MEDIA message is a JSON descriptor, and a banner full of
+          // {"media":{"id":… is not information. Say what arrived instead —
+          // the same three labels js/media.js mediaLabel() gives in the
+          // transcript and on the page (keep the two wordings in step).
+          // The worker NEVER downloads the blob: battery and data say no, and
+          // the descriptor alone is enough to name it.
+          if (/^\{"media":/.test(text)) {
+            try {
+              const m = JSON.parse(text).media;
+              text = m.kind === 'video' ? 'Video'
+                : m.kind === 'file' ? `File: ${String(m.name || 'attachment').slice(0, 40)}`
+                  : 'Photo';
+            } catch { text = 'Attachment'; }
+          }
           seen.push({ peer: m.f, text, ts: f.ts || Date.now() });
         } catch { /* one undecryptable frame must not kill the peek */ }
       };

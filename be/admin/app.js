@@ -709,9 +709,32 @@ function renderReports(reports) {
         </div>
       </details>`
     : '<span class="dim">none shared</span>';
+
+  // M4 attachments (req 9): the reporter handed over the file keys, so the
+  // server could decrypt what it still held. Images and videos render inline,
+  // anything else is a download link — the bytes come from the ADMIN route
+  // (reporter-controlled content must never be pointed at a user endpoint),
+  // and its content type is sniffed, so an HTML/SVG 'image' cannot execute on
+  // this origin.
+  const mediaCell = (r) => {
+    const items = r.media ?? [];
+    if (!items.length) return '<span class="dim">none</span>';
+    const parts = items.map((m) => {
+      const label = `<span class="mono dim">${esc(m.name || m.kind)}</span>`;
+      if (m.undecryptable || !m.hasBytes) {
+        return `<span class="report-media-missing">${label} <span class="dim">(no readable copy${m.source ? `, ${esc(m.source)}` : ''})</span></span>`;
+      }
+      const src = `/api/admin/reports/${encodeURIComponent(r.id)}/media/${m.index}`;
+      if (m.kind === 'image') return `<a href="${src}" target="_blank" rel="noopener noreferrer" class="report-media"><img src="${src}" alt="" class="report-media-img" />${label}</a>`;
+      if (m.kind === 'video') return `<a href="${src}" target="_blank" rel="noopener noreferrer" class="report-media"><video src="${src}" class="report-media-img" muted playsinline></video>${label}</a>`;
+      const size = m.bytes ? `${(m.bytes / 1024).toFixed(0)} KiB` : '';
+      return `<a href="${src}" class="report-media" download>${label} <span class="dim mono">${esc(size)}</span></a>`;
+    });
+    return `<div class="report-media-list">${parts.join('')}</div>`;
+  };
   $('reports-list').innerHTML = `<table class="rel-table reports-table">
     <thead><tr>
-      <th>When</th><th>Reporter</th><th>Against</th><th>Reason</th><th>Description</th><th>Chat history</th><th>Outcome</th><th></th>
+      <th>When</th><th>Reporter</th><th>Against</th><th>Reason</th><th>Description</th><th>Chat history</th><th>Attachments</th><th>Outcome</th><th></th>
     </tr></thead>
     <tbody>${reports.map((r) => `<tr>
       <td class="mono dim">${fmtDate(r.ts)}<br />${esc(r.ip ?? '')}</td>
@@ -720,6 +743,7 @@ function renderReports(reports) {
       <td><span class="badge report-reason">${esc(REPORT_REASON_LABELS[r.reason] ?? r.reason)}</span></td>
       <td class="report-desc">${esc(r.description ?? '')}</td>
       <td>${transcriptCell(r)}</td>
+      <td>${mediaCell(r)}</td>
       <td>${r.blocked
         ? '<span class="badge report-blocked">blocked</span>'
         : '<span class="dim">report only</span>'}</td>

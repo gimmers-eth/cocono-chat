@@ -10,7 +10,8 @@
 import { confirmModal, toast } from './ui.js';
 import { iconEl } from './icons.js';
 import { humanError } from './errors.js';
-import { rememberPeerBlocked, friendDel, messagesWith } from './store.js';
+import { rememberPeerBlocked, friendDel, messagesWith, mediaWith } from './store.js';
+import { blobOf } from './media.js';
 
 export const REPORT_REASONS = [
   ['scamming', 'Scamming', 'reasonScam'],
@@ -74,7 +75,9 @@ export async function reportUserWithConfirm(client, peer) {
     bodyEl: form,
     okLabel: 'Report',
     danger: true,
-    warning: `Your chat history with @${ul} will be sent to the server UNENCRYPTED so it can be reviewed.`,
+    // req 9's honesty rule: a report is not just text — any photo, video or
+    // file in the conversation leaves this device in READABLE form too
+    warning: `Your chat history with @${ul} — including any photos, videos or files in it — will be sent to the server UNENCRYPTED so it can be reviewed.`,
     // reason AND description are required (the modal says so; the button enforces it)
     validate: () => !!chosen.r && !!chosen.description.trim(),
   });
@@ -87,11 +90,31 @@ export async function reportUserWithConfirm(client, peer) {
     .sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0))
     .slice(-MAX_TRANSCRIPT);
 
+  // ATTACHMENTS (plan §7): the file keys this device legitimately holds for the
+  // conversation's media, plus our own plaintext copy when we have one — the
+  // server may already have deleted the blob (every device acked = bytes gone),
+  // and a report is the one moment evidence may not be lost. The newest three
+  // only; the server caps the same way (and the SDK trims to it).
+  const rows = await mediaWith(ul).catch(() => []);
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const media = transcript
+    .filter((m) => m.mediaId && byId.get(m.mediaId))
+    .slice(-3)
+    .map((m) => {
+      const r = byId.get(m.mediaId);
+      return {
+        blobId: blobOf(r) ?? r.id, kind: r.kind, name: r.name, mime: r.mime,
+        key: r.key, iv: r.iv, thumbIv: r.thumbIv,
+        bytes: r.state === 'stored' ? r.data : null,
+      };
+    });
+
   try {
     const res = await client.reportUser(ul, {
       reason: chosen.r,
       description: chosen.description.trim(),
       messages: transcript,
+      media,
       block: chosen.block,
     });
     if (res.blocked) {

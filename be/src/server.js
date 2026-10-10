@@ -2,6 +2,7 @@ import { pathToFileURL } from 'node:url';
 import { config } from './config.js';
 import { connectMongo, connectRedis } from './db.js';
 import { buildApp, defaultFeRoot, defaultSdkRoot } from './app.js';
+import { startMediaSweeper } from './lib/media.js';
 
 export async function start() {
   // H2 fix: refuse to serve with the dev default (or a too-short) JWT secret.
@@ -27,8 +28,19 @@ export async function start() {
   await app.listen({ port: config.port, host: config.host });
   app.log.info(`[server] listening on ${config.tlsCertPath ? 'https' : 'http'}://${config.host}:${config.port}`);
 
+  // Media sweeper: the inline delete-on-last-ack (routes/app-routes/media.js)
+  // is the fast path, this is the safety net — un-acked blobs past
+  // MEDIA_RETENTION_DAYS and never-sent orphan uploads. A setInterval behind
+  // the single-process assumption (same as the WS heartbeat above); the
+  // message queue's own bounds are handled by Mongo's TTL index instead.
+  const sweeper = startMediaSweeper({
+    media: mongo.db.collection('media'), config, log: app.log,
+    everyMs: config.mediaSweepSec * 1000,
+  });
+
   const shutdown = async (signal) => {
     app.log.info(`[server] ${signal} received, shutting down`);
+    sweeper.stop();
     await app.close();
     await mongo.client.close();
     await redis.quit();

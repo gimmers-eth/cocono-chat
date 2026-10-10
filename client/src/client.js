@@ -8,7 +8,7 @@ import { Emitter } from './emitter.js';
 import { CoconoError } from './errors.js';
 import { MemoryStorage } from './storage.js';
 import { createLogger } from './logger.js';
-import { canonical, nowEpoch } from './encoding.js';
+import { canonical, nowEpoch, b64uEncode } from './encoding.js';
 import { localSeal, localUnseal } from './localseal.js';
 import * as c from './crypto.js';
 
@@ -37,6 +37,21 @@ const installedProbe = () => {
   } catch { /* no browser signal */ }
   return null;
 };
+
+// The app may hand in more attachments than the server will accept; the SDK
+// trims to the SAME count the report route enforces, so a client never sends
+// 40 MB that is going to be dropped.
+const REPORT_MEDIA_ITEMS = 3;
+
+// The SDK takes BYTES, not DOM files — but a caller holding a Blob/File is
+// the common case in a browser, so both are accepted here and nowhere else.
+async function toBytes(value, what) {
+  if (!value) throw new CoconoError(`sendMedia needs ${what}`, 'no_media');
+  if (value instanceof Uint8Array) return value;
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (typeof value.arrayBuffer === 'function') return new Uint8Array(await value.arrayBuffer());
+  throw new CoconoError(`sendMedia: unsupported ${what} type`, 'no_media');
+}
 
 export class CoconoClient extends Emitter {
   #identity = null; // loaded lazily from storage
@@ -487,11 +502,16 @@ export class CoconoClient extends Emitter {
    *   reason      'scamming' | 'harassment' | 'graphic' | 'other'
    *   description required free text from the reporter
    *   messages    [{ from, ts, text }] transcript lines
+   *   media       [{ blobId, kind, name, mime, key, iv, thumbIv, bytes? }]
+   *               attachments of that conversation (M4, req 9): the file keys
+   *               the reporter legitimately holds, plus — when the reporter
+   *               still has the plaintext locally — the bytes themselves, so a
+   *               blob the server already deleted is still reviewable
    *   block       also block the peer server-side (default false —
    *               the client UI defaults the checkbox to ON)
    * @returns {Promise<{reported: boolean, blocked: boolean}>}
    */
-  async reportUser(username, { reason, description, messages, block = false } = {}) {
+  async reportUser(username, { reason, description, messages, media, block = false } = {}) {
     const ul = String(username ?? '').toLowerCase();
     const identity = await this.#requireIdentity();
     const lines = (messages ?? [])
@@ -501,8 +521,24 @@ export class CoconoClient extends Emitter {
         ts: m.ts ?? null,
         text: m.text,
       }));
+    // media items: the descriptor fields go as-is; bytes become base64url
+    // plaintext here (and only here), because encoding is the SDK's job
+    const items = [];
+    for (const m of (media ?? []).slice(-REPORT_MEDIA_ITEMS)) {
+      if (!m?.blobId || !m.key) continue;
+      const item = {
+        blobId: String(m.blobId), kind: String(m.kind ?? 'file'),
+        name: String(m.name ?? ''), mime: String(m.mime ?? ''),
+        key: String(m.key), ...(m.iv ? { iv: String(m.iv) } : {}),
+        ...(m.thumbIv ? { thumbIv: String(m.thumbIv) } : {}),
+      };
+      if (m.bytes) {
+        try { item.data = b64uEncode(await toBytes(m.bytes, 'bytes')); } catch { /* no local copy */ }
+      }
+      items.push(item);
+    }
     return this.api.reportUser(this.#requireToken(), {
-      peer: ul, r: reason, description, messages: lines, block: block === true,
+      peer: ul, r: reason, description, messages: lines, media: items, block: block === true,
     });
   }
 
@@ -867,8 +903,7 @@ export class CoconoClient extends Emitter {
     return { localId, peer: peer.u, cids };
   }
 
-  // Mirror an outgoing message to the sender's OTHER devices (same account).
-  // Reuses the sys-message pattern: envelopes our own devices decrypt with
+  // Mirror an outgoing message to the sender's OTHER devices (same account).  // Reuses the sys-message pattern: envelopes our own devices decrypt with
   // their existing per-device-pair conversation keys; the server stores and
   // forwards them like mail (offline devices catch up on next connect) but
   // never pushes for them (plaintext sync:1 flag). Best-effort throughout.
@@ -892,6 +927,178 @@ export class CoconoClient extends Emitter {
     } catch (err) {
       this.logger.debug(`sync fan-out skipped: ${err?.message ?? err}`);
     }
+  }
+
+  /**
+   * E2EE media message (milestone 4): encrypt + upload + fan out one envelope
+   * per recipient device, each carrying the SAME per-file key inside its own
+   * device-pair ciphertext. The bytes never touch the WebSocket (64 KB frame
+   * cap) — they go to POST /api/media, and the envelope carries only a
+   * plaintext routing hint (`att`) plus the encrypted descriptor.
+   *
+   * The split is deliberate: this SDK has no DOM, so the APP resizes,
+   * thumbnails, picks kind/name and enforces the size cap before calling.
+   * Everything here is crypto + transport.
+   *
+   * @param {string} username
+   * @param {object} opts
+   *   kind   'image' | 'video' | 'file' (server-validated enum)
+   *   bytes  ArrayBuffer | Uint8Array | Blob — the PLAINTEXT file
+   *   thumb  same shapes, optional — the client-made 256 px preview
+   *   name/mime/w/h/dur/animated  display metadata (travels encrypted)
+   * @returns {Promise<{localId, peer, cids, media}>} `media` is the descriptor
+   *   the app stores locally (its own copy — the sender keeps it BEFORE the
+   *   upload runs, which is what makes a failed send still a local copy).
+   */
+  async sendMedia(username, { kind = 'file', bytes, thumb = null, name = '', mime = '', w = null, h = null, dur = null, animated = false } = {}, { sync = true, localId: providedId = null } = {}) {
+    const identity = await this.#requireIdentity();
+    this.#requireToken();
+    if (!this.#transport || this.#transport.state !== 'open') {
+      throw new CoconoError('Websocket not open — call connect() and wait for the "open" state.', 'not_connected');
+    }
+    const data = await toBytes(bytes, 'bytes');
+    const thumbBytes = thumb ? await toBytes(thumb, 'thumb') : null;
+    const peer = await this.peerKeys(username);
+
+    // 1. per-file key + ciphertext (iv‖ct‖tag — the same shape as a message)
+    const fileKey = await c.generateFileKey();
+    const ct = await c.encryptBytes(fileKey, data);
+    const thumbCt = thumbBytes ? await c.encryptBytes(fileKey, thumbBytes) : null;
+    const keyB64u = await c.exportRawAesKey(fileKey);
+    const sha256 = await c.sha256B64u(ct);
+    const media = {
+      // id is filled after the upload
+      kind, mime: String(mime || ''), name: String(name || ''), size: data.length,
+      key: keyB64u,
+      // iv/thumbIv are ALSO at the front of each ciphertext (one wire format);
+      // they travel in the descriptor so a client can verify/decrypt without
+      // re-slicing, and so the fields are auditable in a transcript dump.
+      iv: b64uEncode(ct.slice(0, 12)),
+      ...(thumbCt ? { thumbIv: b64uEncode(thumbCt.slice(0, 12)) } : {}),
+      sha256,
+      ...(w ? { w } : {}), ...(h ? { h } : {}), ...(dur ? { dur } : {}),
+      ...(animated ? { animated: true } : {}),
+    };
+
+    // 2. upload the BYTES first: a failure here throws before any envelope
+    //    exists, so nothing is ever half-sent (a message pointing at a blob
+    //    that was never stored). A failure AFTER this point leaves an orphan
+    //    upload the server sweeper reclaims.
+    const { id } = await this.api.uploadMedia(this.token, {
+      kind, blob: ct, ...(thumbCt ? { thumb: thumbCt } : {}), sha256,
+    });
+    media.id = id;
+    const payload = JSON.stringify({ media });
+    const att = { id, kind, size: ct.length }; // server-visible: ciphertext size
+
+    // 3. fan out exactly like sendMessage — same ack/delivered events keyed
+    //    by the returned localId
+    const t = nowEpoch();
+    // The app may hand in its OWN localId: it writes the sender's local copy
+    // BEFORE the upload starts (req 4 — a failed send must still leave the
+    // sender with their own photo), which it can only do if the id exists
+    // first. Text sends keep generating it here.
+    const localId = providedId ?? crypto.randomUUID();
+    const cids = [];
+    for (const dev of peer.devices) {
+      if (!dev.x) {
+        this.logger.warn(`skipping device ${dev.d} of @${peer.u}: no X25519 key (pre-M3 device)`);
+        continue;
+      }
+      const cid = crypto.randomUUID();
+      this.#cidToLocal.set(cid, localId);
+      const key = await this.#getConvKey(identity, peer.u.toLowerCase(), dev.d, dev.x);
+      const m = { d: await c.encryptForConversation(key, payload), u: peer.u, dv: dev.d, f: identity.username, fd: identity.deviceId, cid, t, att };
+      const h = await c.hmac(identity.aesMac, canonical(m));
+      this.#transport.send({ type: 'msg', msg: { m: { ...m, h } } });
+      cids.push(cid);
+    }
+    if (!cids.length) throw new CoconoError(`No encryptable devices for @${peer.u}`, 'no_peer_devices');
+
+    // 4. own other devices get the same media object as a SYNC copy — with
+    //    the plaintext `att` riding along, so handleSend registers them in
+    //    devices/pending and the blob cannot be deleted before they too have
+    //    downloaded (or declined) it.
+    if (sync && peer.u.toLowerCase() !== identity.username.toLowerCase()) {
+      this.#fanOutSyncMedia(identity, localId, peer.u, media, ct.length);
+    }
+    return { localId, peer: peer.u, cids, media };
+  }
+
+  // Mirror a media send to the sender's OTHER devices: the same sync envelope
+  // shape as text, plus the media descriptor, plus the SAME plaintext att —
+  // which is what puts those own devices in the blob's devices/pending lists,
+  // so the bytes cannot be deleted before every device (peer AND own) has
+  // downloaded or declined.
+  async #fanOutSyncMedia(identity, localId, peerUl, media, ctSize) {
+    try {
+      if (!this.#transport || this.#transport.state !== 'open') return;
+      const mine = await this.peerKeys(identity.username);
+      const myUl = identity.username.toLowerCase();
+      const payload = JSON.stringify({ sync: 1, id: localId, peer: peerUl, ts: Date.now(), media });
+      // att.size is compared against the stored CIPHERTEXT length, so it is
+      // the blob byte count — never the plaintext size
+      const att = { id: media.id, kind: media.kind, size: ctSize };
+      for (const dev of mine.devices) {
+        if (dev.d === identity.deviceId || !dev.x) continue;
+        if (!this.#transport || this.#transport.state !== 'open') return;
+        const cid = crypto.randomUUID();
+        this.#syncCids.add(cid);
+        const key = await this.#getConvKey(identity, myUl, dev.d, dev.x);
+        const m = { d: await c.encryptForConversation(key, payload), u: identity.username, dv: dev.d, f: identity.username, fd: identity.deviceId, cid, t: nowEpoch(), sync: 1, att };
+        const h = await c.hmac(identity.aesMac, canonical(m));
+        this.#transport.send({ type: 'msg', msg: { m: { ...m, h } } });
+      }
+    } catch (err) {
+      this.logger.debug(`media sync fan-out skipped: ${err?.message ?? err}`);
+    }
+  }
+
+  /**
+   * Fetch a blob's CIPHERTEXT, verify it against the sender-supplied digest,
+   * decrypt, and hand back Blobs. Integrity first: a mismatch is surfaced as
+   * `media_tampered` — a lying server must be VISIBLE, never silently
+   * accepted (and the caller must then NOT ack `true`).
+   * @returns {Promise<{data: Blob, thumb: Blob|null}>}
+   */
+  async downloadMedia(id, media = {}) {
+    this.#requireToken();
+    const { key, sha256, thumbIv } = media;
+    if (!key || !sha256) throw new CoconoError('downloadMedia needs the media descriptor (key + sha256)', 'no_media_key');
+    const fileKey = await c.importFileKey(key);
+    const ct = await this.api.downloadMediaRaw(this.token, id);
+    const got = await c.sha256B64u(ct);
+    if (got !== sha256) {
+      throw new CoconoError(`Downloaded blob ${id} does not match its digest`, 'media_tampered');
+    }
+    const plain = await c.decryptBytes(fileKey, ct);
+    let thumb = null;
+    if (thumbIv) {
+      // the thumbnail has no digest of its own (sha256 covers the main blob);
+      // AES-GCM's tag is what authenticates it
+      const t = await this.api.downloadMediaRaw(this.token, id, { part: 'thumb' }).catch(() => null);
+      if (t && t.length) {
+        try { thumb = new Blob([await c.decryptBytes(fileKey, t)]); } catch { thumb = null; }
+      }
+    }
+    return { data: new Blob([plain]), thumb };
+  }
+
+  /** Poster/preview bytes ONLY — a video thumbnail without pulling the blob. */
+  async downloadThumb(id, media = {}) {
+    this.#requireToken();
+    if (!media.key) throw new CoconoError('downloadThumb needs the media descriptor (key)', 'no_media_key');
+    const t = await this.api.downloadMediaRaw(this.token, id, { part: 'thumb' });
+    return new Blob([await c.decryptBytes(await c.importFileKey(media.key), t)]);
+  }
+
+  /**
+   * Settle this device's debt on a blob: downloaded (true) or declined (false
+   * — "delete it before I download it", which counts as received). When every
+   * authorised device has acked, the server deletes the bytes.
+   */
+  async ackMedia(id, downloaded = true) {
+    return this.api.ackMedia(this.#requireToken(), id, downloaded === true);
   }
 
   // --- internals ---
@@ -1028,11 +1235,16 @@ export class CoconoClient extends Emitter {
     if (m.sync === 1 && senderUl === myUl && m.fd !== identity.deviceId) {
       try {
         const p = JSON.parse(text);
-        if (p && p.sync && typeof p.id === 'string' && typeof p.text === 'string') {
+        // A sync copy carries EITHER text OR a media descriptor (M4) — the
+        // media one is the same object the sending device stored, so every
+        // own device ends up with the identical record id and can join the
+        // blob lifecycle like any recipient.
+        if (p && p.sync && typeof p.id === 'string' && (typeof p.text === 'string' || p.media)) {
           this.emit('sync', {
             id: p.id,
             peer: String(p.peer ?? ''),
-            text: p.text,
+            text: typeof p.text === 'string' ? p.text : '',
+            media: p.media ?? null,
             ts: typeof p.ts === 'number' ? p.ts : frame.ts,
             fromDeviceId: m.fd,
           });

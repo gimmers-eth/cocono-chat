@@ -29,6 +29,27 @@ export const ICONS = {
   forward: 'fa-share',
   delete: 'fa-trash-can',
 
+  // media (M4): the bottom tab strip, the composer attach menu, and the
+  // viewer's control row. One glyph per ACTION, all from this map — no
+  // component ever writes a ligature character by hand.
+  tabChat: 'fa-comment',
+  tabImages: 'fa-image',
+  tabVideos: 'fa-film',
+  tabFiles: 'fa-folder-open',
+  tabLinks: 'fa-link',
+  attach: 'fa-plus',
+  attachPhoto: 'fa-camera',
+  attachFile: 'fa-file-lines',
+  mediaDownload: 'fa-download',
+  mediaBlur: 'fa-eye-slash',
+  mediaUnblur: 'fa-eye',
+  mediaPlay: 'fa-play',
+  mediaPause: 'fa-pause',
+  mediaMute: 'fa-volume-xmark',
+  mediaUnmute: 'fa-volume',
+  mediaKeep: 'fa-bookmark',
+  mediaExpired: 'fa-circle-question',
+
   // friendship (one-way trust) — sidebar + menu identity marks
   userSolid: 'fa-user',              // you (solid)
   volume: 'fa-volume',                    // chat unmuted (tap to mute)

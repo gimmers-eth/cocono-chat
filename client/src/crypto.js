@@ -83,6 +83,48 @@ export function newDeviceId() {
   return crypto.randomUUID();
 }
 
+// --- byte-level AES-GCM: the ONE encrypt/decrypt path ---
+// Message ciphertexts and media blobs are the same wire shape —
+// iv(12) ‖ ciphertext ‖ tag(16) — so both go through these two functions and
+// differ only in what goes in (utf8 text vs raw bytes) and which key is used
+// (a derived conversation key vs a per-file random key). Keeping one path is
+// the point: a drift here would silently break every stored blob.
+export async function encryptBytes(key, data) {
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, bytes);
+  const out = new Uint8Array(iv.length + ct.byteLength);
+  out.set(iv, 0);
+  out.set(new Uint8Array(ct), iv.length);
+  return out;
+}
+
+export async function decryptBytes(key, buf) {
+  const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  const iv = bytes.slice(0, 12);
+  const ct = bytes.slice(12); // WebCrypto expects ciphertext‖tag
+  return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct));
+}
+
+// A media file's OWN key: random, EXPORTABLE (it must travel to the
+// recipients inside their encrypted envelopes — that is what lets the server
+// hold ciphertext it cannot read), AES-GCM-256.
+export async function generateFileKey() {
+  return crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+}
+
+export async function importFileKey(rawB64u) {
+  return crypto.subtle.importKey('raw', b64uDecode(rawB64u), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
+
+// Integrity of a DOWNLOAD: the sender hashes the CIPHERTEXT it uploaded and
+// ships that hash inside the encrypted payload, so a recipient can prove the
+// bytes it got are the bytes that were sent — even though it cannot read them.
+export async function sha256B64u(data) {
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  return b64uEncode(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)));
+}
+
 // --- E2EE conversation keys (DESIGN.md milestone 3) ---
 
 // Deterministic per-device-pair conversation key; BOTH sides derive the
@@ -111,20 +153,11 @@ export async function deriveConversationKey(myXPriv, peerXPubB64u, info) {
   );
 }
 
-// Wire format: b64u(iv(12) || ciphertext || tag(16)).
+// Wire format: b64u(iv(12) || ciphertext || tag(16)) — see encryptBytes above.
 export async function encryptForConversation(convKey, plaintext) {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, convKey, utf8(plaintext));
-  const out = new Uint8Array(iv.length + ct.byteLength);
-  out.set(iv, 0);
-  out.set(new Uint8Array(ct), iv.length);
-  return b64uEncode(out);
+  return b64uEncode(await encryptBytes(convKey, utf8(plaintext)));
 }
 
 export async function decryptFromConversation(convKey, dB64u) {
-  const buf = b64uDecode(dB64u);
-  const iv = buf.slice(0, 12);
-  const ct = buf.slice(12);
-  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, convKey, ct);
-  return new TextDecoder().decode(pt);
+  return new TextDecoder().decode(await decryptBytes(convKey, b64uDecode(dB64u)));
 }

@@ -22,6 +22,10 @@ export async function connectMongo(url, { msgQueueMaxSec = 30 * 24 * 3600 } = {}
   // Abuse reports ('Report user' in the chat menu): moderation records — NO
   // TTL (kept until the admin deletes them); indexed for newest-first lists.
   await db.collection('reports').createIndex({ ts: -1 });
+  // A report's DECRYPTED attachments (req 9): one doc per item (Mongo's 16 MB
+  // document limit makes a multi-attachment report doc impossible), keyed by
+  // the report it belongs to, addressed by the index the admin panel shows.
+  await db.collection('report_media').createIndex({ report: 1, index: 1 }, { unique: true });
   // Identity-verification document photos (image binaries; ONLY the admin
   // reads them; deleted on demand after review — see VERIFICATION docs).
   await db.collection('id_docs').createIndex({ ul: 1 }, { unique: true });
@@ -32,8 +36,7 @@ export async function connectMongo(url, { msgQueueMaxSec = 30 * 24 * 3600 } = {}
   await db.collection('profiles').createIndex({ ul: 1 }, { unique: true });
   // Store-and-forward message queue (milestone 3): one doc per recipient
   // device, deleted once that device pulls it.
-  const messages = db.collection('messages');
-  await messages.createIndex({ 'to.ul': 1, 'to.dv': 1, ts: 1 });
+  const messages = db.collection('messages');  await messages.createIndex({ 'to.ul': 1, 'to.dv': 1, ts: 1 });
   // Idempotent client retries: same (sender device, client id) cannot be
   // queued twice.
   await messages.createIndex({ 'from.ul': 1, 'from.fd': 1, cid: 1 }, { unique: true });
@@ -57,6 +60,14 @@ export async function connectMongo(url, { msgQueueMaxSec = 30 * 24 * 3600 } = {}
   // queue itself expires, so the graph needs its own bounded record.
   // Metadata only (no envelope, no content).
   await db.collection('contacts').createIndex({ from: 1, to: 1 }, { unique: true });
+  // Media blobs (milestone 4): ciphertext + encrypted thumbnail, one doc per
+  // SEND (not per recipient). Owner lookup drives the quota; `ts` drives the
+  // retention/orphan sweep (lib/media.js). Deliberately NO unique index on
+  // sha256: cross-send dedup would turn a hash match into an upload oracle
+  // ("someone else already has this exact ciphertext").
+  const media = db.collection('media');
+  await media.createIndex({ 'owner.ul': 1 });
+  await media.createIndex({ ts: 1 });
   return { client, db };
 }
 

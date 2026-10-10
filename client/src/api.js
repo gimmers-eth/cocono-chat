@@ -2,6 +2,7 @@
 // baseUrl, errors and logging are handled in one place.
 
 import { CoconoApiError } from './errors.js';
+import { b64uEncode } from './encoding.js';
 
 export class Api {
   constructor({ baseUrl = '', fetchImpl, logger }) {
@@ -23,6 +24,21 @@ export class Api {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new CoconoApiError(res.status, data?.error, data?.message);
     return data;
+  }
+
+  // Byte-transfer variant: a media download is raw octet-stream, so there is
+  // no JSON body to read — but an ERROR response still is, and its machine
+  // code is what tells the app 'expired' (blob swept) from 'rate_limited'.
+  async #requestBytes(path, { token, method = 'GET' } = {}) {
+    const headers = {};
+    if (token) headers.authorization = `Bearer ${token}`;
+    this.logger.debug(`${method} ${path}`, '(bytes)');
+    const res = await this.fetch(`${this.baseUrl}${path}`, { method, headers });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new CoconoApiError(res.status, data?.error, data?.message);
+    }
+    return new Uint8Array(await res.arrayBuffer());
   }
 
   // --- accounts / auth ---
@@ -187,6 +203,38 @@ export class Api {
   // --- messaging support ---
   peerKeys(token, username) {
     return this.#request(`/api/users/${encodeURIComponent(username)}/keys`, { token });
+  }
+
+  // --- media blobs (milestone 4) ---
+  // Bytes move over REST (WS frames are capped at 64 KB); the message that
+  // references them still rides the WS. All three calls deal in CIPHERTEXT —
+  // the key never appears here, it travels inside the recipient's envelope.
+  uploadMedia(token, { kind, blob, thumb, sha256 }) {
+    return this.#request('/api/media', {
+      method: 'POST',
+      token,
+      body: {
+        kind,
+        blob: b64uEncode(blob),
+        ...(thumb ? { thumb: b64uEncode(thumb) } : {}),
+        sha256,
+      },
+    });
+  }
+
+  // part: 'thumb' asks for just the encrypted thumbnail (video posters
+  // without pulling the full blob) — and it deliberately does NOT ack.
+  downloadMediaRaw(token, id, { part = null } = {}) {
+    return this.#requestBytes(
+      `/api/media/${encodeURIComponent(id)}${part ? `?part=${encodeURIComponent(part)}` : ''}`,
+      { token },
+    );
+  }
+
+  ackMedia(token, id, downloaded) {
+    return this.#request(`/api/media/${encodeURIComponent(id)}/ack`, {
+      method: 'POST', body: { downloaded }, token,
+    });
   }
 
   // --- transport URL (not a REST call, but baseUrl-relative by definition) ---

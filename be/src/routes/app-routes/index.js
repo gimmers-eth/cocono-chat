@@ -6,13 +6,14 @@ import devices from './devices.js';
 import userKeys from './userKeys.js';
 import userStats from './userStats.js';
 import profile from './profile.js';
+import media from './media.js';
 import diagnostics from './diagnostics.js';
 import reports from './reports.js';
 import appInfo from './appInfo.js';
 import shares from './shares.js';
 
 // All public app routes. ctx = { users, redis, config, diagnostics, reports,
-// settings }, passed through from buildApp().
+// settings, media }, passed through from buildApp().
 export default async function appRoutes(app, ctx) {
   await app.register(signup, ctx);
   await app.register(auth, ctx);
@@ -22,6 +23,7 @@ export default async function appRoutes(app, ctx) {
   await app.register(userKeys, ctx);
   await app.register(userStats, ctx);
   await app.register(profile, ctx);
+  await app.register(media, ctx);
   await app.register(diagnostics, ctx);
   await app.register(reports, ctx);
   await app.register(shares, ctx);

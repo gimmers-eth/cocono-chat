@@ -15,7 +15,7 @@ const MAX_DEVICES_CAP = 1000;
 
 // GET /api/admin/users, PATCH max-devices, DELETE user, DELETE device,
 // PUT verified (identity-verification toggle), GET/DELETE id-doc (review).
-export default async function usersRoutes(app, { users, redis, config, messages, idDocs, profiles, settings, diagnostics, counters, shares, contacts, graph }) {
+export default async function usersRoutes(app, { users, redis, config, messages, idDocs, profiles, settings, diagnostics, counters, shares, contacts, graph, media }) {
   // account-review outcomes are invisible to the reviewed user otherwise —
   // content-free 'identity' nudges (lib/notify.js) make the app re-pull
   const { notify: notifyAccount, notifyPeers } = createNotifier({ redis, users });
@@ -362,7 +362,7 @@ export default async function usersRoutes(app, { users, redis, config, messages,
     // THE full teardown (friends refs + OTHERS' blocked/blockReasons walls,
     // diagnostics, photos, messages, share/contact edges, redis) — one
     // helper, no per-path gaps
-    await deleteAccountFully({ users, profiles, idDocs, messages, diagnostics, settings, redis, shares, contacts }, ul);
+    await deleteAccountFully({ users, profiles, idDocs, messages, diagnostics, settings, redis, shares, contacts, media }, ul);
     return { deleted: ul };
   });
 
@@ -385,7 +385,7 @@ export default async function usersRoutes(app, { users, redis, config, messages,
     // reserved usernames). Bearer tokens need no explicit revocation — the
     // hook re-checks membership and the account is gone.
     if (after.devices.length === 0) {
-      await deleteAccountFully({ users, profiles, idDocs, messages, diagnostics, settings, redis, shares, contacts }, ul);
+      await deleteAccountFully({ users, profiles, idDocs, messages, diagnostics, settings, redis, shares, contacts, media }, ul);
       return { removed: deviceId, devices: 0, accountDeleted: true };
     }
     return { removed: deviceId, devices: after.devices.length };

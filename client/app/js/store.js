@@ -6,16 +6,26 @@
 // as a different user in the same browser never shows the previous
 // account's conversations.
 //
-// record: { id, peer, dir: 'in'|'out', text, ts, state?, fromDeviceId? }
+// record: { id, peer, dir: 'in'|'out', text, ts, state?, fromDeviceId?,
+//           kind?, mediaId? }   -- M4: kind/mediaId tag a message as media, so
+//   the Images/Videos/Files tabs read the transcript with no join.
 //   id:    outgoing = 'out:'+localId (one per logical send)
 //          incoming = 'in:'+server mid (one per device copy)
 // friends: { peer } — one-way trust list, mirrored from the server (source
 //   of truth) and kept live via E2EE system messages; independent of the
 //   message store on purpose: clearing a chat never unfriends anyone.
+// media:   one row per blob THIS DEVICE knows about (keyPath = server blob
+//   id): the decrypted bytes plus everything the viewer needs. Separate from
+//   the transcript on purpose — a message row is small and read on every
+//   paint, a blob is megabytes read on demand, and the pruning job (drop the
+//   bytes, keep the record) must never rewrite a transcript entry.
 
 const DB_PREFIX = 'cocono-app';
-const DB_VERSION = 5;
+// v5 -> v6 (M4 media): adds the `media` store. The upgrade only CREATES it,
+// so every existing transcript/peer/pin record survives a reload untouched.
+const DB_VERSION = 6;
 const MESSAGES = 'messages';
+const MEDIA = 'media';
 const FRIENDS = 'friends';
 const PINS = 'pins';
 const PEERS = 'peers'; // lightweight facts seen via peerKeys (identity-verified badge)
@@ -99,6 +109,13 @@ function openDb() {
           const store = db.createObjectStore(MESSAGES, { keyPath: 'id' });
           store.createIndex('byPeer', 'peer');
         }
+        if (!db.objectStoreNames.contains(MEDIA)) {
+          // M4 blobs, keyed by server media id; `byPeer` feeds the
+          // conversation tabs, `byState` the retry queue and the prune sweep.
+          const store = db.createObjectStore(MEDIA, { keyPath: 'id' });
+          store.createIndex('byPeer', 'peer');
+          store.createIndex('byState', 'state');
+        }
         if (!db.objectStoreNames.contains(FRIENDS)) {
           db.createObjectStore(FRIENDS, { keyPath: 'peer' });
         }
@@ -145,6 +162,64 @@ export async function updateMessage(id, patch) {
 
 export function messagesWith(peer) {
   return withStore('readonly', (s) => s.index('byPeer').getAll(IDBKeyRange.only(peer)));
+}
+
+// ---- media records (M4) ----
+// { id, peer, dir, kind, name, mime, size, key, iv, thumbIv, sha256, w, h,
+//   dur, animated, state, keep, blurred, data, thumb, msgId, ts }
+// state: pending | downloading | stored | declined | expired | failed | pruned
+// (`synced` is the state a SYNC copy is stored in BEFORE its download — the
+// SDK's sync event marks it, the same policy then moves it to stored/failed)
+
+export function saveMedia(media) {
+  return withStore('readwrite', (s) => s.put(media), MEDIA);
+}
+
+export function getMedia(id) {
+  return withStore('readonly', (s) => s.get(id), MEDIA);
+}
+
+export async function updateMedia(id, patch) {
+  const existing = await getMedia(id);
+  if (!existing) return null;
+  return saveMedia({ ...existing, ...patch });
+}
+
+export function mediaWith(peer) {
+  return withStore('readonly', (s) => s.index('byPeer').getAll(IDBKeyRange.only(peer)), MEDIA);
+}
+
+export function allMedia() {
+  return withStore('readonly', (s) => s.getAll(), MEDIA);
+}
+
+export function deleteMedia(id) {
+  return withStore('readwrite', (s) => s.delete(id), MEDIA);
+}
+
+// Drop a conversation's media rows (device-local, same contract as
+// clearMessages: the peer and the server keep their copies). Deleting the
+// transcript while megabytes of decrypted bytes stayed behind would be a
+// privacy lie about what "Clear messages" does.
+export async function clearMediaWith(peer) {
+  const rows = await mediaWith(peer);
+  if (!rows.length) return 0;
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(MEDIA, 'readwrite');
+    const store = tx.objectStore(MEDIA);
+    for (const r of rows) store.delete(r.id);
+    tx.oncomplete = () => resolve(rows.length);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export function clearAllMedia() {
+  return withStore('readwrite', (s) => {
+    const count = s.count();
+    s.clear();
+    return count;
+  }, MEDIA);
 }
 
 // Local-only delete (this device): peers and the user's other devices keep

@@ -203,6 +203,10 @@ export const config = {
   reportIpWindowSec: numOf(env.REPORT_IP_WINDOW_SEC, IP_TIME_WINDOW),
   reportAccountLimit: numOf(env.REPORT_ACCOUNT_LIMIT, 20),
   reportAccountWindowSec: numOf(env.REPORT_ACCOUNT_WINDOW_SEC, 24 * 3600),
+  // A report's attachments (req 9): three items and this many PLAINTEXT bytes
+  // in total per report. The bytes live one doc each in `report_media` — a
+  // single 30 MB field would exceed Mongo's 16 MB document limit.
+  reportMediaMaxBytes: numOf(env.REPORT_MEDIA_MAX_BYTES, 30 * 1024 * 1024),
   wsHeartbeatSec: numOf(env.WS_HEARTBEAT_SEC, 30),
 
   // Identity verification (real-person check by the admin, distinct from
@@ -241,6 +245,33 @@ export const config = {
   idDocIpWindowSec: numOf(env.ID_DOC_IP_WINDOW_SEC, IP_TIME_WINDOW),
   idDocAccountLimit: numOf(env.ID_DOC_ACCOUNT_LIMIT, 5),
   idDocWindowSec: numOf(env.ID_DOC_WINDOW_SEC, 24 * 3600),
+
+  // Media / files (milestone 4). Blobs NEVER ride the WebSocket (frames are
+  // capped at 64 KB) — bytes move over REST, the referencing *message* rides
+  // the existing E2EE store-and-forward path. The server stores CIPHERTEXT
+  // only (per-file AES-GCM key travels inside the recipient's envelope), so
+  // it cannot validate mime/magic bytes and must instead be stingy about
+  // SIZE: caps + a per-account quota + retention sweeps are all part of the
+  // same PR as the upload route (unbounded blob storage is a P0-class DoS).
+  mediaMaxBytes: numOf(env.MEDIA_MAX_BYTES, 10 * 1024 * 1024),
+  mediaThumbMaxBytes: numOf(env.MEDIA_THUMB_MAX_BYTES, 64 * 1024),
+  // per-account server-held bytes (sum of ciphertext sizes of owned docs)
+  mediaQuotaMb: numOf(env.MEDIA_QUOTA_MB, 100),
+  // un-acked blobs are swept after this many days (and never-sent uploads
+  // — orphan docs with an empty `devices` list — after 24 h)
+  mediaRetentionDays: numOf(env.MEDIA_RETENTION_DAYS, 7),
+  mediaOrphanMaxSec: numOf(env.MEDIA_ORPHAN_MAX_SEC, 24 * 3600),
+  // JSON/base64 bodies inflate ~4/3; the upload route's bodyLimit is derived
+  // from the blob caps (same trick as the ID-doc route).
+  mediaUpIpLimit: numOf(env.MEDIA_UP_IP_LIMIT, 60),
+  mediaUpAccountLimit: numOf(env.MEDIA_UP_ACCOUNT_LIMIT, 60),
+  mediaUpWindowSec: numOf(env.MEDIA_UP_WINDOW_SEC, DEFAULT_TIME_WINDOW),
+  mediaDlIpLimit: numOf(env.MEDIA_DL_IP_LIMIT, 240),
+  mediaDlAccountLimit: numOf(env.MEDIA_DL_ACCOUNT_LIMIT, 240),
+  mediaDlWindowSec: numOf(env.MEDIA_DL_WINDOW_SEC, DEFAULT_TIME_WINDOW),
+  // how often the media sweeper runs (server-side safety net behind the
+  // inline delete-on-empty-pending path)
+  mediaSweepSec: numOf(env.MEDIA_SWEEP_SEC, 3600),
 
   // app-info endpoint poll guard (the FE fetches it on boot; cached 30s)
   appInfoIpLimit: numOf(env.APP_INFO_IP_LIMIT, 240),

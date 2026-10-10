@@ -174,12 +174,35 @@
           <button id="btn-chat-mute" class="icon-btn tagbar-mute" title="Mute notifications" data-icon="volume" hidden></button>
         </div>
         <p id="chat-warn" class="chat-warn" hidden></p>
+        <!-- TRANSCRIPT vs TABS: the two are siblings and exactly one is shown.
+             The tab strip (chat · images · videos · files · links) lives at
+             the BOTTOM of the pane under the composer, and switching it swaps
+             THIS area only — the composer stays visible and functional in
+             every tab, because an attachment belongs to the conversation,
+             not to a view of it. -->
         <ul id="chat-messages" class="messages"></ul>
+        <div id="chat-tabpanel" class="chat-tabpanel" role="tabpanel" hidden></div>
         <footer class="composer">
+          <!-- attach menu: a composer-local popover, ANCHORED ABOVE the input
+               row (absolute inside .composer, which is the relative box), so
+               it floats over the transcript and never moves the composer.
+               Under the toast tier (75) on purpose — a toast must stay
+               readable above an open menu. -->
+          <div id="attach-menu" class="attach-menu" role="menu" hidden>
+            <button id="btn-attach-photo" class="attach-item" role="menuitem" type="button"></button>
+            <button id="btn-attach-file" class="attach-item" role="menuitem" type="button"></button>
+          </div>
+          <button id="btn-attach" class="icon-btn attach-btn" title="Attach a photo, video or file"
+                  aria-haspopup="true" aria-expanded="false" data-icon="attach"></button>
           <input id="chat-input" type="text" placeholder="Type a message"
                  autocomplete="off" maxlength="4096" />
           <button id="btn-send" class="btn btn-accent round" title="Send" data-icon="send"></button>
+          <!-- gallery FIRST on every platform: no `capture`, so mobile OSes
+               offer the camera inside the normal picker instead of forcing it -->
+          <input id="attach-photo-input" type="file" accept="image/*,video/*" hidden />
+          <input id="attach-file-input" type="file" hidden />
         </footer>
+        <nav id="chat-tabs" class="chat-tabs" role="tablist" aria-label="Conversation contents"></nav>
       </section>
     </main>
   </div>
@@ -315,6 +338,20 @@
         </label>
         <p id="notify-hint" class="muted small"></p>
         <h3>Messages</h3>
+        <!-- Local media retention (plan §4.5): decrypted bytes drop off THIS
+             device after the window unless a file is pinned with Keep in the
+             viewer. Transcript rows always stay. -->
+        <label class="field retention-field">
+          <span>Keep downloaded photos, videos and files on this device</span>
+          <select id="media-retention" class="select" aria-label="Local media retention">
+            <option value="1">for 1 day</option>
+            <option value="3">for 3 days</option>
+            <option value="7">for 7 days</option>
+            <option value="30">for 30 days</option>
+            <option value="90">for 90 days</option>
+          </select>
+        </label>
+        <p class="muted small">Only the files themselves age out — the conversation keeps every message, and anything you marked “Keep on this device” stays.</p>
         <div class="row-actions">
           <button id="btn-clear-all-msgs" class="btn btn-small btn-danger">Clear all messages</button>
         </div>
@@ -394,6 +431,12 @@
     </header>
     <p id="msg-modal-time" class="muted small"></p>
     <div id="msg-modal-text" class="msg-modal-text" tabindex="0"></div>
+    <!-- MEDIA PANE (M4): for a media message the text area is hidden and this
+         takes its place — the full-size picture/player plus its control row
+         (blur, play/pause, mute, download, keep). It lives INSIDE the modal
+         for the same reason the rest of the modal does: overlay DOM survives
+         render(), in-bubble controls do not. -->
+    <div id="msg-media" class="msg-media" hidden></div>
     <p id="msg-modal-status" class="status" role="status"></p>
     <div id="msg-panes" class="msg-panes">
       <div class="msg-pane msg-pane-view">

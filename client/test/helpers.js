@@ -22,6 +22,12 @@ const LIMITS = {
   verifyIpLimit: 1000,
   msgAccountLimit: 1000,
   msgIpLimit: 1000,
+  // media: a few hundred tiny blobs per suite must not trip the caps the
+  // lifecycle tests are about (the caps themselves are covered in be/test)
+  mediaUpIpLimit: 5000,
+  mediaUpAccountLimit: 5000,
+  mediaDlIpLimit: 5000,
+  mediaDlAccountLimit: 5000,
   userKeysIpLimit: 1000,
   deviceEnrollIpLimit: 1000,
   deviceApproveAccountLimit: 1000,
@@ -60,6 +66,9 @@ export async function startServer() {
       await mongo.db
         .collection('messages')
         .deleteMany({ $or: [{ 'to.ul': ul }, { 'from.ul': ul }] });
+      // media blobs owned by the account (milestone 4) — same reason the app
+      // server does it: an account that is gone leaves no uploads behind
+      await mongo.db.collection('media').deleteMany({ 'owner.ul': ul });
       // share-link attribution + graph contact edges naming this account
       await mongo.db.collection('shares').deleteMany({ $or: [{ o: ul }, { viewer: ul }] });
       await mongo.db.collection('contacts').deleteMany({ $or: [{ from: ul }, { to: ul }] });

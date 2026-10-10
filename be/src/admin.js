@@ -66,6 +66,9 @@ await app.register(async function adminScope(instance) {
     config,
     diagnostics: mongo.db.collection('diagnostics'),
     reports: mongo.db.collection('reports'),
+    // decrypted attachments of a report (req 9) — served by the admin media
+    // route and deleted with the report they belong to
+    reportMedia: mongo.db.collection('report_media'),
     counters: mongo.db.collection('counters'),
     settings: mongo.db.collection('settings'),
     messages: mongo.db.collection('messages'),
@@ -76,6 +79,8 @@ await app.register(async function adminScope(instance) {
     shares: mongo.db.collection('shares'),
     contacts: mongo.db.collection('contacts'),
     graph: mongo.db.collection('graph'),
+    // media blobs — account deletion purges owned uploads (lib/accountState)
+    media: mongo.db.collection('media'),
   });
 });
 

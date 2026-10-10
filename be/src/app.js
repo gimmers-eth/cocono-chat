@@ -118,6 +118,10 @@ app.addHook('onSend', async (request, reply, payload) => {
     // abuse reports ('Report user' in the chat menu) — moderation records,
     // kept until an admin deletes them (NO TTL, unlike diagnostics)
     reports: mongo.db.collection('reports'),
+    // the DECRYPTED attachments of those reports (req 9): one doc per item,
+    // because a report with three 10 MB images would blow Mongo's 16 MB doc
+    // limit — and because the report list must stay a list
+    reportMedia: mongo.db.collection('report_media'),
     // username-keyed counters (messages sent) that SURVIVE account deletion
     // by design: a deleted-then-re-registered user keeps their badge
     // progress. wipe-data.sh still drops it (a full dev reset resets all).
@@ -126,6 +130,10 @@ app.addHook('onSend', async (request, reply, payload) => {
     messages: mongo.db.collection('messages'),
     idDocs: mongo.db.collection('id_docs'),
     profiles: mongo.db.collection('profiles'),
+    // media blobs (milestone 4): ciphertext + encrypted thumb, one doc per
+    // SEND; the ws layer registers recipients on it and the ack route
+    // deletes it once every device has download-or-declined (lib/media.js)
+    media: mongo.db.collection('media'),
     // share-link attribution (created/seen edges) + the durable
     // "has messaged" edges the God View graph draws — see lib/shares.js
     shares: mongo.db.collection('shares'),
