@@ -318,6 +318,11 @@ client.on('notice', async ({ what, by }) => {
   } else if (what === 'muted') {
     // another device muted/unmuted someone: mirror + repaint affordances
     syncMuted().then(() => home.renderConversationList?.().catch?.(() => {})).catch(() => {});
+  } else if (what === 'tags') {
+    // another device tagged/untagged someone: tags ride the SAME
+    // relationships read as the blocked mirror, so refreshBlocked re-pulls
+    // both and repaints the list (the filter + search sort read the mirror)
+    home.refreshBlocked?.().catch(() => {});
   } else if (what === 'badges') {
     // admin awarded/revoked a badge on MY account: skip the 60s wait —
     // poll now (dispatches any unseen-grant modal on whichever device wins

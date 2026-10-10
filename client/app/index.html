@@ -115,6 +115,17 @@
         <ul id="conversation-list" class="convo-list"></ul>
       </nav>
 
+      <!-- Sidebar tag FILTER bar (foot): single-select radio — tapping the
+           active tag falls back to All, tapping another moves the filter;
+           All is never 'off'. Active icon turns purple (see base.css). -->
+      <nav id="convo-filter" class="convo-filter" aria-label="Filter chats by tag">
+        <button type="button" class="filter-btn" data-tag="all" aria-pressed="true" title="All chats" data-icon="tagAll"></button>
+        <button type="button" class="filter-btn" data-tag="starred" aria-pressed="false" title="Starred" data-icon="tagStar"></button>
+        <button type="button" class="filter-btn" data-tag="family" aria-pressed="false" title="Family" data-icon="tagFamily"></button>
+        <button type="button" class="filter-btn" data-tag="personal" aria-pressed="false" title="Personal" data-icon="tagPersonal"></button>
+        <button type="button" class="filter-btn" data-tag="work" aria-pressed="false" title="Work" data-icon="tagWork"></button>
+      </nav>
+
       <!-- Install nudge (app copy): sidebar foot, same rules — visible until
            installed, never dismissible, gone in the installed app itself. -->
       <div class="install-hint" hidden>
@@ -156,6 +167,9 @@
           <button id="btn-chat-mute" class="icon-btn" title="Mute notifications" data-icon="volume" hidden></button>
           <button id="btn-chat-menu" class="icon-btn chat-menu-btn" title="Chat options" aria-haspopup="true" data-icon="menu"></button>
         </header>
+        <!-- chat TAG row: tap an icon to add/remove the tag on this peer
+             (toast feedback); active icons turn purple. Hidden for self-chat. -->
+        <div id="chat-tagbar" class="chat-tagbar" role="group" aria-label="Tag this contact" hidden></div>
         <p id="chat-warn" class="chat-warn" hidden></p>
         <ul id="chat-messages" class="messages"></ul>
         <footer class="composer">

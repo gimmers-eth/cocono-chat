@@ -421,6 +421,18 @@ export class CoconoClient extends Emitter {
   }
 
   /**
+   * Set the tag set on ONE peer ('starred' | 'family' | 'personal' | 'work';
+   * the server enforces the enum and drops unknowns). A tag is the caller's
+   * OWN private label — the tagged account never learns about it. Empty
+   * array clears. Resolves with the server's normalised set (the app mirrors
+   * THAT, not its own guess).
+   */
+  async setPeerTags(username, tags) {
+    const ul = String(username ?? '').toLowerCase();
+    return this.api.setPeerTags(this.#requireToken(), ul, (tags ?? []).map(String));
+  }
+
+  /**
    * Report a peer for toxic/illegal activity. The reporter VOLUNTARILY
    * shares the (locally decrypted) transcript — the server only ever sees
    * chat plaintext when a user hands it over like this, which is why the

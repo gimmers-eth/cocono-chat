@@ -90,6 +90,13 @@ export async function deleteAccountFully({ users, profiles, idDocs, messages, di
     { [`blockReasons.${ul}`]: { $exists: true } },
     { $unset: { [`blockReasons.${ul}`]: '' } },
   );
+  // OTHER accounts' private tags aimed at this name: a dead contact must
+  // not linger in anyone's sidebar filter, and re-registering the name
+  // must never inherit labels stuck on its previous owner.
+  await users.updateMany(
+    { [`tags.${ul}`]: { $exists: true } },
+    { $unset: { [`tags.${ul}`]: '' } },
+  );
   if (diagnostics) await diagnostics.deleteMany({ account: ul });
   if (idDocs) await idDocs.deleteOne({ ul });
   if (profiles) await profiles.deleteOne({ ul });

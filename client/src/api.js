@@ -83,6 +83,10 @@ export class Api {
   unblockUser(token, ul) {
     return this.#request(`/api/me/friends/${encodeURIComponent(ul)}/block`, { method: 'DELETE', token });
   }
+  // whole tag SET for one peer (server replaces atomically; empty = none)
+  setPeerTags(token, ul, tags) {
+    return this.#request(`/api/me/friends/${encodeURIComponent(ul)}/tags`, { method: 'PUT', body: { tags }, token });
+  }
   relationships(token) {
     return this.#request('/api/me/relationships', { token });
   }

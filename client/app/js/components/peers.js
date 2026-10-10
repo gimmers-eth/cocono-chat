@@ -9,14 +9,17 @@
 // dropdown that floats OVER the content below its (position:relative)
 // container and dismisses on outside click.
 
-import { knownPeers, loadFriends, loadPeerChips, loadPeerBlocked, loadPeerVerifications, loadPeerAvatars } from '../store.js';
+import { knownPeers, loadFriends, loadPeerChips, loadPeerBlocked, loadPeerVerifications, loadPeerAvatars, loadPeerTags } from '../store.js';
 import { resolvePeerState, PS } from './peername.js';
 import { lineKids } from './userline.js';
 import { nameChipEl } from '../badges.js';
+import { currentFilter } from '../tags.js';
 
 export function createPeerSuggestions(listEl, { max = Infinity, floating = false, decorate = null } = {}) {
   let peers = [];
   let avatars = new Map();
+  let tags = new Map(); // peer → [ids]; sorts the suggestion list (never hides)
+  const taggedByActive = (p) => (tags.get(p) ?? []).includes(currentFilter());
   let getValue = () => '';
   let onPick = () => {};
   let dismissed = false;
@@ -26,7 +29,13 @@ export function createPeerSuggestions(listEl, { max = Infinity, floating = false
     const q = getValue().trim().toLowerCase();
     // an EXACT match stays listed (it used to hide — the typing completion
     // read as "no such user" right when the name was fully typed)
-    const items = peers.filter((p) => !q || p.includes(q)).slice(0, max);
+    // Search is NEVER filtered by the sidebar tag — but the active tag
+    // SORTS: tagged peers are checked first (stable for the rest).
+    const items = peers.filter((p) => !q || p.includes(q));
+    if (currentFilter() !== 'all') {
+      items.sort((a, b) => (taggedByActive(b) ? 1 : 0) - (taggedByActive(a) ? 1 : 0));
+    }
+    items.length = Math.min(items.length, max);
     const frag = document.createDocumentFragment();
     for (const p of items) {
       const li = document.createElement('li');
@@ -67,6 +76,7 @@ export function createPeerSuggestions(listEl, { max = Infinity, floating = false
     dismissed = false;
     try { peers = await knownPeers(); } catch { peers = []; }
     try { avatars = await loadPeerAvatars(); } catch { avatars = new Map(); }
+    try { tags = await loadPeerTags(); } catch { tags = new Map(); }
     paint();
   }
 

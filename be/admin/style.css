@@ -234,6 +234,17 @@ details.diag summary { display: flex; gap: 0.6rem; align-items: center; flex-wra
 .rel-table button.linkish { background: none; border: 0; color: var(--accent); cursor: pointer; font: inherit; padding: 0; }
 .rel-table button.linkish:hover { text-decoration: underline; }
 .rel-yes { color: #6fbf73; font-weight: 700; }
+
+/* Peer tags (owner's private labels, shown for operator context only).
+   Active = purple (the brand accent in the CLIENT app is purple; the admin
+   accent here is blue, so the tag colour is spelled out to read the same
+   across both). Inactive = quiet grey. Inline-flex glyph row shares the
+   .reason-chip rhythm (gap + svg sizing). */
+.tags { display: inline-flex; gap: .3rem; align-items: center; }
+.tag-glyph { display: inline-flex; }
+.tag-glyph svg { width: 1rem; height: 1rem; }
+.tag-glyph.tag-on { color: #8b7ce8; }
+.tag-glyph.tag-off { color: #3a4150; }
 #user-relations { padding-top: .25rem; }
 #user-relations h3 { margin: .2rem 0 .5rem; font-size: .8rem; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
 

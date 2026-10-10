@@ -17,6 +17,7 @@ import { safetyNumber } from '../identity.js';
 import { BADGE_UI, nameChipEl } from '../badges.js';
 import { blockUserWithConfirm, unblockUser } from '../blocks.js';
 import { reportUserWithConfirm } from '../reports.js';
+import { TAG_IDS, TAG_LABELS, tagIconEl, togglePeerTag } from '../tags.js';
 import { mountLine, setAvatar } from './userline.js';
 import { errorText, humanError } from '../errors.js';
 import {
@@ -24,6 +25,7 @@ import {
   getMessage, deleteMessage, clearMessages,
   loadPeerAvatars, rememberPeerAvatar, AVATARS_EVENT,
   loadFriends, friendAdd, friendDel, friendMarkFlags, setFriends, FRIENDS_EVENT, loadPeerBlocked, loadPeerMuted, rememberPeerMuted, loadPeerChips,
+  loadPeerTags,
   getPin, recordPinSeen, markPeerGone, rememberPeerVerified,
 } from '../store.js';
 
@@ -524,14 +526,52 @@ export function createChat({ client, onHomeRefresh }) {
     });
   }
 
+  // --- chat TAG row (below the head): tap a tag to add/remove it on this
+  //     peer; grey vs purple, toast feedback, hidden for self-chat. Tags are
+  //     the user's OWN labels (server-stored, invisible to the peer), so
+  //     they paint for ANY peer — blocked and gone ones too (they are still
+  //     family; the wall changes messaging, not your address book).
+  async function paintTagBar(peer) {
+    const bar = $('chat-tagbar');
+    if (!bar) return;
+    const selfUl = String(client.username ?? '').toLowerCase();
+    if (!peer || String(peer).toLowerCase() === selfUl) {
+      bar.hidden = true;
+      bar.replaceChildren();
+      return;
+    }
+    bar.hidden = false;
+    let mine = [];
+    try { mine = (await loadPeerTags()).get(String(peer).toLowerCase()) ?? []; } catch { /* offline: none shown, server still true */ }
+    bar.replaceChildren(...TAG_IDS.map((id) => {
+      const on = mine.includes(id);
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = `tag-btn${on ? ' tag-on' : ''}`;
+      b.setAttribute('aria-pressed', String(on));
+      b.title = on ? `Remove the ${TAG_LABELS[id]} tag` : `Tag @${peer} as ${TAG_LABELS[id]}`;
+      b.append(tagIconEl(id));
+      b.addEventListener('click', async () => {
+        b.disabled = true; // one write in flight per row; the toast is the feedback
+        try {
+          const next = await togglePeerTag(client, peer, id);
+          if (next) { await paintTagBar(peer); onHomeRefresh?.(); }
+        } finally { b.disabled = false; }
+      });
+      return b;
+    }));
+  }
+
   async function updateTrustUI() {
     const warn = $('chat-warn');
     if (!currentPeer) {
       if (warn) warn.hidden = true;
       paintMuteBtn(null);
+      paintTagBar(null);
       $('chat-peer-line')?.replaceChildren();
       return;
     }
+    paintTagBar(currentPeer);
     const ent = await friendEntryFor(currentPeer);
     const pin = await getPin(currentPeer);
     const state = trustState(ent, pin);
