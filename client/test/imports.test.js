@@ -29,7 +29,7 @@ function exportsOf(file) {
   return [...src.matchAll(/export (?:async )?function (\w+)/g)].map((m) => m[1]);
 }
 
-const TRACKED = ['store.js', 'ui.js', 'icons.js', 'userline.js', 'peername.js', 'badges.js', 'errors.js', 'blocks.js', 'accountPurge.js', 'swkv.js', 'shares.js']
+const TRACKED = ['store.js', 'ui.js', 'icons.js', 'userline.js', 'peername.js', 'badges.js', 'errors.js', 'blocks.js', 'reports.js', 'tags.js', 'accountPurge.js', 'swkv.js', 'shares.js']
   .map((f) => join(APP, f))
   .filter((f) => { try { return exportsOf(f); } catch { return false; } });
 
