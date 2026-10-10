@@ -482,6 +482,12 @@ Copy/Forward/Delete action row):
     poster + a Download button instead.
   - **file:** name/size + Download button (`a[download]` + Blob URL → saves
     the decrypted bytes under the original name).
+    **IMPLEMENTED, widened:** every stored item (image/video/file) gets
+    **Save to device**, which prefers `navigator.share({files})` — the door
+    that actually works in an installed PWA on iOS/Android — and falls back to
+    `a[download]` + Blob URL with a filename that always carries an extension
+    (`deviceFileName`), then SAYS which door it used. Images also get **Expand**
+    (full-size lightbox, rectangular).
 - Copy is hidden for media; **Forward** re-sends via `sendMedia` using the
   locally stored plaintext (fresh key, fresh upload — never forward a blob
   id); **Delete** removes the local transcript + media records only (server
@@ -525,6 +531,13 @@ sys path; unparsable → treat as plain text):
    downloading marks it as received".
 5. Images ack immediately after successful store (req: images auto-download;
    acking promptly is what lets the server delete — req 8).
+5a. **A poster fetch is decoration** (found on device): a video sent without a
+    thumbnail (`videoPoster()` failing is normal on iOS) made the recipient's
+    `?part=thumb` GET return the same 404 as a swept blob, the app read that as
+    'expired', acked it — and the ack DELETED the video for every device. Now
+    the server answers `404 no_thumb` for a listed caller whose blob simply has
+    no preview, and `applyArrivalPolicy` never touches `state` or the ack on a
+    poster path. Rule: **only a payload fetch may settle the lifecycle.**
 6. **Sync copies (own other devices):** the SDK's `sync` event (§5.2 step 4)
    carries the media payload; the app stores the transcript record as
    `dir:'out'`, `state:'synced'` + a `media` row, and applies the SAME

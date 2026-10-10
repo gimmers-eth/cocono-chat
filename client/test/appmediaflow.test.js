@@ -11,6 +11,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { installIdbShim } from './idbshim.js';
+import { startServer, waitFor, waitOpen, randUser } from './helpers.js';
 
 const shim = installIdbShim();
 
@@ -219,4 +220,106 @@ test('pipeline: a media message paints as media, and the tabs find it', async ()
   assert.equal(await store.clearMediaWith('bobby'), 1);
   assert.deepEqual(await store.mediaWith('bobby'), []);
   assert.equal((await store.messagesWith('bobby')).length, 1, 'messages clear separately');
+});
+
+test('pipeline: a video WITHOUT a poster cannot delete itself (req 8 is sacred)', async () => {
+  await freshAccount();
+  // the sender's browser could not capture a frame (normal on iOS): the
+  // descriptor has no thumbIv, and the server answers a poster request with
+  // 404 no_thumb. Both used to read as "the blob is gone" — and the ack that
+  // follows an 'expired' record DELETES the video for every device.
+  const noPoster = M.mediaRow({
+    key: 'v0', peer: 'bobby', dir: 'in', kind: 'video',
+    media: { id: 'v0', kind: 'video', name: 'clip.mp4', mime: 'video/mp4', size: 4_000_000, key: 'k', iv: 'i', sha256: 's' },
+    msgId: 'in:v0', ts: 1,
+  });
+  await store.saveMedia(noPoster);
+  const cli = fakeClient();
+  const res = await M.applyArrivalPolicy(cli, noPoster);
+  assert.deepEqual(cli.calls, [], 'not even a request: there is nothing to preview');
+  assert.equal(res.state, 'pending');
+  assert.equal((await store.getMedia('v0')).state, 'pending', 'the record waits for the user');
+
+  // and a poster request that comes back 404 must not move the state either
+  const withPoster = M.mediaRow({
+    key: 'v1', peer: 'bobby', dir: 'in', kind: 'video',
+    media: { id: 'v1', kind: 'video', name: 'clip.mp4', mime: 'video/mp4', size: 4_000_000, key: 'k', iv: 'i', thumbIv: 't', sha256: 's' },
+    msgId: 'in:v1', ts: 1,
+  });
+  await store.saveMedia(withPoster);
+  const cli2 = {
+    calls: [],
+    async downloadThumb() { this.calls.push('thumb'); throw Object.assign(new Error('no preview'), { code: 'no_thumb', status: 404 }); },
+    async downloadMedia() { this.calls.push('download'); return { data: new Blob(['x']) }; },
+    async ackMedia() { this.calls.push('ack'); },
+  };
+  const res2 = await M.applyArrivalPolicy(cli2, withPoster);
+  assert.equal(res2.ok, false);
+  assert.deepEqual(cli2.calls, ['thumb'], 'a failed DECORATION fetches nothing else');
+  assert.equal((await store.getMedia('v1')).state, 'pending', 'still waiting for the Download button');
+
+  // the same 404 on the FULL blob is genuinely 'gone' → settled with an ack
+  const cli3 = {
+    calls: [],
+    async downloadMedia() { this.calls.push('download'); throw Object.assign(new Error('gone'), { code: 'unknown_media', status: 404 }); },
+    async ackMedia(id, d) { this.calls.push(`ack:${d}`); },
+  };
+  const res3 = await M.downloadMedia(cli3, { id: 'v2', blobId: 'v2', key: 'k', kind: 'video', state: 'pending' });
+  assert.equal(res3.state, 'expired');
+  assert.deepEqual(cli3.calls, ['download', 'ack:true'], 'a payload that IS gone gets settled');
+});
+
+// The bug this guards: a VIDEO whose sender could not produce a poster (iOS
+// canvas capture failing on a phone is normal) arrived, the recipient's app
+// fetched ?part=thumb, got a 404, read it as "the payload is gone", marked the
+// record expired and ACKED it — and that ack deleted the video for every
+// device. So this runs the app's real policy against the real SDK and the real
+// server: the poster half must be harmless, and only the full download may
+// settle the lifecycle.
+test('pipeline against the real server: a poster-less video survives, then downloads', async (t) => {
+  const srv = await startServer();
+  const aliceName = randUser('alice');
+  const bobName = randUser('bob');
+  const sendMedia = new Uint8Array(Array.from({ length: 4096 }, (_, i) => i % 251));
+  t.after(async () => {
+    await srv.deleteUser(aliceName);
+    await srv.deleteUser(bobName);
+    await srv.stop();
+  });
+  shim.reset();
+  store.setScope(`live${++seq}`);
+
+  const alice = srv.client();
+  const bob = srv.client();
+  await alice.register(aliceName);
+  await bob.register(bobName);
+  alice.connect(); bob.connect();
+  await Promise.all([waitOpen(alice), waitOpen(bob)]);
+
+  // NO thumb passed: this is the phone case
+  const sent = await alice.sendMedia(bobName, {
+    kind: 'video', bytes: sendMedia, name: 'clip.mp4', mime: 'video/mp4', dur: 3.5,
+  });
+  assert.equal(sent.media.thumbIv, undefined, 'the descriptor honestly says there is no poster');
+  const msg = await waitFor(bob, 'message', (m) => m.text.startsWith('{"media":'), 20000);
+  const media = JSON.parse(msg.text).media;
+
+  const row = M.mediaRow({ key: media.id, peer: bobName, dir: 'in', kind: 'video', media, msgId: 'in:1', ts: msg.ts });
+  await store.saveMedia(row);
+
+  const res = await M.applyArrivalPolicy(bob, row);
+  assert.equal(res.ok, false, 'the poster step reports it did nothing');
+  assert.equal(res.state, 'pending', 'and the record still waits for the user');
+  assert.ok(await srv.mongo.db.collection('media').findOne({ _id: media.id }),
+    'THE VIDEO IS STILL ON THE SERVER — a preview failure must not delete payload');
+  assert.equal((await store.getMedia(media.id)).state, 'pending');
+
+  // the user's Download button then does the real thing, and THAT acks
+  const full = await M.downloadMedia(bob, { ...row, state: 'pending' });
+  assert.equal(full.state, 'stored');
+  const stored = await store.getMedia(media.id);
+  assert.deepEqual(new Uint8Array(await stored.data.arrayBuffer()), sendMedia);
+  assert.equal(await srv.mongo.db.collection('media').findOne({ _id: media.id }), null,
+    'the last device to ack released it (req 8)');
+  alice.disconnect(); bob.disconnect();
 });

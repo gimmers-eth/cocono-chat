@@ -1098,6 +1098,15 @@ body[data-view="blocked"] .page-footer { display: none; }
   border-radius: 50%; border: 2px solid var(--panel-raised);
   box-shadow: var(--shadow); image-rendering: auto; cursor: zoom-out;
 }
+/* …but only for the round case. An expanded chat photo is a picture, not a
+   avatar: a 50% radius would cut its corners off, and 520px/80vh shrank a
+   landscape shot to a stamp. Media (openLightbox(…, {round:false})) gets a
+   rounded rectangle at nearly the whole viewport. */
+.lightbox:not(.is-round) {
+  border-radius: 12px;
+  max-width: min(94vw, 1100px); max-height: 86vh;
+  border-color: var(--border);
+}
 /* zoom affordance = .avatar-stack.zoomable (cursor) + .avatar-zoom-hint
    (badge); profile + preview opt in, chat top and sidebar head do not */
 
@@ -1477,14 +1486,14 @@ body[data-view="blocked"] .page-footer { display: none; }
 .media-missing { display: block; font-size: .85rem; }
 .media-gone-ic { color: var(--muted); font-size: 1.3rem; margin: .2rem .35rem; display: inline-block; }
 .media-actions { display: flex; gap: .4rem; margin: .4rem .35rem .1rem; }
-.media-dl, .media-decline {
+.media-dl, .media-decline, .media-save {
   background: var(--panel-raised); border: 1px solid var(--border);
   color: var(--text); border-radius: 6px; padding: .25rem .5rem; font-size: .78rem;
   cursor: pointer;
 }
-.media-dl:hover { border-color: var(--accent); color: var(--accent); }
+.media-dl:hover, .media-save:hover { border-color: var(--accent); color: var(--accent); }
 .media-decline:hover { border-color: var(--danger); color: var(--danger); }
-.media-dl i, .media-decline i { margin-right: .4em; }
+.media-dl i, .media-decline i, .media-save i { margin-right: .4em; }
 .media-file { display: flex; align-items: center; gap: .6rem; padding: .2rem .3rem; }
 .media-file-icon { color: var(--accent); font-size: 1.4rem; flex: none; }
 .media-file-meta { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }

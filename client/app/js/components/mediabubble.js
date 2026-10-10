@@ -13,7 +13,7 @@
 //    scope, so a re-render can never blank an open viewer.
 
 import { iconEl } from '../icons.js';
-import { formatSize, objectUrl, isBlurred, durationText, renderableAsImage } from '../media.js';
+import { formatSize, objectUrl, isBlurred, durationText, renderableAsImage, hasLocalBytes } from '../media.js';
 
 const KIND_ICON = { image: 'tabImages', video: 'tabVideos', file: 'attachFile' };
 
@@ -120,21 +120,31 @@ export function bubbleNodes(msg, row, { verified = false } = {}) {
   if (status) nodes.push(status);
 
   // pending / failed video|file: the two choices req 6 puts IN the bubble
-  // (chat.js binds both by class on its delegated listener)
+  // (chat.js binds them by class on its delegated listener)
+  const acts = mk('span', 'media-actions');
   if (row.state === 'pending' || row.state === 'synced' || row.state === 'failed') {
-    const acts = mk('span', 'media-actions');
     const dl = mk('button', 'media-dl');
     dl.type = 'button';
     dl.append(iconEl('mediaDownload'), document.createTextNode(` Download${row.size ? ` (${formatSize(row.size)})` : ''}`));
     acts.append(dl);
-    if (row.kind === 'file') {
-      const dec = mk('button', 'media-decline');
-      dec.type = 'button';
-      dec.append(iconEl('delete'), document.createTextNode(' Delete'));
-      dec.title = 'Delete without downloading — marks it received on this device';
-      acts.append(dec);
-    }
-    nodes.push(acts);
   }
+  // a FILE that is on this device gets its save right here: opening the modal
+  // to reach the same button is a fine second route, but a file you cannot
+  // hand to another app has not arrived (req 3/6)
+  if (row.kind === 'file' && hasLocalBytes(row)) {
+    const sv = mk('button', 'media-save');
+    sv.type = 'button';
+    sv.title = 'Save this file, or open it in another app';
+    sv.append(iconEl('mediaSave'), document.createTextNode(' Save to device'));
+    acts.append(sv);
+  }
+  if ((row.state === 'pending' || row.state === 'synced' || row.state === 'failed') && row.kind === 'file') {
+    const dec = mk('button', 'media-decline');
+    dec.type = 'button';
+    dec.append(iconEl('delete'), document.createTextNode(' Delete'));
+    dec.title = 'Delete without downloading — marks it received on this device';
+    acts.append(dec);
+  }
+  if (acts.childNodes.length) nodes.push(acts);
   return nodes;
 }

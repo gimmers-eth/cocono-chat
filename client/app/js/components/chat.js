@@ -659,12 +659,25 @@ export function createChat({ client, onHomeRefresh }) {
     const rec = messageId ? await getMessage(messageId) : null;
     const row = rec?.mediaId ? await getMedia(rec.mediaId) : null;
     if (!row) return;
-    await mediaAction(client, row, action, { onDone: () => render().catch(() => {}) });
+    await mediaAction(client, row, action, { onDone: (res) => finishMediaAction(action, res) });
   }
 
   async function runMediaAction(row, action) {
-    if (action === 'download') await mediaAction(client, row, 'download', { onDone: () => render().catch(() => {}) });
-    else if (action === 'decline') await mediaAction(client, row, 'decline', { onDone: () => render().catch(() => {}) });
+    await mediaAction(client, row, action, { onDone: (res) => finishMediaAction(action, res) });
+  }
+
+  // Repaint after the lifecycle actions; SPEAK after a save, because it is the
+  // one action that leaves the app's sandbox — 'shared' vs 'saved' vs a
+  // dismissed sheet are three different things to have done.
+  function finishMediaAction(action, res) {
+    if (action === 'save' && res) {
+      if (res.ok) toast(res.how === 'shared'
+        ? 'Shared — choose “Save to Files” or another app.'
+        : `Sent to your downloads as ${res.name} — if nothing appeared, this browser blocks in-app downloads.`);
+      else if (res.how === 'cancelled') toast('Save cancelled.');
+      else if (res.how !== 'none') toast('This browser would not hand the file over — open it and try saving again.', 'error');
+    }
+    render().catch(() => {});
   }
 
   // --- message modal (tap a bubble): readable scrollable text + fixed actions ---
@@ -2383,7 +2396,8 @@ export function createChat({ client, onHomeRefresh }) {
       // a bubble's own Download/Delete buttons are NOT a tap on the bubble:
       // they act and the modal stays shut (req 6 lives right here)
       const act = e.target.closest('.media-dl') ? 'download'
-        : e.target.closest('.media-decline') ? 'decline' : null;
+        : e.target.closest('.media-decline') ? 'decline'
+          : e.target.closest('.media-save') ? 'save' : null;
       if (act) {
         runBubbleAction(li.dataset.id, act)
           .catch(() => toast('That did not go through — try again.', 'error'));

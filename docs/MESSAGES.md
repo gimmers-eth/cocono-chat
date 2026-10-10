@@ -365,6 +365,7 @@ Resulting guarantees (asserted in `be/test/multidev-repro.test.js`):
 | Upload refused (REST) | `400 bad_sha256` | the claimed digest does not match the uploaded bytes |
 | Download refused (REST) | `404 unknown_media` | missing, swept, or the caller's (account, device) is not on `devices` — one answer for all three |
 | Client-side failure | `media_tampered` | downloaded ciphertext does not match the sender's digest (never acked) |
+| No preview image | `404 no_thumb` (REST) | the blob exists and the caller is listed, but it has no thumbnail — **not** "the payload is gone", and nothing may ack because of it |
 | Socket closed | `4401` | missing/invalid JWT, or device no longer registered |
 | Socket closed | `4000 replaced` | same device connected elsewhere (newest wins) |
 | Socket closed | `4413` | frame over 64 KB |
@@ -405,6 +406,13 @@ offline replay therefore work untouched: a media message IS a message.
   copies of the sender's own devices included — or by the retention sweep. A
   device that replays a message whose blob is gone gets `404 unknown_media` and
   shows a "no longer available" placeholder (`state:'expired'`).
+- **Only a PAYLOAD fetch may ack.** A video's poster (`?part=thumb`) is
+  decoration: a poster request that fails — because the sender's browser could
+  not capture a frame, which is normal on iOS — changes nothing, acks nothing,
+  and never moves the record out of `pending`. (It used to share the failure
+  path of a real download, and the ack that followed marked the video expired
+  and deleted it for every device. Guarded end-to-end in
+  `client/test/appmediaflow.test.js` against the real server.)
 - **The server reads nothing.** Moderation gets plaintext only because a
   reporter's own client hands over the file keys of its conversation (§2.12).
 - **Outgoing sync** (§2.7) mirrors media the same way as text: payload

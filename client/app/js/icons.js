@@ -41,6 +41,10 @@ export const ICONS = {
   attachPhoto: 'fa-camera',
   attachFile: 'fa-file-lines',
   mediaDownload: 'fa-download',
+  // the way OUT of the app (req 3/6): 'save' hands the bytes to the OS (share
+  // sheet / download), 'expand' sends them to the full-size lightbox
+  mediaSave: 'fa-file-arrow-down',
+  mediaExpand: 'fa-up-right-from-square',
   mediaBlur: 'fa-eye-slash',
   mediaUnblur: 'fa-eye',
   mediaPlay: 'fa-play',

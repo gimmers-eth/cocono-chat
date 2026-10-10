@@ -943,3 +943,41 @@ test('media: a staff-BANNED account cannot move bytes either (M4 × moderation)'
     assert.equal(closed, 4403);
   } finally { await ctx.teardown(); }
 });
+
+test('media: a blob with no preview says no_thumb, never unknown_media (poster fetches must not delete anything)', async () => {
+  const ctx = await setupLive();
+  try {
+    const alice = await createUser(ctx, makeClient(), 'alice');
+    const bob = await createUser(ctx, makeClient(), 'bobby');
+    // a VIDEO sent without a poster: the sender's browser could not capture a
+    // frame (normal on iOS), so the doc has thumb = null
+    const { res, blob } = await upload(ctx, alice.token, { kind: 'video' });
+    const id = res.json().id;
+    const send = await connectWs(ctx.port, alice.token);
+    const cid = 'nothumb-send-1';
+    const env = buildEnvelope(alice, bob, bob.d, cid, { att: { id, kind: 'video', size: blob.length } }).env;
+    send.send({ type: 'msg', msg: env });
+    assert.equal((await send.waitFor((m) => m.type === 'ack' && m.cid === cid)).ok, true);
+
+    // the recipient's poster fetch gets a DIFFERENT 404 than a gone blob: the
+    // app must never read a missing preview as "the payload is gone" and settle
+    // the ack — doing so deletes the video for every device (it did, once)
+    const thumb = await ctx.app.inject({ method: 'GET', url: `/api/media/${id}?part=thumb`, headers: auth(bob.token) });
+    assert.equal(thumb.statusCode, 404);
+    assert.equal(thumb.json().error, 'no_thumb');
+
+    // the payload itself is untouched and still fetchable
+    const full = await ctx.app.inject({ method: 'GET', url: `/api/media/${id}`, headers: auth(bob.token) });
+    assert.equal(full.statusCode, 200);
+    assert.deepEqual([...full.rawPayload], [...blob]);
+    assert.equal((await ctx.media.findOne({ _id: id })).pending.length, 1);
+
+    // and an unauthorised caller still gets the SAME answer as a gone blob —
+    // no_thumb only ever speaks to someone already listed on the blob
+    const carol = await createUser(ctx, makeClient(), 'carol');
+    const stranger = await ctx.app.inject({ method: 'GET', url: `/api/media/${id}?part=thumb`, headers: auth(carol.token) });
+    assert.equal(stranger.statusCode, 404);
+    assert.equal(stranger.json().error, 'unknown_media');
+    send.ws.close();
+  } finally { await ctx.teardown(); }
+});

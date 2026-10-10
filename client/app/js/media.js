@@ -305,6 +305,101 @@ export function prunePatch(rec) {
   return { data: null, thumb: keepThumb ? rec.thumb ?? null : null, state: 'pruned' };
 }
 
+// ---------------- the hand-off to the DEVICE (req 3/6's last step) ----------------
+
+// "Download" in this app has always meant *server → this device's encrypted
+// store*. That is only half of what a person means by the word: on a phone a
+// file you cannot open has not been downloaded at all. Everything below is the
+// second half — handing the decrypted bytes back to the OS.
+
+/** Does this device hold the bytes? 'expired'/'pruned'/'declined' rows do not,
+ *  and no wording should pretend a save is possible. */
+export const hasLocalBytes = (row) => !!row?.data && Number(row.data.size ?? 0) > 0;
+
+const EXT_BY_MIME = {
+  'image/jpeg': 'jpg', 'image/pjpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif',
+  'image/webp': 'webp', 'image/avif': 'avif', 'video/mp4': 'mp4', 'video/quicktime': 'mov',
+  'video/webm': 'webm', 'application/pdf': 'pdf', 'text/plain': 'txt', 'text/csv': 'csv',
+  'application/zip': 'zip', 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a',
+};
+
+/**
+ * A filename the OS can actually act on. The sender's name is untrusted
+ * display text: path separators and the characters filesystems fight over are
+ * stripped (same rule as the transcript's sanitiser, stricter because this
+ * name reaches a filesystem), and an extension is guaranteed — a photo saved
+ * as "IMG_0142" with no .jpg opens in nothing, which is exactly the complaint
+ * this function exists to prevent.
+ */
+export function deviceFileName(row) {
+  const raw = String(row?.name ?? '')
+    .split(/[\\/]/).pop()
+    .replace(/[\u0000-\u001f:*?"<>|]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const kind = row?.kind;
+  let name = raw || (kind === 'image' ? 'photo' : kind === 'video' ? 'video' : 'file');
+  if (!/\.[A-Za-z0-9]{1,8}$/.test(name)) {
+    const ext = EXT_BY_MIME[String(row?.mime ?? '').toLowerCase()] ?? '';
+    if (ext) name = `${name}.${ext}`;
+  }
+  return name.slice(0, 180);
+}
+
+/**
+ * Hand the decrypted bytes to the device. Two doors, because mobile browsers
+ * disagree about who owns "download":
+ *   1. Web Share with files — iOS/Android's way to "Save to Files" or open the
+ *      item in another app, and the only one that behaves in an installed PWA.
+ *      It needs a user gesture, which a button press is.
+ *   2. A same-origin `<a download>` on the Blob URL — desktop and Android
+ *      Chrome write it to Downloads.
+ * `how` says WHICH door was used, and the caller must say it out loud: a save
+ * that quietly landed nowhere is worse than an error. 'cancelled' (a dismissed
+ * share sheet) is a normal outcome, not a failure.
+ */
+export async function saveToDevice(row) {
+  if (!hasLocalBytes(row)) return { ok: false, how: 'none' };
+  const name = deviceFileName(row);
+  const type = String(row.mime ?? '').trim() || 'application/octet-stream';
+  let file = row.data;
+  try {
+    file = new File([row.data], name, { type, lastModified: Number(row.ts) || Date.now() });
+  } catch { /* older engines: a nameless Blob still downloads via the anchor */ }
+
+  try {
+    if (typeof navigator?.share === 'function' && navigator.canShare?.({ files: [file] }) === true) {
+      await navigator.share({ files: [file], title: name });
+      return { ok: true, how: 'shared', name };
+    }
+  } catch (err) {
+    if (err?.name === 'AbortError') return { ok: false, how: 'cancelled' };
+    // any other share failure (denied, no handler): fall through to the anchor
+  }
+
+  // Its OWN URL, deliberately outside the bubble/viewer scopes: a re-render or
+  // a closed modal must never revoke the address a save is mid-flight on.
+  let url = '';
+  try {
+    url = URL.createObjectURL(row.data);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.rel = 'noopener';
+    a.style.display = 'none';
+    document.body.append(a);
+    a.click();
+    a.remove();
+    return { ok: true, how: 'saved', name };
+  } catch (err) {
+    return { ok: false, how: 'failed', error: err };
+  } finally {
+    // Long enough for a 10 MB write to hand off, short enough that a failed
+    // save cannot strand the bytes in the tab forever.
+    if (url) setTimeout(() => { try { URL.revokeObjectURL(url); } catch { /* gone */ } }, 10_000);
+  }
+}
+
 // ---------------- the conversation tabs (req 1/4) ----------------
 
 /** One entry per URL in a message, in order, de-duplicated per message. */
@@ -441,16 +536,29 @@ export async function downloadMedia(client, row, { thumbOnly = false } = {}) {
   // every write below is a PATCH, never a re-spread of a row read earlier:
   // updateMedia merges onto the CURRENT record, so a download that finishes
   // after the user pinned/blur-toggled the row keeps their choice
-  await updateMedia(row.id, { state: 'downloading' });
   try {
     if (thumbOnly) {
-      // a POSTER is not a download: the record keeps waiting for the user's
-      // button (and the blob keeps waiting for that ack), only its preview
-      // fills in
-      const thumb = await client.downloadThumb(blob, row);
-      await updateMedia(row.id, { thumb });
-      return { ok: true, state: row.state, thumbOnly: true };
+      // A POSTER is decoration. It must never touch `state` and above all must
+      // never ACK: the fetch that writes the lifecycle is the full download
+      // (req 8). Earlier code ran the poster through the same failure path as
+      // a real download, so a video sent without a preview (the sender's
+      // browser failed to capture a frame — normal on iOS) got a 404 on
+      // ?part=thumb, was read as "the blob is gone", and the recipient's own
+      // ack DELETED the video for everyone.
+      if (!row.thumbIv) return { ok: false, skipped: 'no-thumb', state: row.state, thumbOnly: true };
+      await updateMedia(row.id, { state: 'downloading' });
+      try {
+        const thumb = await client.downloadThumb(blob, row);
+        await updateMedia(row.id, { thumb, state: row.state });
+        return { ok: true, state: row.state, thumbOnly: true };
+      } catch (err) {
+        // back to exactly the state it was in: pending (or synced) and waiting
+        // for the user's Download button, with the bytes still on the server
+        await updateMedia(row.id, { state: row.state });
+        return { ok: false, state: row.state, thumbOnly: true, error: err };
+      }
     }
+    await updateMedia(row.id, { state: 'downloading' });
     const { data, thumb } = await client.downloadMedia(blob, row);
     await updateMedia(row.id, { data, ...(thumb ? { thumb } : {}), state: 'stored' });
     // ack AFTER the bytes are safely on the device: that is what lets the
@@ -458,7 +566,9 @@ export async function downloadMedia(client, row, { thumbOnly = false } = {}) {
     await client.ackMedia(blob, true).catch(() => {});
     return { ok: true, state: 'stored' };
   } catch (err) {
-    const gone = err?.code === 'unknown_media' || err?.status === 404;
+    // 'no_thumb' is deliberately NOT 'gone': a missing preview says nothing
+    // about the payload, and the code below would ack it away
+    const gone = err?.code === 'unknown_media' || (err?.status === 404 && err?.code !== 'no_thumb');
     await updateMedia(row.id, { state: gone ? 'expired' : 'failed' });
     // a gone blob is settled: ack it so the server-side pending set can empty
     // (the copy is unrecoverable, holding it pending helps nobody)
@@ -475,6 +585,8 @@ export async function applyArrivalPolicy(client, row) {
     // wait behind the Download button, and the blob must survive until then
     return downloadMedia(client, row, { thumbOnly: true });
   }
+  // a file has no preview to pull and no permission to fetch itself: the
+  // record waits for the user's Download (or Delete), state untouched
   return { ok: true, state: row.state };
 }
 

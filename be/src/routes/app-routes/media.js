@@ -147,7 +147,17 @@ export default async function mediaRoutes(app, { redis, config, settings, media 
     );
     if (!doc || !mine) return fail(reply, 'unknown_media', 'No such attachment', 404);
     const buf = asBytes(wantThumb ? doc.thumb : doc.blob);
-    if (!buf) return fail(reply, 'unknown_media', 'No such attachment', 404);
+    if (!buf) {
+      // The caller is already authorised on THIS blob, so telling it that the
+      // blob simply has no thumbnail is no enumeration risk — and it matters,
+      // because 'unknown_media' means "the payload is gone, settle the ack"
+      // while a missing POSTER means "nothing to preview here" (a sender whose
+      // browser could not capture a video frame used to have its video deleted
+      // by the recipient's poster fetch).
+      return wantThumb
+        ? fail(reply, 'no_thumb', 'This attachment has no preview image', 404)
+        : fail(reply, 'unknown_media', 'No such attachment', 404);
+    }
     reply.header('x-cocono-kind', doc.kind);
     reply.header('etag', `"${doc.sha256}"`);
     return reply.type('application/octet-stream').send(buf);

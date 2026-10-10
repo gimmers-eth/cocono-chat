@@ -12,10 +12,12 @@
 // which is also what makes a sender-controlled filename harmless.
 
 import { iconEl } from '../icons.js';
+import { openLightbox, closeLightbox } from '../ui.js';
 import { mediaWith, messagesWith, updateMedia } from '../store.js';
 import {
   formatSize, durationText, isBlurred, objectUrl, releaseScope, filterMedia,
   tabBuckets, downloadMedia, declineMedia, renderableAsImage,
+  saveToDevice, hasLocalBytes,
 } from '../media.js';
 
 // exported so chat.js and the tests agree on the vocabulary
@@ -107,13 +109,18 @@ function fileRowEl(row, { onOpen, onAction }) {
   meta.append(mk('span', 'media-line-sub',
     `${formatSize(row.size)} · ${dateText(row.ts)} · ${row.dir === 'out' ? 'sent' : 'received'}${row.state === 'expired' ? ' · gone from the server' : ''}${row.state === 'pruned' ? ' · removed from this device' : ''}`));
   b.append(ic, meta);
-  if (row.state === 'pending' || row.state === 'synced' || row.state === 'failed') {
-    const dl = btn('media-line-dl', 'mediaDownload', null, 'Download this file');
-    dl.addEventListener('click', (e) => {
+  // ONE button per row, saying what it actually does: pull the bytes here
+  // (pending) vs hand them to the device (stored). Never both, and never a
+  // 'Download' that only fetches into the app's own store.
+  const pending = row.state === 'pending' || row.state === 'synced' || row.state === 'failed';
+  if (pending || hasLocalBytes(row)) {
+    const act = btn('media-line-dl', pending ? 'mediaDownload' : 'mediaSave', null,
+      pending ? 'Download to this device' : 'Save to the device / open in another app');
+    act.addEventListener('click', (e) => {
       e.stopPropagation();               // the row itself opens the viewer
-      onAction?.(row, 'download');
+      onAction?.(row, pending ? 'download' : 'save');
     });
-    b.append(dl);
+    b.append(act);
   }
   b.addEventListener('click', () => onOpen(row));
   li.append(b);
@@ -222,12 +229,15 @@ function beginPanel(host, tab) {
   return host;
 }
 
-/** A media row's bubble actions (Download / Delete), shared by the transcript
- *  and the Files tab so both do exactly the same thing. */
+/** A media row's bubble/row actions, shared by the transcript and the Files tab
+ *  so both do exactly the same thing. `save` reports the outcome through
+ *  onDone because it leaves the app's sandbox — the user has to be told which
+ *  door it went out of (or that they dismissed it). */
 export async function mediaAction(client, row, action, { onDone } = {}) {
   if (!row) return;
   if (action === 'download') await downloadMedia(client, row);
   else if (action === 'decline') await declineMedia(client, row);
+  else if (action === 'save') { onDone?.(await saveToDevice(row)); return; }
   onDone?.();
 }
 
@@ -379,6 +389,34 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
     });
     controls.append(dl);
   }
+  // ---- the way OUT: this device's bytes into the user's hands ----
+  // The viewer is where a photo is actually LOOKED at and where a file gets
+  // opened, so this is where saving belongs; the bubbles stay quiet.
+  if (isImage) {
+    const expand = btn('viewer-toggle', 'mediaExpand', 'Expand', 'View full size');
+    expand.addEventListener('click', () => {
+      const img = host.querySelector('.viewer-image');
+      if (img?.src) openLightbox(img.src, { round: false });
+    });
+    controls.append(expand);
+  }
+  if (hasLocalBytes(row)) {
+    const save = btn('viewer-toggle', 'mediaSave', 'Save to device',
+      row.kind === 'file' ? 'Save this file, or open it in another app'
+        : row.kind === 'video' ? 'Save this video to the device'
+          : 'Save this photo to the device');
+    save.addEventListener('click', async () => {
+      save.disabled = true;
+      const res = await saveToDevice(row);
+      save.disabled = false;
+      if (res.ok) status(res.how === 'shared'
+        ? 'Shared — choose “Save to Files”, or any app that can open it.'
+        : `Sent to your downloads as ${res.name}. Nothing appeared? This browser blocks in-app downloads — open it from your Files app, or long-press the photo.`);
+      else if (res.how === 'cancelled') status('Save cancelled.');
+      else status('This browser would not hand the file over — try expanding it and saving from there.', true);
+    });
+    controls.append(save);
+  }
   // Keep (DESIGN.md's "mark to keep long term"): the local prune job skips
   // pinned records. Say what the alternative actually costs — once the server
   // has deleted the blob, a pruned copy is gone for good on this device.
@@ -401,8 +439,11 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
 
   // the ONE teardown: the full-size Blob URLs go when the modal closes (they
   // are the megabytes, and 'bubbles' is a different scope — a re-render must
-  // never blank an open viewer, and vice versa)
+  // never blank an open viewer, and vice versa). Any Expand overlay goes with
+  // it: the lightbox shows the SAME URL, so leaving it open would point at a
+  // revoked Blob.
   return () => {
+    closeLightbox();
     releaseScope('viewer');
     host.replaceChildren();
   };

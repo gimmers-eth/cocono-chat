@@ -173,10 +173,15 @@ export function fmtTime(ts) {
 // Lightbox: click any profile photo (own tab or peer's profile sheet) to
 // view it large over a dim scrim; click/Esc closes. data: URLs stay in-DOM
 // (top-level data: navigation is blocked by browsers, so no new tab here).
-export function openLightbox(src) {
+// `round` is the frame, not a preference: the lightbox was born as an AVATAR
+// zoom (square-cropped photo → circle looks intentional), but an expanded
+// chat photo is any aspect ratio and a 50% radius would carve its corners off —
+// i.e. hide part of the picture. Media passes { round: false }.
+export function openLightbox(src, { round = true } = {}) {
   const overlay = $('lightbox-overlay');
   const img = $('lightbox-img');
   if (!overlay || !img || !src) return;
+  img.classList?.toggle('is-round', round);
   img.src = src;
   img.hidden = false;   // the <img> ships hidden — un-hide it or the zoom is invisible
   overlay.hidden = false;

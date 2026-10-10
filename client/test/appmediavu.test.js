@@ -371,3 +371,138 @@ function fakeClient() {
   cli.ackMedia = async (id, downloaded) => { cli.calls.push({ what: 'ack', id, downloaded }); return { ok: true }; };
   return cli;
 }
+
+// ---------------- getting the bytes OUT to the device ----------------
+
+/** Node has a read-only `navigator` global; the save path only needs the two
+ *  share methods, so replace the whole object for the duration of a test. */
+function setNavigator(value) {
+  Object.defineProperty(globalThis, 'navigator', { value, configurable: true, writable: true });
+}
+
+test('save: the share sheet is the door when the browser can use it', async () => {
+  await fresh();
+  const shared = [];
+  setNavigator({
+    canShare: (data) => !!(data?.files?.length),
+    share: async (data) => { shared.push(data); },
+  });
+  const row = await stored({ id: 'sv1', kind: 'file', name: 'invoice.pdf', mime: 'application/pdf' });
+  const res = await M.saveToDevice(row);
+  assert.equal(res.ok, true);
+  assert.equal(res.how, 'shared', 'iOS/Android: "Save to Files" or another app lives here');
+  assert.equal(shared[0].files[0].name, 'invoice.pdf', 'the FILE carries the name the user sees');
+  assert.equal(shared[0].files[0].type, 'application/pdf');
+  assert.equal(shared[0].title, 'invoice.pdf');
+  setNavigator({ onLine: true, userAgent: 'node' });
+});
+
+test('save: no share support → a same-origin download anchor with the right filename', async () => {
+  await fresh();
+  setNavigator({ onLine: true });     // no share/canShare at all (desktop Firefox)
+  const row = await stored({ id: 'sv2', kind: 'video', name: 'clip', mime: 'video/mp4' });
+  const before = dom.created.length;
+  const res = await M.saveToDevice(row);
+  assert.equal(res.how, 'saved', res.how);
+  const anchor = dom.created.slice(before).find((el) => el.tagName === 'A');
+  assert.ok(anchor, 'a <a download> is the fallback door');
+  assert.equal(anchor.download, 'clip.mp4', 'and it carries the extension the OS needs');
+  assert.match(anchor.href, /^blob:local\//);
+  assert.equal(anchor.parentNode, null, 'removed again — no stray node in the body');
+  setNavigator({ onLine: true, userAgent: 'node' });
+});
+
+test('save: a dismissed sheet is not an error, and missing bytes are not a save', async () => {
+  await fresh();
+  setNavigator({
+    canShare: () => true,
+    share: async () => { const e = new Error('dismissed'); e.name = 'AbortError'; throw e; },
+  });
+  const withBytes = await stored({ id: 'sv3' });
+  assert.deepEqual((await M.saveToDevice(withBytes)).how, 'cancelled',
+    'the user closing the share sheet must not be reported as a failure');
+
+  setNavigator({ canShare: () => true, share: async () => {} });
+  const nothing = { ...row({ id: 'sv4' }), data: null };
+  const res = await M.saveToDevice(nothing);
+  assert.equal(res.ok, false);
+  assert.equal(res.how, 'none', 'nothing to hand over: no share sheet, no anchor');
+  setNavigator({ onLine: true, userAgent: 'node' });
+});
+
+test('bubble + Files row: a stored file offers SAVE, a pending one offers DOWNLOAD', async () => {
+  await fresh();
+  const storedRow = await stored({ id: 'bFile', kind: 'file', name: 'doc.pdf', mime: 'application/pdf' });
+  const nodes = bubbleNodes({ dir: 'in', kind: 'file', state: 'delivered' }, storedRow, {});
+  assert.ok(has(nodes, /media-save/), 'the file is here — so the button hands it to the device');
+  assert.ok(!has(nodes, /media-dl/), '…and never both words for one thing');
+  assert.match(nodes.map((x) => x.textContent).join(' '), /Save to device/);
+
+  const pending = row({ id: 'bFile2', kind: 'file', name: 'doc2.pdf' });
+  pending.state = 'pending';
+  await store.saveMedia(pending);
+  const pNodes = bubbleNodes({ dir: 'in', kind: 'file', state: 'delivered' }, pending, {});
+  assert.ok(has(pNodes, /media-dl/) && has(pNodes, /media-decline/), 'req 6: download or delete-before-download');
+  assert.ok(!has(pNodes, /media-save/), 'no save for bytes this device does not have');
+
+  // an image keeps the bubble quiet: the viewer owns viewing and saving it
+  const img = await stored({ id: 'bImg' });
+  assert.ok(!has(bubbleNodes({ dir: 'in', kind: 'image', state: 'delivered' }, img, {}), /media-save/));
+
+  // the Files tab row uses the same two states
+  await store.saveMessage({ id: 'in:bf', peer: 'bobby', dir: 'in', kind: 'file', mediaId: 'bFile', ts: 5, text: 'File: doc.pdf' });
+  await store.saveMessage({ id: 'in:bf2', peer: 'bobby', dir: 'in', kind: 'file', mediaId: 'bFile2', ts: 4, text: 'File: doc2.pdf' });
+  const actions = [];
+  const panel = dom.byId('chat-tabpanel');
+  await view.paintTabPanel(panel, {
+    peer: 'bobby', tab: 'files', query: '',
+    onOpen: () => {}, onAction: (r, a) => actions.push([r.id, a]),
+  });
+  const rows = panel.querySelectorAll('.media-line');
+  assert.equal(rows.length, 2);
+  for (const el of rows) el.querySelector('.media-line-dl').click();
+  assert.deepEqual(actions.sort(), [['bFile', 'save'], ['bFile2', 'download']],
+    'each row does the honest thing for its state');
+});
+
+test('viewer: Expand sends a photo to the full-size lightbox, and closing both leaves no dangling URL', async () => {
+  await fresh();
+  const img = await stored({ id: 'vExp' });
+  const host = dom.byId('msg-media');
+  const teardown = view.openViewer(host, {
+    client: fakeClient(), msg: { dir: 'in', kind: 'image' }, row: img,
+    verified: true, onChange: () => {}, onStatus: () => {},
+  });
+  const expand = host.querySelectorAll('.viewer-toggle').find((b) => /Expand/i.test(b.textContent));
+  assert.ok(expand, 'a 40vh picture is not "viewing" a photo on a phone');
+  expand.click();
+  const light = dom.byId('lightbox-img');
+  assert.ok(light.src, 'the lightbox shows the same full-size Blob');
+  assert.ok(dom.byId('lightbox-overlay').hidden === false, 'and it is on screen');
+
+  // closing the viewer must close the expansion too: the lightbox holds the
+  // SAME URL, and the teardown revokes it
+  teardown();
+  assert.ok(dom.byId('lightbox-overlay').hidden, 'no lightbox left pointing at a revoked Blob');
+});
+
+test('expand: an expanded photo is a rectangle, an avatar stays a circle', async () => {
+  await fresh();
+  const { openLightbox } = await import('../app/js/ui.js');
+  const img = await stored({ id: 'vShape' });
+  const host = dom.byId('msg-media');
+  const teardown = view.openViewer(host, {
+    client: fakeClient(), msg: { dir: 'in', kind: 'image' }, row: img,
+    verified: true, onChange: () => {}, onStatus: () => {},
+  });
+  host.querySelectorAll('.viewer-toggle').find((b) => /Expand/i.test(b.textContent)).click();
+  const light = dom.byId('lightbox-img');
+  assert.ok(light.src, 'the expansion shows the full-size picture');
+  assert.ok(!light.classList.contains('is-round'),
+    'a chat photo is not an avatar: 50% radius would carve its corners off');
+
+  openLightbox('data:image/jpeg;base64,AA');     // the profile-photo path
+  assert.ok(light.classList.contains('is-round'),
+    'and the avatar zoom this control was born for is untouched');
+  teardown();
+});

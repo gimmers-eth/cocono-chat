@@ -307,7 +307,7 @@ delivery, ordering, idempotency, receipts, push gating and resync are unchanged.
 | Method | Path | Purpose |
 | ------ | ---- | ------- |
 | POST | `/api/media` | `{ kind, blob, thumb?, sha256 }` (base64url ciphertext) → `{ id }`. Caps: `MEDIA_MAX_BYTES`, `MEDIA_THUMB_MAX_BYTES`, per-account `MEDIA_QUOTA_MB`; the claimed sha256 must match the bytes (a stored digest never lies) |
-| GET | `/api/media/:id` | the ciphertext, as `application/octet-stream` + `nosniff` (never a browser-renderable mime from our origin) with `x-cocono-kind` and `ETag = sha256`. `?part=thumb` returns just the encrypted poster (video previews without a 10 MB pull) and does NOT ack |
+| GET | `/api/media/:id` | the ciphertext, as `application/octet-stream` + `nosniff` (never a browser-renderable mime from our origin) with `x-cocono-kind` and `ETag = sha256`. `?part=thumb` returns just the encrypted poster (video previews without a 10 MB pull) and does NOT ack; a blob with no poster answers `404 no_thumb` — deliberately NOT `unknown_media`, because that code means "the payload is gone", which is the one reading that must never trigger an ack |
 | POST | `/api/media/:id/ack` | `{ downloaded: true\|false }` — the second is "delete it before I download it". Idempotent; authorisation is exactly `(account, device) ∈ devices` |
 
 The envelope gains one optional plaintext field `m.att = { id, kind, size }`

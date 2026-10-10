@@ -92,6 +92,9 @@ class El {
 
   setAttribute(k, v) { this.attrs[k] = String(v); }
   getAttribute(k) { return this.attrs[k] ?? null; }
+  // the UI genuinely removes attributes (the lightbox drops its src on close,
+  // so a stale picture cannot flash on the next open) — the shim must have it
+  removeAttribute(k) { delete this.attrs[k]; }
 
   addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); }
   removeEventListener(type, fn) { this.listeners[type] = (this.listeners[type] ?? []).filter((f) => f !== fn); }
@@ -154,6 +157,17 @@ class El {
   pause() { this.paused = true; this.fire('pause'); }
   focus() {}
   blur() {}
+
+  // real cleanup (a download anchor detaches itself after the click; a
+  // dangling node here would mean the app leaked one into <body>)
+  remove() {
+    const siblings = this.parentNode?.childNodes;
+    if (siblings) {
+      const i = siblings.indexOf(this);
+      if (i >= 0) siblings.splice(i, 1);
+    }
+    this.parentNode = null;
+  }
 
   // <input type=file>: a test assigns files then fires 'change'
   setFiles(...blobs) { this.files = blobs; }

@@ -185,3 +185,20 @@ test('media: the tabs read the transcript, and only files-tab means files', () =
   assert.deepEqual(filterMedia(rows, '  ').map((r) => r.id), ['b1', 'b2', 'b3'], 'blank query is no filter');
   assert.deepEqual(filterMedia(rows, 'nothing'), []);
 });
+
+test('media: a saved FILE gets a name an OS can open (and bytes to open)', () => {
+  // the name arrives from the SENDER, so this is untrusted input on its way to
+  // a filesystem: path parts and hostile characters go, an extension is
+  // guaranteed — 'IMG_0142' without .jpg opens in nothing
+  assert.equal(M.deviceFileName({ name: 'report.pdf', mime: 'application/pdf' }), 'report.pdf');
+  assert.equal(M.deviceFileName({ name: 'IMG_0142', mime: 'image/jpeg', kind: 'image' }), 'IMG_0142.jpg');
+  assert.equal(M.deviceFileName({ name: '', mime: 'video/mp4', kind: 'video' }), 'video.mp4');
+  const nasty = M.deviceFileName({ name: '../../x:c<u>z?.mp4', mime: 'video/mp4', kind: 'video' });
+  assert.ok(!/[\\/:*?"<>|]/.test(nasty), `forbidden characters stripped: ${nasty}`);
+  assert.ok(nasty.endsWith('.mp4'), 'the extension survives the scrub');
+  assert.ok(M.deviceFileName({ name: 'x'.repeat(400), mime: 'text/plain' }).length <= 180);
+
+  assert.equal(M.hasLocalBytes({ data: new Blob(['x']) }), true);
+  assert.equal(M.hasLocalBytes({ data: null }), false);
+  assert.equal(M.hasLocalBytes({ data: new Blob([]) }), false, 'an empty file is not a thing to save');
+});
