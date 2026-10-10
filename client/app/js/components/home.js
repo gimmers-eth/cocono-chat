@@ -6,7 +6,8 @@ import { $, setStatus, fmtTime, confirmModal, openLightbox, toast, animateSheetC
 import { humanError } from '../errors.js';
 import { createPeerSuggestions, makeTrustDecorator } from './peers.js';
 import { iconEl } from '../icons.js';
-import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, clearAllMessages, loadPeerVerifications, loadPeerPremiums, loadPeerAvatars, rememberPeerAvatar, rememberPeerVerified, rememberPeerChip, loadPeerChips, AVATARS_EVENT, FRIENDS_EVENT, loadPeerBlocked, saveBlockedSet, rememberPeerMuted, loadPeerMuted } from '../store.js';
+import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, clearAllMessages, loadPeerVerifications, loadPeerPremiums, loadPeerAvatars, rememberPeerAvatar, rememberPeerVerified, rememberPeerChip, loadPeerChips, AVATARS_EVENT, FRIENDS_EVENT, loadPeerBlocked, saveBlockedSet, rememberPeerMuted, loadPeerMuted, loadPeerTags, saveTagServerMap } from '../store.js';
+import { currentFilter, wireFilterBar } from '../tags.js';
 import { blockUserWithConfirm, unblockUser, blockReasonLabel, blockReasonIcon } from '../blocks.js';
 import { purgeLocalAccount } from '../accountPurge.js';
 import { mountLine, avatarStack, setAvatar, verifiedSubEl, doubleLine } from './userline.js';
@@ -524,8 +525,8 @@ export function createHome({ client, chat, onLogout }) {
 
   async function renderConversationList() {
     const list = $('conversation-list');
-    const [all, friends, pins, peerVerified, avatars, peerPremium, peerChips, peerBlocked, peerMuted] = await Promise.all(
-      [allMessages(), loadFriends(), loadPins(), loadPeerVerifications(), loadPeerAvatars(), loadPeerPremiums(), loadPeerChips(), loadPeerBlocked(), loadPeerMuted()],
+    const [all, friends, pins, peerVerified, avatars, peerPremium, peerChips, peerBlocked, peerMuted, peerTags] = await Promise.all(
+      [allMessages(), loadFriends(), loadPins(), loadPeerVerifications(), loadPeerAvatars(), loadPeerPremiums(), loadPeerChips(), loadPeerBlocked(), loadPeerMuted(), loadPeerTags()],
     );
     const latestByPeer = new Map();
     for (const m of all) {
@@ -545,9 +546,15 @@ export function createHome({ client, chat, onLogout }) {
       const kb = recency(b[0], b[1]);
       return ka !== kb ? kb - ka : a[0].localeCompare(b[0]);
     });
-    lastPeers = entries.map(([peer]) => peer);
+    // sidebar tag FILTER: 'all' shows everything; a tag shows only peers
+    // carrying it (tags come from the local mirror, reconciled from server)
+    const filter = currentFilter();
+    const shown = filter === 'all'
+      ? entries
+      : entries.filter(([peer]) => (peerTags.get(peer) ?? []).includes(filter));
+    lastPeers = shown.map(([peer]) => peer);
     const frag = document.createDocumentFragment();
-    for (const [peer, last] of entries) {
+    for (const [peer, last] of shown) {
       const li = document.createElement('li');
       const btn = document.createElement('button');
       const av = peerAvatarEl(peer, avatars);
@@ -631,7 +638,7 @@ export function createHome({ client, chat, onLogout }) {
       frag.appendChild(li);
     }
     list.replaceChildren(frag);
-    primeProfiles(entries.map(([peer]) => peer));
+    primeProfiles(shown.map(([peer]) => peer));
   }
 
   async function renderDevices() {
@@ -803,8 +810,14 @@ export function createHome({ client, chat, onLogout }) {
   }
 
   function wire() {
+    // sidebar tag FILTER bar (foot): radio behaviour lives in tags.js;
+    // every change repaints the conversation list through it
+    wireFilterBar($('convo-filter'), () => renderConversationList().catch(() => {}));
     // 'New chat' shows the users known on this device, filtered by typing;
-    // tapping one opens that conversation directly.
+    // tapping one opens that conversation directly. The sidebar tag filter
+    // does NOT hide search results — it only SORTS them (peers.js reads the
+    // active filter and floats tagged matches to the top), every known peer
+    // still surfaces.
     const peerInput = $('chat-peer-name');
     const newChat = createPeerSuggestions($('chat-peer-suggestions'), {
       max: 3, floating: true, decorate: makeTrustDecorator(), // trust icon + badge per name
@@ -1219,10 +1232,12 @@ export function createHome({ client, chat, onLogout }) {
   }
   wireRelationships();
 
-  /** Re-sync the blocked mirror from the server (login + friends nudges). */
+  /** Re-sync the blocked AND tag mirrors from the server (login + friends
+   *  nudges — both ride the same relationships read). */
   async function refreshBlocked() {
     const rel = await client.relationships();
     await saveBlockedSet((rel.blocked ?? []).map((b) => b.peer));
+    await saveTagServerMap(rel.tags ?? {});
     renderConversationList().catch(() => {});
   }
 

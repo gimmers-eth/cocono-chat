@@ -63,6 +63,25 @@ function reasonChip(id) {
   return `<span class="reason-chip ${m.cls}" title="${esc(m.text)}">${m.icon}${esc(m.text)}</span>`;
 }
 
+// Peer TAGS (client/app/js/tags.js mirrors this id set + order). The account
+// owner's own private labels — never shown to the tagged party, surfaced
+// here only for operator context. The panel carries no font dependency, so
+// glyphs are inline SVG mirroring the client's FA picks (star/house/user/
+// briefcase). ORDER here is the display order in the relationships cell.
+const TAG_META = [
+  ['starred', 'Starred', '<path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 18.9 6.1 20.5l1.2-6.5L2.5 9.4 9.1 8.5 12 2.5Z"/>'],
+  ['family', 'Family', '<path d="M3 11.5 12 4l9 7.5"/><path d="M6 10.5V20h12v-9.5"/>'],
+  ['personal', 'Personal', '<circle cx="12" cy="8" r="3.4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/>'],
+  ['work', 'Work', '<rect x="3" y="7.5" width="18" height="12" rx="2"/><path d="M9 7.5V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1.5"/><path d="M3 13h18"/>'],
+];
+const TAG_LABEL = Object.fromEntries(TAG_META.map(([id, label]) => [id, label]));
+// the row's tags rendered as the full four-icon set: PURPLE when set, grey
+// when not — an operator reads the whole label at a glance, both states.
+function tagsCell(tags) {
+  const on = new Set(tags ?? []);
+  return `<span class="tags">${TAG_META.map(([id, label, d]) => `<span class="tag-glyph ${on.has(id) ? 'tag-on' : 'tag-off'}" title="${esc(label)}${on.has(id) ? ' — set by this account' : ' — not tagged'}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg></span>`).join('')}</span>`;
+}
+
 // THE username component for the admin panel, mirroring the client's
 // js/components/userline.js grammar: single line = name + markers with the
 // same .3em rhythm; double line = name line over a dim detail line (the
@@ -244,10 +263,11 @@ async function loadRelations() {
     const mark = (on) => on ? '<span class="rel-yes">✓</span>' : '<span class="dim">—</span>';
     el.innerHTML = relationships.length
       ? `<table class="rel-table">
-          <thead><tr><th>User</th><th>Added&nbsp;them</th><th>They&nbsp;added</th><th>Verified</th><th>Trusted</th><th>Blocked&nbsp;them</th><th>Blocked&nbsp;by</th></tr></thead>
+          <thead><tr><th>User</th><th>Added&nbsp;them</th><th>They&nbsp;added</th><th>Verified</th><th>Trusted</th><th>Tags&nbsp;(mine)</th><th>Blocked&nbsp;them</th><th>Blocked&nbsp;by</th></tr></thead>
           <tbody>${relationships.map((r) => `<tr class="${r.blocks || r.blockedBy ? 'rel-blocked' : ''}">
             <td><button class="linkish" data-view-user="${esc(r.ul)}">${unameHtml(r.ul, { premium: r.premium })}</button></td>
             <td>${mark(r.added)}</td><td>${mark(r.theyAddedMe)}</td><td>${mark(r.verified)}</td><td>${mark(r.trust)}</td>
+            <td>${tagsCell(r.tags)}</td>
             <td>${r.blocks ? '<span class="rel-block" title="blocked by this account">⛔</span> ' + reasonChip(r.blockReason) : '<span class="dim">—</span>'}</td>
             <td>${r.blockedBy ? '<span class="rel-block" title="this account is walled off here">⛔</span> ' + reasonChip(r.blockedByReason) : '<span class="dim">—</span>'}</td>
           </tr>`).join('')}</tbody>

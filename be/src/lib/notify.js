@@ -51,6 +51,9 @@
 //   'muted'    YOUR mute list changed (muted/unmuted someone from any
 //              device): re-pull the mirror. The muted party is NEVER
 //              notified — a mute is invisible to them.
+//   'tags'     YOUR peer-tag map changed (tagged/untagged someone from any
+//              device): re-pull it. The TAGGED party is NEVER notified — a
+//              tag is the tagger's own private label, invisible to them.
 //
 // `by` IS ALLOWED HERE although nudges are content-free by doctrine: it
 // names only a fact the recipient's own authenticated re-pull already

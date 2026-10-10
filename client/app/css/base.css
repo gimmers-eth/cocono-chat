@@ -281,6 +281,39 @@ img.own-avatar { border-radius: 50%; }
 .row-actions .select { width: auto; }
 
 .convo-wrap { flex: 1; overflow-y: auto; }
+
+/* Sidebar tag FILTER bar (foot): a row of quiet icons. Active = brand
+   purple (var(--accent)); inactive = muted grey. 'All' is just another
+   slot that happens to be the default — it lights purple whenever no
+   real tag is chosen. Never a badge/count here: this is an index control. */
+.convo-filter {
+  display: flex; justify-content: space-around; align-items: center;
+  gap: .3rem; padding: .5rem .6rem; flex: none;
+  border-top: 1px solid var(--border); background: var(--panel);
+}
+.filter-btn {
+  display: grid; place-items: center; width: 2.4rem; height: 2.4rem;
+  border: 0; border-radius: 10px; background: none; cursor: pointer;
+  color: var(--muted); font-size: 1.05rem; transition: color .12s, background .12s;
+}
+.filter-btn:hover { background: var(--panel-raised); }
+.filter-btn.filter-on { color: var(--accent); }
+.filter-btn.filter-on i { transform: none; } /* colour, not size — stays quiet */
+
+/* Chat TAG row (under the head): tap to add/remove. Same purple/grey
+   language as the sidebar filter so the two read as one system. */
+.chat-tagbar {
+  display: flex; gap: .2rem; align-items: center; padding: .2rem .8rem .5rem;
+  border-bottom: 1px solid var(--border); flex: none;
+}
+.tag-btn {
+  display: grid; place-items: center; width: 2.1rem; height: 2.1rem;
+  border: 0; border-radius: 9px; background: none; cursor: pointer;
+  color: var(--muted); font-size: .98rem; transition: color .12s, background .12s;
+}
+.tag-btn:hover { background: var(--panel-raised); }
+.tag-btn.tag-on { color: var(--accent); }
+.tag-btn:disabled { opacity: .5; cursor: default; }
 .convo-list li > button {
   width: 100%; display: flex; gap: .75rem; align-items: center; text-align: left;
   padding: .7rem 1rem; background: none; border: 0;

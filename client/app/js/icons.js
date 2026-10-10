@@ -43,6 +43,14 @@ export const ICONS = {
   report: 'fa-flag',
   reasonHarassment: 'fa-solid fa-comment-slash',
   reasonGraphic: 'fa-regular fa-image',
+  // peer tags (tags.js): solid glyphs everywhere — the FA free REGULAR set
+  // does not carry house-user/briefcase, so on/off state is COLOR
+  // (grey vs purple), never outline-vs-fill
+  tagStar: 'fa-solid fa-star',
+  tagFamily: 'fa-solid fa-house-user',
+  tagPersonal: 'fa-solid fa-user',
+  tagWork: 'fa-solid fa-briefcase',
+  tagAll: 'fa-solid fa-list-ul',
   volume: 'fa-volume',                    // chat unmuted (tap to mute)
   volumeXmark: 'fa-volume-xmark',        // chat muted (tap to unmute)
   magnifier: 'fa-magnifying-glass-plus',

@@ -220,14 +220,14 @@ export default async function usersRoutes(app, { users, redis, config, messages,
   // brute force (two collection reads) over anything index gymnastics.
   app.get('/api/admin/users/:username/relationships', async (request, reply) => {
     const ul = request.params.username.toLowerCase();
-    const actor = await users.findOne({ ul }, { projection: { friends: 1, blocked: 1, blockReasons: 1 } });
+    const actor = await users.findOne({ ul }, { projection: { friends: 1, blocked: 1, blockReasons: 1, tags: 1 } });
     if (!actor) return fail(reply, 'unknown_account', 'No such user', 404);
     const myBlocked = new Set((actor.blocked ?? []).map((u) => String(u).toLowerCase()));
     const toList = (doc) => (doc?.friends ?? []).map((f) => (typeof f === 'string' ? { u: f } : f));
     const mine = new Map(toList(actor).map((f) => [String(f.u).toLowerCase(), f]));
     const others = await users.find(
       { ul: { $ne: ul } },
-      { projection: { ul: 1, friends: 1, verified: 1, premium: 1, blocked: 1, blockReasons: 1 } },
+      { projection: { ul: 1, friends: 1, verified: 1, premium: 1, blocked: 1, blockReasons: 1, tags: 1 } },
     ).toArray();
     const rows = [];
     for (const other of others) {
@@ -237,7 +237,13 @@ export default async function usersRoutes(app, { users, redis, config, messages,
       // ONLY relation left. Do not skip blocked pairs or the block columns
       // would show nothing for exactly the case they exist for.
       const wall = myBlocked.has(other.ul) || (other.blocked ?? []).some((u) => String(u).toLowerCase() === ul);
-      if (!m && !theirs && !wall) continue;
+      // a TAG this account placed on the other is a relation the operator
+      // must see even with no add/wall left (starring a stranger, or keeping
+      // a label on a since-deleted contact). Only the actor's OWN tags gate
+      // the row — the relationships table shows how THIS account stands
+      // toward others, so a tag someone else put on the actor adds no row.
+      const tagged = !!(actor.tags?.[other.ul]?.length);
+      if (!m && !theirs && !wall && !tagged) continue;
       const mutual = !!m && !!theirs;
       rows.push({
         ul: other.ul,
@@ -257,6 +263,9 @@ export default async function usersRoutes(app, { users, redis, config, messages,
         added: !!m,
         verified: !!(m?.v && mutual),   // same mutuality gate the app enforces
         trust: !!(m?.v && m?.t && mutual),
+        // MY tags on them — the tagger's private label, shown to the
+        // operator for context; the tagged account never sees it
+        tags: (actor.tags?.[other.ul] ?? []).filter((t) => typeof t === 'string'),
       });
     }
     rows.sort((a, b) => (Number(b.blocks) - Number(a.blocks))

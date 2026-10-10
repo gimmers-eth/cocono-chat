@@ -422,6 +422,46 @@ export async function loadPeerBlocked() {
   return map;
 }
 
+// ---- PEER TAGS (mirror of the account's `tags` map on the server) ----
+// The tagger's OWN labels (starred/family/personal/work) — ride the PEERS
+// row so the sidebar filter + chat-head row read them without a round-trip.
+// Server is the source of truth; saveTagServerMap REPLACES the whole mirror
+// on login/nudges so tags removed on another device vanish here too.
+export async function rememberPeerTags(peer, tags) {
+  const ul = String(peer).toLowerCase();
+  const cur = (await withStore('readonly', (s) => s.get(ul), PEERS)) ?? { peer: ul };
+  const next = { ...cur, tags: [...new Set((tags ?? []).map(String))].sort() };
+  await withStore('readwrite', (s) => s.put(next), PEERS);
+}
+
+export async function loadPeerTags() {
+  const rows = await withStore('readonly', (s) => s.getAll(), PEERS);
+  const map = new Map();
+  for (const r of rows ?? []) if (Array.isArray(r.tags) && r.tags.length) map.set(r.peer, r.tags);
+  return map;
+}
+
+/** Full-map reconcile (GET /api/me/relationships `.tags`). */
+export async function saveTagServerMap(tagMap) {
+  const server = tagMap && typeof tagMap === 'object' ? tagMap : {};
+  const rows = await withStore('readonly', (s) => s.getAll(), PEERS);
+  for (const r of rows ?? []) {
+    const next = [...new Set((server[r.peer] ?? []).map(String))].sort();
+    const cur = [...new Set((r.tags ?? []).map(String))].sort();
+    if (cur.join(',') !== next.join(',')) {
+      await withStore('readwrite', (s) => s.put({ ...r, tags: next }), PEERS);
+    }
+  }
+  // peers known ONLY to the server (never seen locally): write them too,
+  // or a tag on a message-less contact would filter nothing
+  const seen = new Set((rows ?? []).map((r) => r.peer));
+  for (const [pu, list] of Object.entries(server)) {
+    const ul = String(pu).toLowerCase();
+    if (seen.has(ul)) continue;
+    await withStore('readwrite', (s) => s.put({ peer: ul, tags: [...new Set((list ?? []).map(String))].sort() }), PEERS);
+  }
+}
+
 export async function loadPeerVerifications() {
   const rows = await withStore('readonly', (s) => s.getAll(), PEERS);
   const map = new Map();

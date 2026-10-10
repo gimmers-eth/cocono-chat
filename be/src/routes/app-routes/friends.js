@@ -37,6 +37,12 @@ import { applyBlock } from '../../lib/blockAccount.js';
 // Live sync between a user's OWN devices rides E2EE system messages from
 // the acting device; the server list remains the source of truth that new
 // and offline devices reconcile against (GET /api/me/friends on app entry).
+// The tag vocabulary the app offers (client/app/js/tags.js mirrors this
+// order for the sidebar filter + chat-head row). Server-enforced enum: any
+// id outside it is dropped, so a stale client can never invent tags the
+// admin panel doesn't know how to draw.
+const PEER_TAGS = ['starred', 'family', 'personal', 'work'];
+
 export default async function friendsRoutes(app, { users, redis, config, settings }) {
   const key = (request) => `rl:friends:${request.ip}`;
 
@@ -381,13 +387,52 @@ export default async function friendsRoutes(app, { users, redis, config, setting
     return { muted: false };
   });
 
+  // ---- TAGS ----------------------------------------------------------
+  // A TAG is the user's OWN one-way label on a peer: 'starred' | 'family'
+  // | 'personal' | 'work'. Purely organizational — it gates NOTHING between
+  // the accounts and is NEVER shown to the tagged party (like a block
+  // reason it is the tagger's own account data; the only extra reader is
+  // the admin relationships panel, for operator context). A peer may carry
+  // SEVERAL tags; the set is replaced atomically (idempotent PUT), so
+  // toggling one tag is a whole-set write from the app.
+  // Stored on the tagger's account doc: `tags: { <peerUl>: [ids…] }` — an
+  // object keyed by peer so a single $set/$unset updates one peer without
+  // read-modify-write races. The peer need NOT be a friend or even exist
+  // (you can star a stranger, or keep a deleted contact's star) — a tag is
+  // just the tagger's note about a name.
+  app.put('/api/me/friends/:ul/tags', async (request, reply) => {
+    const denied = await guard(request, reply, 'friendschange');
+    if (denied) return denied;
+    const target = targetOf(request);
+    if (!target) return fail(reply, 'bad_username', 'Invalid username', 400);
+    const raw = request.body?.tags;
+    if (!Array.isArray(raw)) return fail(reply, 'invalid_request', 'tags must be an array', 400);
+    // enforce the enum, lowercase, drop unknowns + dupes, cap at the full set
+    const tags = [...new Set(raw.map((t) => String(t).toLowerCase()))]
+      .filter((t) => PEER_TAGS.includes(t))
+      .sort();
+    const ul = String(request.auth.sub ?? '').toLowerCase();
+    if (tags.length) {
+      await users.updateOne({ ul }, { $set: { [`tags.${target}`]: tags } });
+    } else {
+      // empty set == no tag: unset the key so the doc doesn't accumulate
+      // empty arrays (and the mirror/reconcile sees a clean absence)
+      await users.updateOne({ ul }, { $unset: { [`tags.${target}`]: '' } });
+    }
+    // my OTHER devices re-pull the tag mirror; the tagged party gets
+    // NOTHING (a tag is invisible to them, by design)
+    await notifyAccount(ul, 'tags');
+    return { tags };
+  });
+
   // GET /api/me/relationships — the unified view the Settings tab renders:
-  // every contact I added (with trust stages) + everyone I blocked.
+  // every contact I added (with trust stages) + everyone I blocked + my
+  // peer tags (a flat peer→[ids] map the app mirrors for filtering).
   app.get('/api/me/relationships', async (request, reply) => {
     const denied = await guard(request, reply, 'friends');
     if (denied) return denied;
     const ul = String(request.auth.sub ?? '').toLowerCase();
-    const me = await users.findOne({ ul }, { projection: { friends: 1, blocked: 1, blockReasons: 1, muted: 1 } });
+    const me = await users.findOne({ ul }, { projection: { friends: 1, blocked: 1, blockReasons: 1, muted: 1, tags: 1 } });
     const added = await enriched(ul);
     const blockedList = [...new Set((me?.blocked ?? []).map((u) => String(u).toLowerCase()))].sort();
     const blocked = [];
@@ -404,7 +449,15 @@ export default async function friendsRoutes(app, { users, redis, config, setting
         at: me?.blockReasons?.[bu]?.at ?? null,
       });
     }
-    return { added, blocked, muted: [...new Set((me?.muted ?? []).map((u) => String(u).toLowerCase()))].sort() };
+    // peer → [tags] map (keys normalised lowercase). The app mirrors this
+    // whole map on login + 'tags'/'friends' nudges, so a tag removed on
+    // another device disappears here too (replace, never merge).
+    const tagMap = {};
+    for (const [pu, list] of Object.entries(me?.tags ?? {})) {
+      const t = (list ?? []).map((x) => String(x).toLowerCase()).filter((x) => PEER_TAGS.includes(x));
+      if (t.length) tagMap[String(pu).toLowerCase()] = t.sort();
+    }
+    return { added, blocked, muted: [...new Set((me?.muted ?? []).map((u) => String(u).toLowerCase()))].sort(), tags: tagMap };
   });
 
   app.delete('/api/me/friends/:ul', async (request, reply) => {
