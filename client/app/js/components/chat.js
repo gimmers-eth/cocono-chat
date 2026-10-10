@@ -21,7 +21,7 @@ import { TAG_IDS, TAG_LABELS, tagIconEl, togglePeerTag } from '../tags.js';
 import { mountLine, setAvatar } from './userline.js';
 import { errorText, humanError } from '../errors.js';
 import {
-  saveMessage, updateMessage, messagesWith, markRead, allMessages,
+  saveMessage, updateMessage, messagesWith, markRead, allMessages, isUnread,
   getMessage, deleteMessage, clearMessages,
   loadPeerAvatars, rememberPeerAvatar, AVATARS_EVENT,
   loadFriends, friendAdd, friendDel, friendMarkFlags, setFriends, FRIENDS_EVENT, loadPeerBlocked, loadPeerMuted, rememberPeerMuted, loadPeerChips,
@@ -299,7 +299,13 @@ export function createChat({ client, onHomeRefresh }) {
       if (await getMessage(id)) return;
       const peer = String(m.peer ?? '').toLowerCase();
       if (!peer) return;
-      await saveMessage({ id, peer, dir: 'out', text: m.text, ts: m.ts || Date.now(), state: 'synced' });
+      const ts = m.ts || Date.now();
+      await saveMessage({ id, peer, dir: 'out', text: m.text, ts, state: 'synced' });
+      // Our OWN send, mirrored from another device: it reorders the sidebar
+      // like any last message but must never raise an unread dot here —
+      // advance the read marker (forward-only via the isUnread guard, so a
+      // late-arriving sync can't un-read newer incoming mail).
+      if (isUnread(peer, ts)) markRead(peer, ts);
       if (currentPeer && currentPeer.toLowerCase() === peer) await render();
       onHomeRefresh?.();
     });
