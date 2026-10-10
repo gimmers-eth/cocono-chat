@@ -1341,9 +1341,21 @@ body[data-view="blocked"] .page-footer { display: none; }
 /* ---- composer attach ---- */
 .composer { position: relative; }           /* the attach menu anchors here */
 .composer .attach-btn {
-  flex: none; width: 2.1rem; height: 2.1rem; border-radius: 50%;
+  /* A circle with a glyph in it needs the same treatment as every other icon
+     square in the app (.filter-btn, .chat-tab, .tag-btn): grid-centred, no
+     inherited padding. As a bare .icon-btn it took padding .3rem .5rem inside a
+     fixed 2.1rem box (box-sizing: border-box is global) — so the plus sat
+     off-centre in a content box that was 1.1rem wide but 1.5rem tall, and
+     line-height was left to the font. The 1px border is part of the box, so
+     the circle stays 2.1rem across. */
+  flex: none; width: 2.1rem; height: 2.1rem;
+  display: grid; place-items: center; padding: 0; line-height: 1;
+  border-radius: 50%;
   background: var(--panel-raised); border: 1px solid var(--border);
 }
+/* the send circle is deliberately bigger (primary action); matching its
+   44px here would leave two equal-weight rounds fighting over the row. The
+   glyph keeps .icon-btn's 1.05rem — one icon scale across the app. */
 .composer .attach-btn:disabled { opacity: .4; }
 .attach-menu {
   /* ABOVE the composer, floating over the transcript; z under the toast (75)
