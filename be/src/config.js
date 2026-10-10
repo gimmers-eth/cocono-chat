@@ -81,6 +81,10 @@ export const config = {
     'username',
     'cocono',
     'co-co-no',
+    'coco',
+    'co-co',
+    'co-con',
+    'co-co-n',
   ]),
   // names may not START with these either (brand impersonation): covers the
   // app name 'CoCoNo' in its dashed domain spelling too
