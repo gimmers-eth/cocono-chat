@@ -403,13 +403,42 @@ replay dedup · envelope HMAC/sender-mismatch/unknown-recipient · auth flow hap
 - **Receive policy** (app): images auto-download + ack; videos auto-download
   their POSTER only (full bytes behind a Download button); files wait for the
   user, who may delete-before-download (= received, acked false). Failed
-  downloads retry on the next socket open in small batches; a 404 is final and
-  is still acked.
+  downloads retry on the next socket open in small batches; a 404 on the
+  PAYLOAD is final and is still acked. A failed POSTER fetch is inert — no state
+  change, no ack: a sender whose browser cannot capture a video frame (normal on
+  iOS) used to have its video deleted by the recipient's own preview request,
+  because `?part=thumb` answered with the same 404 that means "the blob was
+  swept". The route now distinguishes `no_thumb`; the rule is in
+  `docs/MESSAGES.md` §2.11 — only a payload fetch may settle the lifecycle.
 - **UI**: the `+` attach menu above the composer, media bubbles (blur, play
   badge, duration, download/decline), the bottom tab strip
   (chat · images · videos · files · links) with sent-vs-received borders and a
   searchable file list, the message-modal viewer (Blur / Play-Pause for animated
   images / Play / Mute / Download / Keep), and a per-device retention setting.
+- **Getting the bytes ONTO the phone** was the missing half: `Download` only
+  moved them from the server into the app's own encrypted store, so a stored
+  file could not be opened by anything else. Every stored item now offers
+  **Save to device** (file bubble, Files-tab row, viewer), preferring
+  `navigator.share({files})` — the door that works in an installed PWA on
+  iOS/Android, reaching *Save to Files* or another app — with a same-origin
+  `<a download>` fallback whose filename always carries an extension
+  (`deviceFileName` scrubs the sender's untrusted name; `IMG_0142` without
+  `.jpg` opens in nothing). It says WHICH door it used, and a dismissed share
+  sheet reads cancelled, never failed: a save that quietly landed nowhere is
+  worse than an error. Images also get **Expand** (shared lightbox,
+  `{round:false}` — its 50% radius suits the square-cropped avatars it was built
+  for and carves the corners off a photo).
+- **Keep in app ≠ Save to device** — the pair that read as one verb, so the
+  labels now name the two destinations. **Save to device** gives the bytes to the
+  OS: outside the app's reach (no sweep, no clear-chat, the phone's own storage).
+  **Keep in app** is a per-device pin exempting the app's own copy from the
+  retention window (1/3/7/30/90 d, default 7), measured from `storedAt` — when
+  the download landed, NOT the message's age. Unpinned, the bytes drop and the
+  record becomes `pruned`: the transcript row, name/size/date and the
+  photo/video thumbnail stay, Save-to-device goes, and the viewer offers
+  **Download again** because only the server knows whether a copy survived. The
+  copy itself is asserted in `appmediavu.test.js` (one label says device, the
+  other says app — neither both).
 - **Req 7 blur policy**: received images from senders WITHOUT the admin
   identity-verified flag arrive blurred; a user's explicit toggle wins; own
   sends are never blurred. Blur is a render state over already-decrypted bytes.
@@ -487,6 +516,25 @@ replay dedup · envelope HMAC/sender-mismatch/unknown-recipient · auth flow hap
 - Workers: NO localStorage (spec), NO dynamic `import()`, `importScripts`
   only during evaluation — all worker persistence goes through IndexedDB
   (`cocono-sw`: kv + log stores).
+- **A local state must not impersonate a server fact.** "Removed from this
+  device" and "no longer available on the server" read alike and are not: the
+  first is ours, the second is the network's answer to a question we have not
+  asked. Declaring a pruned file un-downloadable turned a sometimes-recoverable
+  file into an announced-lost one — ask, then report (`pruned` ≠ `expired`).
+- **Check which clock a sweep measures.** `ts` (place in the conversation) and
+  "when the bytes arrived here" are the same moment for an auto-downloaded photo
+  and completely different for a file the user chose to fetch last week —
+  retention built on the first made the second pointless (download it, and the
+  next pass drops it, possibly for good since the download is what acks it).
+- **A decorative fetch must not share a failure path with a lifecycle fetch.**
+  The poster bug hid in `downloadMedia(..., {thumbOnly:true})`: its `catch`
+  spoke about the BLOB while the call had asked about a PREVIEW. Its regression
+  test must run against the REAL backend — no stub 404s the way a poster-less
+  blob does (`client/test/appmediaflow.test.js`).
+- **Assert that a doc edit matched.** Sections of this file silently no-opped for
+  two commits from `str.replace` on a near-miss anchor, until the script grew a
+  `count(old) == 1` check — the same reason a test should assert behaviour and
+  not "the call did not throw".
 
 ## Next up (agreed order)
 

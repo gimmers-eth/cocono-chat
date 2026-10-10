@@ -429,16 +429,22 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
   // pinned records. Say what the alternative actually costs — once the server
   // has deleted the blob, a pruned copy is gone for good on this device.
   if (row.state === 'stored') {
+    // 'in app', never 'on this device': the two buttons in this row are the
+    // ONLY pair in the feature whose labels sound alike and do opposite things
+    // — Save hands the bytes to the OS (out of our reach, immortal), Keep
+    // exempts our own copy from the sweep (stays here, invisible, deletable by
+    // clearing the chat). Saying 'Keep on this device' made them read as two
+    // strengths of the same verb.
     const keep = btn(`viewer-toggle${row.keep ? ' viewer-keep-on' : ''}`, 'mediaKeep',
-      row.keep ? 'Kept' : 'Keep on this device',
-      row.keep ? 'Unpin: this file may be removed from this device after the retention window'
-        : 'Pin: keep these bytes on this device past the retention window');
+      row.keep ? 'Kept in app' : 'Keep in app',
+      row.keep ? 'Unpin: after the retention window the app may drop these bytes (they are not in your Files unless you Save them)'
+        : 'Pin: keep these bytes in the app past the retention window — to put them in your phone, use Save to device');
     keep.addEventListener('click', async () => {
       const next = !row.keep;
       await updateMedia(row.id, { keep: next });
       row.keep = next;
       keep.classList.toggle('viewer-keep-on', next);
-      keep.replaceChildren(iconEl('mediaKeep'), document.createTextNode(next ? 'Kept' : 'Keep on this device'));
+      keep.replaceChildren(iconEl('mediaKeep'), document.createTextNode(next ? 'Kept in app' : 'Keep in app'));
       onChange?.({ ...row });
     });
     controls.append(keep);

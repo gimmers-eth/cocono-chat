@@ -446,23 +446,36 @@ sweep until the admin deletes the report (which deletes its media docs with it).
 | Decrypted media bytes on a device | client IDB `media` | settings drawer, 7 d default | boot + daily prune, measured **from when the bytes landed on that device** (`storedAt`), not from the message's age; `keep: true` ("Keep on this device") exempt |
 | Text transcripts on a device | client IDB `messages` | none — the user's own history | clear-chat stays manual |
 
-### 2.13a What "Keep on this device" does (and what it does not)
+### 2.13a "Keep in app" vs "Save to device" — two buttons, two destinations
 
-The pin is **local and per-device**: it exempts one device's decrypted bytes
-from the row above. It is not a server statement (the acks decide when a blob
-dies), it does not sync to your other devices, and it does not survive clearing
-the chat or the device's app data.
+They run in opposite directions, which is why the labels share no noun:
 
-Without it, once the window passes the sweep drops the file's bytes and the
-record becomes `pruned`. What stays: the message in the transcript, its
-name/size/date, and for a photo or video the 256 px thumbnail — so the wall
-keeps its picture and only the payload goes. What goes: the full-resolution
-image, the video, the file, and with them the ability to **Save to device**.
-The viewer then offers **Download again**, because only the server knows whether
-a copy survives (a blob lives until EVERY listed device has acked) — and it
-takes the answer, `404 unknown_media` → `expired`, as the verdict. `pruned` is
-therefore not `expired`: one is this device choosing to let bytes go, the other
-is the network confirming there is nothing left to fetch.
+- **Save to device** hands the bytes to the operating system — `navigator.share`
+  with files where the browser allows it (iOS/Android's route to *Save to
+  Files*, or to any app that opens the type), a same-origin `<a download>`
+  otherwise. After that they are outside the app entirely: no retention window,
+  clear-chat, logout or site-data wipe can remove them, and they occupy the
+  phone's own storage. Needs the full payload on this device (a `pruned` row
+  must be re-fetched first).
+- **Keep in app** is a flag on this device's media record. The copy stays
+  inside the app's encrypted store and is exempt from the local sweep below —
+  invisible outside the app, **not** synced to your other devices, silent to the
+  server, and deleted if you clear the chat or the site's data.
+
+Pin what you want at full size inside the app; Save what you need to open or
+keep elsewhere. The settings drawer's window (1/3/7/30/90 days, default 7)
+applies to everything not pinned.
+
+Without Keep, once the window passes the sweep drops the bytes and the record
+becomes `pruned`. What stays: the message in the transcript, its name/size/date,
+and for a photo or video the 256 px thumbnail — the wall keeps its picture and
+only the payload goes. What goes: the full-resolution image, the video, the
+file, and with them the ability to **Save to device**. The viewer then offers
+**Download again**, because only the server knows whether a copy survives (a
+blob lives until EVERY listed device has acked) — and it takes that answer,
+`404 unknown_media` → `expired`, as the verdict. `pruned` is therefore not
+`expired`: one is this device choosing to let bytes go, the other is the network
+confirming there is nothing left to fetch.
 
 ### 2.14 Scaling & implementation notes
 

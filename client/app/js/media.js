@@ -297,7 +297,8 @@ export function isBlurred(rec, verified) {
  * for, because the message is old. `ts` stays what it always was: the position
  * of the media in the conversation timeline.
  *
- * `keep` (the viewer's 'Keep on this device') is the only exemption.
+ * `keep` (the viewer's 'Keep in app') is the only exemption. Note the label:
+ *  Keep keeps the copy IN the app; 'Save to device' gives it to the OS.
  */
 export function pruneDue(records, { now = Date.now(), days = LOCAL_RETENTION_DAYS_DEFAULT } = {}) {
   const cutoff = now - Math.max(0, Number(days) || 0) * 86_400_000;

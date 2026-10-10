@@ -538,3 +538,21 @@ test('viewer: a PRUNED file may be fetched again; an expired one may not', async
   assert.ok(dead && dead.disabled === true, 'a gone blob is stated, not retried');
   teardown();
 });
+
+test('viewer copy: Save and Keep cannot read as two strengths of the same verb', async () => {
+  await fresh();
+  const img = await stored({ id: 'copy1' });
+  const host = dom.byId('msg-media');
+  const teardown = view.openViewer(host, {
+    client: fakeClient(), msg: { dir: 'in', kind: 'image' }, row: img,
+    verified: true, onChange: () => {}, onStatus: () => {},
+  });
+  const labels = host.querySelectorAll('.viewer-toggle').map((b) => b.textContent.trim());
+  const save = labels.find((t) => /Save/.test(t));
+  const keep = labels.find((t) => /Keep/.test(t));
+  assert.equal(save, 'Save to device', 'the one that leaves the app says device');
+  assert.equal(keep, 'Keep in app', 'the one that stays says app');
+  assert.ok(!/device/i.test(keep), 'Keep must not claim the device — that is the other button');
+  assert.ok(!/\bapp\b/i.test(save), 'and Save must not sound in-app');
+  teardown();
+});
