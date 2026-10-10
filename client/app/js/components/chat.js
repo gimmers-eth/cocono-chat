@@ -16,6 +16,7 @@ import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl, premiumBadgeEl 
 import { safetyNumber } from '../identity.js';
 import { BADGE_UI, nameChipEl } from '../badges.js';
 import { blockUserWithConfirm, unblockUser } from '../blocks.js';
+import { reportUserWithConfirm } from '../reports.js';
 import { mountLine, setAvatar } from './userline.js';
 import { errorText, humanError } from '../errors.js';
 import {
@@ -494,9 +495,10 @@ export function createChat({ client, onHomeRefresh }) {
     openForward(msgId, $('msg-modal-text').textContent ?? '');
   }
 
-  // --- chat-options modal (header ⋮): clear chat today; report/block land
-  //     here later. Modal (not dropdown) so it survives any re-render and
-  //     needs no outside-click machinery. ---
+  // --- chat-options modal (header ⋮): profile, trust ladder, mute, clear
+  //     chat, and report/block (each collecting a required reason). Modal
+  //     (not dropdown) so it survives any re-render and needs no
+  //     outside-click machinery. ---
 
   // --- trust UI: friends = IDENTITY-BOUND one-way trust. Anything short of
   //     a live-matching binding (stranger, legacy/unbound, changed, gone)
@@ -675,6 +677,13 @@ export function createChat({ client, onHomeRefresh }) {
     if (blockBtn) {
       blockBtn.closest('.menu-row').hidden = state === PS.SELF;
       blockBtn.disabled = state === PS.SELF;
+    }
+    // Report: same reach as block — anyone but yourself (a blocked peer can
+    // still be reported afterwards: the abuse you saw is already history)
+    const reportBtn = $('btn-chat-report');
+    if (reportBtn) {
+      reportBtn.closest('.menu-row').hidden = state === PS.SELF;
+      reportBtn.disabled = state === PS.SELF;
     }
   }
 
@@ -1868,6 +1877,16 @@ export function createChat({ client, onHomeRefresh }) {
       closeChatOpts();
       if (!currentPeer) return;
       if (await blockUserWithConfirm(client, currentPeer)) {
+        await updateTrustUI();
+        onHomeRefresh?.();
+      }
+    });
+    // Report user: modal collects reason + description (+ the optional
+    // auto-block checkbox); a landed report-block flips the trust UI too
+    $('btn-chat-report')?.addEventListener('click', async () => {
+      closeChatOpts();
+      if (!currentPeer) return;
+      if (await reportUserWithConfirm(client, currentPeer)) {
         await updateTrustUI();
         onHomeRefresh?.();
       }

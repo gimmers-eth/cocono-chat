@@ -153,6 +153,11 @@ export const config = {
   deviceRemoveAccountLimit: numOf(env.DEVICE_REMOVE_ACCOUNT_LIMIT, 10),
   deviceRemoveWindowSec: numOf(env.DEVICE_REMOVE_WINDOW_SEC, 3600),
 
+  // Device self-status (PWA-installed flag): fires on every WS open, so the
+  // budget is per-day churn headroom, not a scarce allowance.
+  deviceSelfAccountLimit: numOf(env.DEVICE_SELF_ACCOUNT_LIMIT, 200),
+  deviceSelfWindowSec: numOf(env.DEVICE_SELF_WINDOW_SEC, 24 * 3600),
+
   // Device egress-IP tracking (app.js auth hook): the latest IP is kept per
   // device (admin 'known IPs'); an IP CHANGE costs the device one unit from
   // a fixed-window budget — more than `limit` changes inside `windowSec` and
@@ -180,6 +185,14 @@ export const config = {
   diagIpWindowSec: numOf(env.DIAG_IP_WINDOW_SEC, IP_TIME_WINDOW),
   diagAccountLimit: numOf(env.DIAG_ACCOUNT_LIMIT, 30),
   diagAccountWindowSec: numOf(env.DIAG_ACCOUNT_WINDOW_SEC, 24 * 3600),
+
+  // Abuse reports ('Report user' in the chat menu): rare by nature — the
+  // per-IP window is the spam gate, the per-account budget stops one device
+  // from roaming IPs. Transcripts ride these bodies (route caps size).
+  reportIpLimit: numOf(env.REPORT_IP_LIMIT, 20),
+  reportIpWindowSec: numOf(env.REPORT_IP_WINDOW_SEC, IP_TIME_WINDOW),
+  reportAccountLimit: numOf(env.REPORT_ACCOUNT_LIMIT, 20),
+  reportAccountWindowSec: numOf(env.REPORT_ACCOUNT_WINDOW_SEC, 24 * 3600),
   wsHeartbeatSec: numOf(env.WS_HEARTBEAT_SEC, 30),
 
   // Identity verification (real-person check by the admin, distinct from

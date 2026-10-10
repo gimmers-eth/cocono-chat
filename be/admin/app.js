@@ -332,16 +332,20 @@ const PANEL_SECTIONS = {
     </div>
     <div class="sec">
       <h3>Devices <span class="dim">(${u.devices.length})</span></h3>
-      ${u.devices
-        .map((d) => `<div class="device">
-          ${d.name ? `<strong>${esc(d.name)}</strong> <span class="dim">·</span> ` : ''}<span class="mono" title="${esc(d.id)}">${esc(d.id.slice(0, 8))}…</span>
-          <span class="dim">created ${fmtDate(d.createdAt)}</span>
-          <span class="dim">seen ${fmtAgo(d.lastSeenAt)}</span>
-          ${d.lastIp ? `<span class="dim mono">${esc(d.lastIp)}</span>` : ''}
-          <button class="danger tiny" data-del-device="${esc(u.ul)}" data-device="${esc(d.id)}">remove</button>
-        </div>`)
-        .join('') || '<span class="dim">none</span>'}
-      <p class="dim small-note">removing the LAST device deletes the account outright</p>
+      ${u.devices.length ? `<table class="rel-table device-table">
+        <thead><tr><th>Device</th><th>Created</th><th>Seen</th><th>Last&nbsp;IP</th><th>App</th><th></th></tr></thead>
+        <tbody>${u.devices
+          .map((d) => `<tr>
+            <td>${d.name ? `<strong>${esc(d.name)}</strong><br />` : ''}<span class="mono" title="${esc(d.id)}">${esc(d.id.slice(0, 8))}…</span></td>
+            <td class="dim">${fmtDate(d.createdAt)}</td>
+            <td class="dim">${fmtAgo(d.lastSeenAt)}</td>
+            <td class="dim mono">${esc(d.lastIp ?? '—')}</td>
+            <td>${deviceInstallMark(d)}</td>
+            <td><button class="danger tiny" data-del-device="${esc(u.ul)}" data-device="${esc(d.id)}">remove</button></td>
+          </tr>`)
+          .join('')}</tbody>
+      </table>` : '<span class="dim">none</span>'}
+      <p class="dim small-note">removing the LAST device deletes the account outright · App: ✓ installed PWA, ✕ browser tab, — never reported (self-reports arrive on each session open)</p>
     </div>`,
 
   traffic: (u) => `${accountHead(u)}
@@ -482,6 +486,15 @@ function renderLimitsConfig(cfg) {
   $('limits-config-body').innerHTML = rows;
 }
 
+// PWA install state per device (PUT /api/devices/self, sent by the SDK when
+// a session opens): tick installed, cross tab-mode, dash = never reported —
+// a non-browser device MUST NOT be shown as "not installed".
+const deviceInstallMark = (d) => (d.installed === true
+  ? '<span class="rel-yes" title="installed as an app (device-reported)">✓</span>'
+  : d.installed === false
+    ? '<span class="rel-no" title="running as a browser tab">✕</span>'
+    : '<span class="dim" title="no self-report received yet">—</span>');
+
 // Warning appended to the device-remove confirm when the account would be
 // left with zero devices (username stays reserved, account inaccessible).
 function orphanNote(ul) {
@@ -510,6 +523,49 @@ function renderDiags(diags) {
     </details>`,
     )
     .join('');
+}
+
+// Reports mirror the client's REPORT_REASONS (client/app/js/reports.js):
+// reason id -> label. Keep the two in step when the menu changes.
+const REPORT_REASON_LABELS = {
+  scamming: 'Scamming',
+  harassment: 'Harassment or hate speech',
+  graphic: 'Unsolicited graphic material',
+  other: 'Other',
+};
+
+function renderReports(reports) {
+  $('reports-empty').hidden = reports.length > 0;
+  if (!reports.length) { $('reports-list').innerHTML = ''; return; }
+  // one row per report; the shared transcript is long, so it folds into an
+  // expandable cell under its own "n messages" toggle rather than a column
+  const transcriptCell = (r) => (r.messages ?? []).length
+    ? `<details class="report-toggle">
+        <summary>${(r.messages ?? []).length} message${(r.messages ?? []).length === 1 ? '' : 's'} <span class="dim">(unencrypted)</span></summary>
+        <div class="report-transcript">
+          ${(r.messages ?? [])
+            .map((m) => `<div class="report-msg"><span class="mono dim">${fmtDate(m.ts)}</span> <strong>@${esc(m.from ?? '?')}</strong> <span>${esc(m.text ?? '')}</span></div>`)
+            .join('')}
+        </div>
+      </details>`
+    : '<span class="dim">none shared</span>';
+  $('reports-list').innerHTML = `<table class="rel-table reports-table">
+    <thead><tr>
+      <th>When</th><th>Reporter</th><th>Against</th><th>Reason</th><th>Description</th><th>Chat history</th><th>Outcome</th><th></th>
+    </tr></thead>
+    <tbody>${reports.map((r) => `<tr>
+      <td class="mono dim">${fmtDate(r.ts)}<br />${esc(r.ip ?? '')}</td>
+      <td><button class="linkish" data-view-user="${esc(r.account ?? '')}">@${esc(r.account ?? '?')}</button></td>
+      <td><button class="linkish" data-view-user="${esc(r.peer ?? '')}">@${esc(r.peer ?? '?')}</button></td>
+      <td><span class="badge report-reason">${esc(REPORT_REASON_LABELS[r.reason] ?? r.reason)}</span></td>
+      <td class="report-desc">${esc(r.description ?? '')}</td>
+      <td>${transcriptCell(r)}</td>
+      <td>${r.blocked
+        ? '<span class="badge report-blocked">blocked</span>'
+        : '<span class="dim">report only</span>'}</td>
+      <td><button class="danger tiny" data-del-report="${esc(r.id)}">delete</button></td>
+    </tr>`).join('')}</tbody>
+  </table>`;
 }
 
 function renderBranding(b) {
@@ -555,11 +611,12 @@ function renderOps(o) {
 
 async function refresh() {
   try {
-    const [users, limitsCfg, badgeDefs, diags, branding, ops] = await Promise.all([
+    const [users, limitsCfg, badgeDefs, diags, reports, branding, ops] = await Promise.all([
       api('/api/admin/users'),
       api('/api/admin/limits'),
       api('/api/admin/badges'),
       api('/api/admin/diagnostics'),
+      api('/api/admin/reports'),
       api('/api/admin/branding'),
       api('/api/admin/ops'),
     ]);
@@ -572,6 +629,7 @@ async function refresh() {
     if (!$('user-panel').hidden && userTab === 'relations') loadRelations();
     if (!$('user-panel').hidden && userTab === 'blockers') loadBlockers();
     renderDiags(diags);
+    renderReports(reports);
     renderBranding(branding);
     renderOps(ops);
     $('updated').textContent = `updated ${new Date().toLocaleTimeString()}`;
@@ -707,6 +765,11 @@ $('rl-search').addEventListener('keydown', (e) => {
 $('btn-purge-diags').addEventListener('click', () => {
   if (!confirm('Delete ALL diagnostics reports?')) return;
   run('Purged diagnostics reports', () => api('/api/admin/diagnostics', { method: 'DELETE' }));
+});
+
+$('btn-purge-reports').addEventListener('click', () => {
+  if (!confirm('Delete ALL abuse reports?')) return;
+  run('Purged abuse reports', () => api('/api/admin/reports', { method: 'DELETE' }));
 });
 
 // ---- Backup & Ops ----
@@ -845,6 +908,12 @@ document.addEventListener('click', (e) => {
       api(`/api/admin/diagnostics/${encodeURIComponent(delDiag)}`, { method: 'DELETE' }));
   }
 
+  const delReport = e.target.closest('[data-del-report]')?.dataset.delReport;
+  if (delReport) {
+    return run(`Deleted abuse report`, () =>
+      api(`/api/admin/reports/${encodeURIComponent(delReport)}`, { method: 'DELETE' }));
+  }
+
   const clearKey = e.target.closest('[data-clear-key]')?.dataset.clearKey;
   if (clearKey) {
     return run(`Cleared ${clearKey}`, () =>
@@ -975,7 +1044,7 @@ document.addEventListener('click', async (e) => {
 // a reload (or a shared link) lands where you left it. Data keeps refreshing
 // every 10s regardless of the visible page — hidden sections re-render
 // cheaply and the side panel lives outside the pager.
-const PAGES = ['users', 'app', 'traffic', 'diagnostics', 'ops'];
+const PAGES = ['users', 'app', 'traffic', 'reports', 'diagnostics', 'ops'];
 // set by the user panel's "search rate limits" button: the subjects to load
 // into the traffic page when it opens (cleared on use)
 let pendingTrafficSearch = null;

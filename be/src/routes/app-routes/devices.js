@@ -224,6 +224,34 @@ export default async function deviceRoutes(app, { users, redis, config, messages
     };
   });
 
+  // PUT /api/devices/self — the device's own status report (JWT): right now
+  // only whether the PWA is INSTALLED (running standalone, added to the
+  // home screen) on it. The SDK fires this best-effort whenever a WS session
+  // opens, so the flag ages with real use; a browser-tab session reports
+  // false, and a non-browser (test/Node) device reports NOTHING — unknown
+  // stays unknown. Device-scoped by the token: a caller can only ever
+  // update its OWN device row. The limiter is generous (every reconnect
+  // re-reports) — it gates scripted spam, not usage.
+  app.put('/api/devices/self', async (request, reply) => {
+    const denied = requireAuth(request, reply);
+    if (denied) return denied;
+    const ul = request.auth.sub;
+    const lim = await effectiveLimit(settings, config, 'dself', ul);
+    const rl = await rateLimit(redis, `rl:dself:${ul}`, lim.limit, lim.windowSec);
+    if (!rl.ok) return limited(reply, rl);
+
+    const installed = request.body?.installed;
+    if (typeof installed !== 'boolean') {
+      return fail(reply, 'invalid_request', 'installed must be a boolean', 400);
+    }
+    const res = await users.updateOne(
+      { ul, 'devices.id': request.auth.d },
+      { $set: { 'devices.$.installed': installed, 'devices.$.installedAt': new Date() } },
+    );
+    if (!res.matchedCount) return fail(reply, 'unknown_device', 'No such device on this account', 404);
+    return { updated: request.auth.d, installed };
+  });
+
   // PUT /api/devices/:deviceId/name — rename a device on THIS account
   // (Settings > Devices). Body { name }: 1..40 printable chars; empty
   // clears the label. Shares the device-approval budget (both are rare

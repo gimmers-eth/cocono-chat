@@ -7,9 +7,10 @@ import userKeys from './userKeys.js';
 import userStats from './userStats.js';
 import profile from './profile.js';
 import diagnostics from './diagnostics.js';
+import reports from './reports.js';
 import appInfo from './appInfo.js';
 
-// All public app routes. ctx = { users, redis, config, diagnostics,
+// All public app routes. ctx = { users, redis, config, diagnostics, reports,
 // settings }, passed through from buildApp().
 export default async function appRoutes(app, ctx) {
   await app.register(signup, ctx);
@@ -21,5 +22,6 @@ export default async function appRoutes(app, ctx) {
   await app.register(userStats, ctx);
   await app.register(profile, ctx);
   await app.register(diagnostics, ctx);
+  await app.register(reports, ctx);
   await app.register(appInfo, ctx);
 }

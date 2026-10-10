@@ -77,6 +77,9 @@ export class Api {
   blockUser(token, ul, reason) {
     return this.#request(`/api/me/friends/${encodeURIComponent(ul)}/block`, { method: 'PUT', body: { r: reason }, token });
   }
+  reportUser(token, payload) {
+    return this.#request('/api/me/report', { method: 'POST', body: payload, token });
+  }
   unblockUser(token, ul) {
     return this.#request(`/api/me/friends/${encodeURIComponent(ul)}/block`, { method: 'DELETE', token });
   }
@@ -156,6 +159,10 @@ export class Api {
 
   removeDevice(token, deviceId) {
     return this.#request(`/api/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE', token });
+  }
+
+  setDeviceSelf(token, payload) {
+    return this.#request('/api/devices/self', { method: 'PUT', body: payload, token });
   }
 
   devices(token) {

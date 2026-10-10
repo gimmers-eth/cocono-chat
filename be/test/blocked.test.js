@@ -136,6 +136,7 @@ test('admin relationships: a pure block (no friends ever) still shows in the pan
     redis,
     config,
     diagnostics: mongo.db.collection('diagnostics'),
+    reports: mongo.db.collection('reports'),
     settings: mongo.db.collection('settings'),
     messages: mongo.db.collection('messages'),
     idDocs: mongo.db.collection('id_docs'),

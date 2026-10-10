@@ -445,6 +445,24 @@ img.own-avatar { border-radius: 50%; }
 .block-reasons .reason-icon { margin-top: .1rem; opacity: .85; }
 .rel-pill .reason-icon { margin-right: .35em; }
 
+/* ---- REPORT modal: shares the block-reason choice-list styling above;
+   the description + optional-block rows continue the same rhythm ---- */
+.report-desc {
+  display: block; box-sizing: border-box; width: 100%; resize: vertical;
+  min-height: 4.2rem; margin-top: .55rem; padding: .55rem .85rem;
+  background: var(--panel-raised); border: 1px solid var(--border);
+  color: var(--text); border-radius: .6rem; font: inherit; font-size: .9rem;
+}
+.report-desc:focus { outline: none; border-color: var(--danger); }
+.report-block {
+  display: flex; align-items: flex-start; gap: .55rem; margin-top: .55rem;
+  padding: .55rem .7rem; border: 1px solid var(--border); border-radius: .6rem;
+  cursor: pointer; font-size: .9rem;
+}
+.report-block:hover { background: rgba(255, 255, 255, 0.05); }
+.report-block input { margin-top: .15rem; accent-color: var(--danger); }
+.report-block .reason-icon { margin-top: .1rem; opacity: .85; }
+
 /* ---- Settings > Relationships ---- */
 .rel-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-bottom: .6rem; }
 .rel-toolbar .input { flex: 1 1 10rem; }

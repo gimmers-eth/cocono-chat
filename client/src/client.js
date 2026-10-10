@@ -21,6 +21,23 @@ const iosLike = () =>
   /iPhone|iPad|iPod/.test(navigator.userAgent) &&
   (navigator.maxTouchPoints ?? 0) > 0;
 
+// PWA install probe: is the app running STANDALONE (installed to the home
+// screen, own window) or as a plain browser TAB? matchMedia is the standard
+// signal (Chrome/Android/desktop); older iOS Safari has no display-mode
+// query but exposes navigator.standalone. Returns true/false when a browser
+// answers, and null when NEITHER exists (Node tests, non-browser hosts) —
+// callers must treat null as "unknown, report nothing" so unknown devices
+// never get a false cross in the admin panel.
+const installedProbe = () => {
+  try {
+    if (typeof globalThis.matchMedia === 'function') {
+      return globalThis.matchMedia('(display-mode: standalone)').matches === true;
+    }
+    if (globalThis.navigator?.standalone === true) return true;
+  } catch { /* no browser signal */ }
+  return null;
+};
+
 export class CoconoClient extends Emitter {
   #identity = null; // loaded lazily from storage
   #transport = null;
@@ -403,6 +420,35 @@ export class CoconoClient extends Emitter {
     return this.api.unblockUser(this.#requireToken(), ul);
   }
 
+  /**
+   * Report a peer for toxic/illegal activity. The reporter VOLUNTARILY
+   * shares the (locally decrypted) transcript — the server only ever sees
+   * chat plaintext when a user hands it over like this, which is why the
+   * client warns before sending.
+   * @param {string} username   reported peer
+   * @param {object} opts
+   *   reason      'scamming' | 'harassment' | 'graphic' | 'other'
+   *   description required free text from the reporter
+   *   messages    [{ from, ts, text }] transcript lines
+   *   block       also block the peer server-side (default false —
+   *               the client UI defaults the checkbox to ON)
+   * @returns {Promise<{reported: boolean, blocked: boolean}>}
+   */
+  async reportUser(username, { reason, description, messages, block = false } = {}) {
+    const ul = String(username ?? '').toLowerCase();
+    const identity = await this.#requireIdentity();
+    const lines = (messages ?? [])
+      .filter((m) => m && typeof m.text === 'string' && m.text)
+      .map((m) => ({
+        from: String(m.from ?? (m.dir === 'out' ? identity.username : ul)).toLowerCase(),
+        ts: m.ts ?? null,
+        text: m.text,
+      }));
+    return this.api.reportUser(this.#requireToken(), {
+      peer: ul, r: reason, description, messages: lines, block: block === true,
+    });
+  }
+
   /** Unified relationship view: { added: [entries…], blocked: [users…] }. */
   async relationships() {
     return this.api.relationships(this.#requireToken());
@@ -662,7 +708,19 @@ export class CoconoClient extends Emitter {
       logger: this.logger,
     });
     transport.on('frame', (frame) => this.#onFrame(frame));
-    transport.on('state', (state) => this.emit('state', { state }));
+    transport.on('state', (state) => {
+      this.emit('state', { state });
+      // Device self-status (PUT /api/devices/self): the PWA-installed flag
+      // rides every fresh WS open — best-effort, silent on failure, and a
+      // non-browser host (no display-mode signal) never reports at all.
+      if (state === 'open') {
+        const installed = installedProbe();
+        if (installed !== null) {
+          this.api.setDeviceSelf(this.token, { installed })
+            .catch((err) => this.logger.debug(`device self-report skipped: ${err?.message ?? err}`));
+        }
+      }
+    });
     transport.on('auth-failed', () => {
       // Server rejected our session: drop the token, close cleanly, and let
       // the app surface a re-login prompt instead of going quietly deaf.

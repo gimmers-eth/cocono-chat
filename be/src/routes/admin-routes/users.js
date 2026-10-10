@@ -45,6 +45,11 @@ export default async function usersRoutes(app, { users, redis, config, messages,
           lastIp: dev.lastIp ?? null,
           createdAt: dev.createdAt,
           lastSeenAt: dev.lastSeenAt,
+          // PWA install state as the device last reported it (PUT
+          // /api/devices/self): true installed, false tab-mode, null never
+          // reported (non-browser device or no session since the flag shipped)
+          installed: dev.installed === true ? true : dev.installed === false ? false : null,
+          installedAt: dev.installedAt ?? null,
           flap: {
             count: Math.max(0, Number(count ?? 0)),
             limit: eff.limit,

@@ -16,6 +16,7 @@ async function setupAdmin() {
     redis: ctx.redis,
     config,
     diagnostics: ctx.mongo.db.collection('diagnostics'),
+    reports: ctx.mongo.db.collection('reports'),
     settings: ctx.mongo.db.collection('settings'),
     messages: ctx.mongo.db.collection('messages'),
     idDocs: ctx.mongo.db.collection('id_docs'),

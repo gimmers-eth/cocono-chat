@@ -3,6 +3,7 @@ import { rateLimit } from '../../lib/rateLimit.js';
 import { USERNAME_RE } from '../../lib/username.js';
 import { effectiveLimit } from '../../lib/limits.js';
 import { createNotifier } from '../../lib/notify.js';
+import { applyBlock } from '../../lib/blockAccount.js';
 
 // Friends: a per-account, ONE-WAY trust list ANCHORED TO IDENTITY KEYS.
 //
@@ -320,28 +321,10 @@ export default async function friendsRoutes(app, { users, redis, config, setting
       return fail(reply, 'invalid_request', 'Pick a block reason', 400);
     }
     const ul = String(request.auth.sub ?? '').toLowerCase();
-    const tDoc = await users.findOne({ ul: target }, { projection: { _id: 1, friends: 1 } });
-    if (!tDoc) return fail(reply, 'unknown_account', 'No such user', 404);
-
-    await users.updateOne({ ul }, {
-      $addToSet: { blocked: target },
-      $set: { [`blockReasons.${target}`]: { r: reason, at: new Date() } },
-    });
-
-    // sever BOTH ways (stronger than un-add: their entry on me goes too,
-    // and my flags on them die with it — no half-trust may persist)
-    const user = await users.findOne({ ul }, { projection: { friends: 1 } });
-    const kept = normalize(user?.friends).filter((f) => f.u !== target);
-    await users.updateOne({ ul }, { $set: { friends: kept.sort((a, b) => a.u.localeCompare(b.u)) } });
-    const theirKept = normalize(tDoc.friends).filter((f) => f.u !== ul);
-    if (theirKept.length !== normalize(tDoc.friends).length) {
-      await users.updateOne({ ul: target }, { $set: { friends: theirKept.sort((a, b) => a.u.localeCompare(b.u)) } });
-      // their view of the relation moved completely — nudge (they learn the
-      // severing via their own re-pull, never that they are blocked)
-      await notifyAccount(target, 'friends');
-    }
-    // my other devices: the entry left MY list too
-    await notifyAccount(ul, 'friends');
+    // sever-both-ways + reason stamp + nudges live in lib/blockAccount.js
+    // (shared with the report flow's optional auto-block)
+    const applied = await applyBlock({ users, notifyAccount }, ul, target, reason);
+    if (!applied) return fail(reply, 'unknown_account', 'No such user', 404);
     return { blocked: true };
   });
 

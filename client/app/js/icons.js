@@ -39,6 +39,10 @@ export const ICONS = {
   reasonNospeak: 'fa-regular fa-message',
   reasonUnknown: 'fa-regular fa-circle-question',
   reasonScam: 'fa-solid fa-triangle-exclamation',
+  // report action + report-reason glyphs (reports.js)
+  report: 'fa-flag',
+  reasonHarassment: 'fa-solid fa-comment-slash',
+  reasonGraphic: 'fa-regular fa-image',
   volume: 'fa-volume',                    // chat unmuted (tap to mute)
   volumeXmark: 'fa-volume-xmark',        // chat muted (tap to unmute)
   magnifier: 'fa-magnifying-glass-plus',

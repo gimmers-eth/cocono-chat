@@ -115,6 +115,9 @@ app.addHook('onSend', async (request, reply, payload) => {
     redis,
     config,
     diagnostics: mongo.db.collection('diagnostics'),
+    // abuse reports ('Report user' in the chat menu) — moderation records,
+    // kept until an admin deletes them (NO TTL, unlike diagnostics)
+    reports: mongo.db.collection('reports'),
     // username-keyed counters (messages sent) that SURVIVE account deletion
     // by design: a deleted-then-re-registered user keeps their badge
     // progress. wipe-data.sh still drops it (a full dev reset resets all).

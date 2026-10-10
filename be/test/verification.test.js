@@ -48,6 +48,7 @@ function adminApp(ctx) {
       redis: ctx.redis,
       config: (await import('../src/config.js')).config,
       diagnostics: ctx.mongo.db.collection('diagnostics'),
+      reports: ctx.mongo.db.collection('reports'),
       settings: ctx.mongo.db.collection('settings'),
       messages: ctx.mongo.db.collection('messages'),
       idDocs: ctx.mongo.db.collection('id_docs'),

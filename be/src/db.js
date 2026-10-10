@@ -19,6 +19,9 @@ export async function connectMongo(url) {
   );
   // Diagnostics reports ('Send diagnostics' button): auto-expire after 30 days.
   await db.collection('diagnostics').createIndex({ ts: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 });
+  // Abuse reports ('Report user' in the chat menu): moderation records — NO
+  // TTL (kept until the admin deletes them); indexed for newest-first lists.
+  await db.collection('reports').createIndex({ ts: -1 });
   // Identity-verification document photos (image binaries; ONLY the admin
   // reads them; deleted on demand after review — see VERIFICATION docs).
   await db.collection('id_docs').createIndex({ ul: 1 }, { unique: true });

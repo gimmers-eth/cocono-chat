@@ -698,3 +698,37 @@ test('device IP flap: latest IP tracked per device; >budget changes in window = 
     await teardown();
   }
 });
+
+test('device self-report: installed flag lands on the token’s own device row', async () => {
+  const { app, mongo, teardown } = await setupApp(LIMITS);
+  try {
+    const u = 'alice';
+    const dMain = 'main-device-0001';
+    const main = makeClient();
+    assert.equal((await signupUser(app, main, u, dMain)).statusCode, 201);
+    const auth = { authorization: `Bearer ${await getToken(app, main, u, dMain)}` };
+
+    // auth required, boolean enforced
+    assert.equal((await app.inject({ method: 'PUT', url: '/api/devices/self', payload: { installed: true } })).statusCode, 401);
+    assert.equal((await app.inject({ method: 'PUT', url: '/api/devices/self', headers: auth, payload: { installed: 'yes' } })).statusCode, 400);
+
+    const ok = await app.inject({ method: 'PUT', url: '/api/devices/self', headers: auth, payload: { installed: true } });
+    assert.equal(ok.statusCode, 200, ok.body);
+    assert.deepEqual(ok.json(), { updated: dMain, installed: true });
+
+    let doc = await mongo.db.collection('users').findOne({ ul: u });
+    let dev = doc.devices.find((x) => x.id === dMain);
+    assert.equal(dev.installed, true);
+    assert.ok(dev.installedAt, 'report timestamp kept');
+
+    // flip to tab-mode: the same device row updates in place (false is a
+    // real verdict, not a cleared field — unknown stays null only when
+    // NOTHING was ever reported)
+    await app.inject({ method: 'PUT', url: '/api/devices/self', headers: auth, payload: { installed: false } });
+    doc = await mongo.db.collection('users').findOne({ ul: u });
+    dev = doc.devices.find((x) => x.id === dMain);
+    assert.equal(dev.installed, false, 'tab-mode re-report flips the flag');
+  } finally {
+    await teardown();
+  }
+});
