@@ -279,7 +279,9 @@ test('user stats: vouch counts are EXCLUSIVE stage buckets', async () => {
 
     const stats = await app.inject({ method: 'GET', url: '/api/users/carol/stats', headers: hB });
     assert.equal(stats.statusCode, 200);
-    assert.deepEqual(stats.json(), { u: 'carol', addedBy: 0, verifiedBy: 0, trustedBy: 1, coco: 3, socialTrusted: false, premium: false });
+    // malicious/banned: the staff-moderation marks ride every stats read
+    // (lib/moderation.js) — clean account here, both false
+    assert.deepEqual(stats.json(), { u: 'carol', addedBy: 0, verifiedBy: 0, trustedBy: 1, coco: 3, socialTrusted: false, premium: false, malicious: false, banned: false });
 
     // UNVERIFIED vouches carry NO weight: a throwaway cannot boost anyone…
     const dave = makeClient();
@@ -299,7 +301,7 @@ test('user stats: vouch counts are EXCLUSIVE stage buckets', async () => {
     // vouch sits mid-ladder (alice adds+verifies dave… use carol as voucher)
     await trustAndVerifyTargetStep2(app, tC, hB);
     const bStats = await app.inject({ method: 'GET', url: '/api/users/bobby/stats', headers: { authorization: `Bearer ${tC}` } });
-    assert.deepEqual(bStats.json(), { u: 'bobby', addedBy: 0, verifiedBy: 1, trustedBy: 0, coco: 1, socialTrusted: false, premium: false });
+    assert.deepEqual(bStats.json(), { u: 'bobby', addedBy: 0, verifiedBy: 1, trustedBy: 0, coco: 1, socialTrusted: false, premium: false, malicious: false, banned: false });
 
     // unknown -> 404, counts never expose WHO
     assert.equal((await app.inject({ method: 'GET', url: '/api/users/nosuchuser/stats', headers: hB })).statusCode, 404);

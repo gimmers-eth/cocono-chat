@@ -24,6 +24,7 @@
 // final slot.
 import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
+import { timeoutActive } from './moderation.js';
 
 export class Badge {
   id = null;
@@ -146,10 +147,11 @@ export function badgeScore(badges, config) {
 /** What may sit next to the name: an owned badge id, or null (auto). */
 /**
  * The badge a NAME may show: only admin-VERIFIED accounts display one, and
- * only what they explicitly chose. '' / undefined / unverified → none.
+ * only what they explicitly chose. '' / undefined / unverified → none. A
+ * staff TIMEOUT reads as unverified here (lib/moderation.js).
  */
 export function visibleDisplayBadge(user) {
-  if (user?.verified !== true) return null;
+  if (user?.verified !== true || timeoutActive(user)) return null;
   const d = user.displayBadge;
   return d && d !== '' ? d : null;
 }

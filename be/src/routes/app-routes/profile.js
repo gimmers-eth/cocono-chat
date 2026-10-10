@@ -4,6 +4,7 @@ import { USERNAME_RE } from '../../lib/username.js';
 import { createNotifier } from '../../lib/notify.js';
 import { badgesFor, badgeScore, validDisplayBadge, visibleDisplayBadge } from '../../lib/badges.js';
 import { effectiveLimit } from '../../lib/limits.js';
+import { effectiveVerified, moderationFlags } from '../../lib/moderation.js';
 
 // Profiles: a short bio (≤ PROFILE_BIO_MAX_LEN) + a tiny avatar
 // (≤ PROFILE_AVATAR_MAX_BYTES, JPEG only — clients resize on-canvas before
@@ -114,7 +115,7 @@ export default async function profileRoutes(app, { users, redis, config, profile
       return fail(reply, 'invalid_username', 'Malformed username', 400);
     }
     const ul = username.toLowerCase();
-    const targetDoc = await users.findOne({ ul }, { projection: { _id: 1, verified: 1, premium: 1, premiumAt: 1, awards: 1, displayBadge: 1 } });
+    const targetDoc = await users.findOne({ ul }, { projection: { _id: 1, verified: 1, premium: 1, premiumAt: 1, awards: 1, displayBadge: 1, timeoutUntil: 1, banned: 1 } });
     if (!targetDoc) return fail(reply, 'unknown_account', 'No such user', 404);
 
     const [prof, viewerDoc, targetUserDoc] = await Promise.all([
@@ -123,12 +124,17 @@ export default async function profileRoutes(app, { users, redis, config, profile
       ul === viewer ? null : users.findOne({ ul }, { projection: { friends: 1 } }),
     ]);
     const mutual = ul === viewer || (hasAdded(viewerDoc, ul) && hasAdded(targetUserDoc, viewer));
-    // photos require BOTH mutual-add and the target's ID verification
-    const maySeePhoto = ul === viewer || (mutual && targetDoc.verified === true);
+    // photos require BOTH mutual-add and the target's ID verification —
+    // and a staff TIMEOUT withdraws that verification for as long as it
+    // runs (the photo was shown under a trust state just revoked)
+    const maySeePhoto = ul === viewer || (mutual && effectiveVerified(targetDoc));
 
     const targetBadges = badgesFor(targetDoc ?? {});
     return {
       u: ul,
+      // staff moderation marks (public trust metadata): the profile sheet
+      // raises the staff warning / ban notice from these (lib/moderation.js)
+      ...moderationFlags(targetDoc),
       // badges are as public as the certificate they replace: name chips and
       // the profile sheet render straight from this
       premium: targetDoc.premium === true,

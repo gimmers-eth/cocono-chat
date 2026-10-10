@@ -68,6 +68,12 @@ export default async function authRoutes(app, { users, redis, config, settings ,
     if (!publicKey || !verifySignature(publicKey, Buffer.from(n, 'utf8'), s)) {
       return fail(reply, 'bad_signature', 'Nonce signature does not verify', 401);
     }
+    // Staff BAN: the keys are real, the account simply may not use the
+    // platform (lib/moderation.js). Data stays intact — unban resumes.
+    if (user.banned === true) {
+      return fail(reply, 'account_banned',
+        'This account has been banned by CoCoNo staff. Your data is preserved; contact support if you believe this is a mistake.', 403);
+    }
 
     await users.updateOne(
       { ul, 'devices.id': d },

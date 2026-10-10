@@ -2,6 +2,7 @@ import { fail } from '../shared.js';
 import { cocoScore } from '../../lib/cocoScore.js';
 import { badgeScore, badgesFor, visibleDisplayBadge } from '../../lib/badges.js';
 import { normUl } from '../../lib/shares.js';
+import { cocoPenalty, timeoutActive } from '../../lib/moderation.js';
 
 // ---- GOD VIEW: the whole social graph, computed on demand ---------------
 // Three edge kinds, all derived from data the server already holds:
@@ -36,7 +37,10 @@ const GRAPH_ID = 'godview';
 function vouchBuckets(docs) {
   const byUl = new Map(docs.map((d) => [d.ul, { addedBy: 0, verifiedBy: 0, trustedBy: 0 }]));
   for (const doc of docs) {
-    const voucherCounts = doc.verified === true;
+    // EFFECTIVE verified: a staff-timed-out voucher's word counts for
+    // nothing while its timeout runs (lib/moderation.js, mirrors
+    // routes/app-routes/userStats.js)
+    const voucherCounts = doc.verified === true && !timeoutActive(doc);
     for (const f of doc.friends ?? []) {
       const entry = typeof f === 'string' ? { u: f } : f;
       const target = byUl.get(normUl(entry?.u));
@@ -103,6 +107,9 @@ export async function buildGraphSnapshot({ users, shares, contacts, profiles, co
     projection: {
       u: 1, ul: 1, verified: 1, premium: 1, displayBadge: 1, awards: 1,
       createdAt: 1, ref: 1, friends: 1, 'devices.id': 1,
+      // staff moderation (lib/moderation.js): the graph shows the danger
+      // mark and scores the CoCo penalty exactly like the live routes
+      timeoutUntil: 1, banned: 1,
     },
   }).sort({ createdAt: 1 }).toArray();
   const avatarUls = new Set(
@@ -114,13 +121,15 @@ export async function buildGraphSnapshot({ users, shares, contacts, profiles, co
     const held = badgesFor(doc);
     const b = buckets.get(doc.ul) ?? { addedBy: 0, verifiedBy: 0, trustedBy: 0 };
     const { score, trusted } = cocoScore(
-      { verifiedBy: b.verifiedBy, trustedBy: b.trustedBy, badgePoints: badgeScore(held, config) },
+      { verifiedBy: b.verifiedBy, trustedBy: b.trustedBy, badgePoints: badgeScore(held, config), penalty: cocoPenalty(doc, config) },
       doc.createdAt ?? new Date(0),
     );
     return {
       ul: doc.ul,
       u: doc.u ?? doc.ul,
-      verified: doc.verified === true,
+      verified: doc.verified === true && !timeoutActive(doc),
+      malicious: timeoutActive(doc),
+      banned: doc.banned === true,
       premium: doc.premium === true,
       badge: visibleDisplayBadge(doc),
       badges: held.map((x) => x.id),

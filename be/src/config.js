@@ -220,6 +220,9 @@ export const config = {
   cocoTrustMinVouchers: numOf(env.COCO_TRUST_MIN_VOUCHERS, 2),
   // flat reputation gift for PREMIUM subscribers (gold certificate)
   cocoPremiumBonus: numOf(env.COCO_PREMIUM_BONUS, 5),
+  // flat CoCo hit a STAFF-TIMED-OUT account carries while the clock runs
+  // (lib/moderation.js) — big enough to bury any reputation a scammer built
+  cocoTimeoutPenalty: numOf(env.COCO_TIMEOUT_PENALTY, 1000),
   // accounts created before this instant are Early-Bird eligible (capped)
   earlyBirdDeadline: env.EARLY_BIRD_DEADLINE || '2026-12-31T23:59:59Z',
   // badge caps (seat counts) — config so ops/tests can shrink them

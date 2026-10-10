@@ -5,7 +5,7 @@ import fastifyStatic from '@fastify/static';
 import { verifyJwt } from './lib/jwt.js';
 import { rateLimit, setRateLimitsGate } from './lib/rateLimit.js';
 import { effectiveLimit } from './lib/limits.js';
-import { registerSecurityHeaders, limited } from './routes/shared.js';
+import { registerSecurityHeaders, limited, fail } from './routes/shared.js';
 import appRoutes from './routes/app-routes/index.js';
 import { resolveAppName } from './routes/app-routes/appInfo.js';
 import { resetLimitsCache } from './lib/limits.js';
@@ -69,6 +69,9 @@ app.addHook('onSend', async (request, reply, payload) => {
   // Parse the bearer token up front; routes decide whether to require it.
   // H4 fix: also re-check that the token's device is still registered — a
   // removed device loses access immediately, not at token expiry.
+  // BAN fix: a staff-BANNED account is locked out of EVERY authenticated
+  // call and the WS (lib/moderation.js) — the token stays cryptographically
+  // valid, the account doc refuses service. Data stays untouched.
   app.decorateRequest('auth', null);
   app.addHook('onRequest', async (request, reply) => {
     const header = request.headers.authorization ?? '';
@@ -76,7 +79,11 @@ app.addHook('onSend', async (request, reply, payload) => {
     const payload = verifyJwt(header.slice(7), config.jwtSecret);
     if (!payload) return;
 
-    const user = await users.findOne({ ul: payload.sub }, { projection: { 'devices.id': 1 } });
+    const user = await users.findOne({ ul: payload.sub }, { projection: { 'devices.id': 1, banned: 1 } });
+    if (user?.banned === true) {
+      return fail(reply, 'account_banned',
+        'This account has been banned by CoCoNo staff. Your data is preserved; contact support if you believe this is a mistake.', 403);
+    }
     if (user?.devices.some((dev) => dev.id === payload.d)) {
       request.auth = payload;
       // Device egress-IP tracking + FLAP limiter: the latest IP per device

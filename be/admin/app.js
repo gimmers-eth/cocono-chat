@@ -42,6 +42,44 @@ const fmtDuration = (sec) => {
   if (sec < 3600) return `${Math.floor(sec / 60)}m`;
   return `${Math.floor(sec / 3600)}h`;
 };
+// Remaining TIME of a staff timeout — reads like a countdown, not a
+// duration: days first, then h/m. Admin-only data (the users listing carries
+// timeoutRemainingSec; app routes never expose the clock).
+const fmtRemaining = (sec) => {
+  if (!sec || sec <= 0) return 'expired';
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+};
+// ---- STAFF MODERATION (timeout + ban) — server lib/moderation.js ----
+// The timeout presets the Reports page and the user panel offer. 36500d is
+// the "100 years" permanent-grade mark. The effect summary lives in the
+// confirm text — an operator must see what they are about to do before
+// clicking.
+const TIMEOUT_PRESETS = [[1, '1d'], [7, '7d'], [30, '30d'], [36500, '100y']];
+const MOD_TIMEOUT_TEXT = (ul, label, days) => `Timeout @${ul} for ${label}?\n\n`
+  + 'The account will ACT LIKE AN UNVERIFIED ONE while the clock runs: '
+  + 'every user sees the DANGER icon and the "identified as malicious by '
+  + 'CoCoNo staff" warning, and it takes -1000 CoCo.'
+  + (days >= 36500 ? '\n\n100 YEARS ≈ PERMANENT (only clearing it by hand lifts it).' : '');
+const MOD_BAN_TEXT = (ul, on) => on
+  ? `BAN @${ul}?\n\nThe account can NO LONGER USE the platform (login, API, WS all refused) — every byte of its data stays intact and an unban resumes exactly where it stopped.`
+  : `Lift the BAN on @${ul}? The account may use the platform again immediately.`;
+// the one PUT both surfaces share (timeoutDays and/or banned)
+const moderationPut = (ul, body) => api(`/api/admin/users/${encodeURIComponent(ul)}/moderation`, {
+  method: 'PUT', body: JSON.stringify(body),
+});
+// a timed-out/banned account is a MARKED account everywhere the panel names
+// it: the danger chip rides the user list and the reports' Against column
+const modChip = (u) => {
+  if (!u) return '';
+  if (u.banned) return ' <span class="badge mod-danger" title="BANNED by staff — platform use refused, data intact">banned</span>';
+  if (u.malicious) return ` <span class="badge mod-danger" title="TIMED OUT by staff — acts unverified, danger icon for everyone">malicious ${esc(fmtRemaining(u.timeoutRemainingSec))}</span>`;
+  return '';
+};
 const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // mirrors the client's block-reason enum (ids enforced by the server).
@@ -189,7 +227,8 @@ function renderUsers(users) {
         <td>${fmtDate(u.createdAt)}</td>
         <td>${u.verified
           ? '<span class="badge ok-badge">verified</span>'
-          : '<span class="badge no-badge">not verified</span>'}</td>
+          : '<span class="badge no-badge">not verified</span>'}${modChip(u)}${u.verified && u.malicious
+          ? '<br /><span class="dim small-note">treated as unverified while the timeout runs</span>' : ''}</td>
         <td class="mono">${u.maxDevices}</td>
         <td><button class="tiny" data-view-user="${esc(u.ul)}">view more</button></td>
       </tr>`,
@@ -431,9 +470,35 @@ const accountHead = (u) => `
     <div class="dim">created ${fmtDate(u.createdAt)}</div>
   </div>`;
 
+// ---- Staff moderation block for the user panel (the details tab IS the
+// user details view): timeout state + REMAINING TIME (admin-only — the app
+// routes expose the malicious/banned flags but never the clock), the same
+// preset buttons as the Reports page, and the ban switch. The 10s poll
+// re-renders this, so the countdown is always live.
+const moderationSection = (u) => `
+    <div class="sec">
+      <h3>Staff moderation</h3>
+      ${u.banned
+        ? `<p><span class="badge mod-danger">banned</span> <span class="dim small-note">since ${esc(fmtDate(u.bannedAt))} — platform use refused, ALL data intact; unban resumes as it was</span></p>`
+        : u.malicious
+          ? `<p><span class="badge mod-danger">timed out — treated as malicious</span><br />
+             <span class="dim small-note">until ${esc(fmtDate(u.timeoutUntil))} · <strong class="mod-remaining">${esc(fmtRemaining(u.timeoutRemainingSec))}</strong> remaining</span><br />
+             <span class="dim small-note">acts like an UNVERIFIED user everywhere (danger icon + staff warning + −1000 CoCo)${u.verified ? ' — stored verification returns when the clock runs out' : ''}</span></p>`
+          : '<p class="dim small-note">no active timeout or ban</p>'}
+      <div class="row mod-actions">
+        ${TIMEOUT_PRESETS.map(([days, label]) => `<button class="tiny${u.malicious && !u.banned ? ' mod-live' : ''}"
+          data-timeout="${esc(u.ul)}" data-days="${days}" title="${esc(MOD_TIMEOUT_TEXT(u.ul, label, days).replaceAll('\n', ' '))}">${label}</button>`).join('')}
+        ${u.malicious ? `<button class="linkish" data-timeout="${esc(u.ul)}" data-days="0">clear timeout</button>` : ''}
+        ${u.banned
+          ? `<button class="tiny mod-live" data-ban="${esc(u.ul)}" data-on="0">unban</button>`
+          : '<button class="danger tiny" data-ban="' + esc(u.ul) + '" data-on="1">ban</button>'}
+      </div>
+    </div>`;
+
 const PANEL_SECTIONS = {
   // What the world (well — mutual friends) sees: the client's public profile.
   details: (u) => `${accountHead(u)}
+    ${moderationSection(u)}
     <div class="sec">
       <h3>Origin</h3>
       ${u.ref
@@ -709,20 +774,42 @@ function renderReports(reports) {
         </div>
       </details>`
     : '<span class="dim">none shared</span>';
+  // the staff-action column: timeout presets (the account then ACTS
+  // UNVERIFIED, carries the danger mark + staff warning everywhere and
+  // takes -1000 CoCo) and the BAN (platform use refused, data intact).
+  // State chips read from lastUsers — renderUsers runs before this in
+  // refresh(), and the 10s poll keeps remaining time live.
+  const actionCell = (r) => {
+    const peer = String(r.peer ?? '').toLowerCase();
+    if (!peer) return '<span class="dim">—</span>';
+    const u = lastUsers.find((x) => x.ul === peer);
+    const presets = TIMEOUT_PRESETS
+      .map(([days, label]) => `<button class="tiny${u?.malicious && !u.banned ? ' mod-live' : ''}"
+        data-timeout="${esc(peer)}" data-days="${days}" title="${esc(MOD_TIMEOUT_TEXT(peer, label, days).replaceAll('\n', ' '))}">${label}</button>`)
+      .join('');
+    const banBtn = u?.banned
+      ? `<button class="tiny mod-live" data-ban="${esc(peer)}" data-on="0">unban</button>`
+      : '<button class="danger tiny" data-ban="' + esc(peer) + '" data-on="1">ban</button>';
+    const live = (u?.malicious || u?.banned)
+      ? `<div class="small-note">${modChip(u)}${u.malicious ? ` <button class="linkish" data-timeout="${esc(peer)}" data-days="0">clear timeout</button>` : ''}</div>`
+      : '';
+    return `<div class="row mod-actions">${presets}${banBtn}</div>${live}`;
+  };
   $('reports-list').innerHTML = `<table class="rel-table reports-table">
     <thead><tr>
-      <th>When</th><th>Reporter</th><th>Against</th><th>Reason</th><th>Description</th><th>Chat history</th><th>Outcome</th><th></th>
+      <th>When</th><th>Reporter</th><th>Against</th><th>Reason</th><th>Description</th><th>Chat history</th><th>Outcome</th><th>Staff action</th><th></th>
     </tr></thead>
     <tbody>${reports.map((r) => `<tr>
       <td class="mono dim">${fmtDate(r.ts)}<br />${esc(r.ip ?? '')}</td>
       <td><button class="linkish" data-view-user="${esc(r.account ?? '')}">@${esc(r.account ?? '?')}</button></td>
-      <td><button class="linkish" data-view-user="${esc(r.peer ?? '')}">@${esc(r.peer ?? '?')}</button></td>
+      <td><button class="linkish" data-view-user="${esc(r.peer ?? '')}">@${esc(r.peer ?? '?')}</button>${modChip(lastUsers.find((x) => x.ul === String(r.peer ?? '').toLowerCase()))}</td>
       <td><span class="badge report-reason">${esc(REPORT_REASON_LABELS[r.reason] ?? r.reason)}</span></td>
       <td class="report-desc">${esc(r.description ?? '')}</td>
       <td>${transcriptCell(r)}</td>
       <td>${r.blocked
         ? '<span class="badge report-blocked">blocked</span>'
         : '<span class="dim">report only</span>'}</td>
+      <td>${actionCell(r)}</td>
       <td><button class="danger tiny" data-del-report="${esc(r.id)}">delete</button></td>
     </tr>`).join('')}</tbody>
   </table>`;
@@ -1073,6 +1160,27 @@ document.addEventListener('click', (e) => {
   if (delDiag) {
     return run(`Deleted diagnostics report`, () =>
       api(`/api/admin/diagnostics/${encodeURIComponent(delDiag)}`, { method: 'DELETE' }));
+  }
+
+  // ---- STAFF MODERATION: timeout presets + ban (server lib/moderation.js)
+  const timeoutBtn = e.target.closest?.('[data-timeout]');
+  if (timeoutBtn) {
+    const ul = timeoutBtn.dataset.timeout;
+    const days = Number(timeoutBtn.dataset.days);
+    if (!days) {
+      if (!confirm(`Clear the timeout on @${ul}? The account returns to its stored verification state and the danger marks disappear.`)) return;
+      return run(`Cleared timeout on @${ul}`, () => moderationPut(ul, { timeoutDays: null }));
+    }
+    const label = TIMEOUT_PRESETS.find(([d]) => d === days)?.[1] ?? `${days}d`;
+    if (!confirm(MOD_TIMEOUT_TEXT(ul, label, days))) return;
+    return run(`Timed out @${ul} for ${label}`, () => moderationPut(ul, { timeoutDays: days }));
+  }
+  const banBtn = e.target.closest?.('[data-ban]');
+  if (banBtn) {
+    const ul = banBtn.dataset.ban;
+    const on = banBtn.dataset.on === '1';
+    if (!confirm(MOD_BAN_TEXT(ul, on))) return;
+    return run(`${on ? 'Banned' : 'Unbanned'} @${ul}`, () => moderationPut(ul, { banned: on }));
   }
 
   const delReport = e.target.closest('[data-del-report]')?.dataset.delReport;

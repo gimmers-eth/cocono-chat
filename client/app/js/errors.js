@@ -41,6 +41,9 @@ export const ERROR_TEXT = {
   session_expired: 'Session expired — log in again.',
   not_authenticated: 'Log in again.',
   unauthorized: 'Log in again.',
+  // the staff BAN (server lib/moderation.js): honest, short, says the data
+  // is safe — the account is refused, not deleted
+  account_banned: 'Banned by CoCoNo staff — this account may not use the platform. Your data is preserved.',
   identity_exists: 'This browser already has an account.',
   no_identity: 'No saved account here — sign in first.',
   not_supported: 'Not supported by this device.',

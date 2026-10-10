@@ -7,6 +7,7 @@ import { verifyEnvelope } from './envelope.js';
 import { devKey, sendJson, PENDING_BATCH } from './protocol.js';
 import { sendBlindPush, presenceKey, pushSentKey } from '../../lib/push.js';
 import { recordContactEdge } from '../../lib/shares.js';
+import { effectiveVerified } from '../../lib/moderation.js';
 
 export function createHandlers({ users, redis, pub, config, messages, settings, counters, contacts }) {
   async function handleSend(socket, request, body, auth) {
@@ -31,6 +32,11 @@ export function createHandlers({ users, redis, pub, config, messages, settings, 
     }
 
     const sender = await users.findOne({ ul: auth.sub });
+    // BAN fix, defense in depth: a socket opened BEFORE the ban stays live
+    // until the transport's next handshake, but nothing new is accepted
+    // from a banned account (lib/moderation.js; the HTTP bearer hook and
+    // the upgrade gate close the rest of the window)
+    if (sender?.banned === true) return ack(false, 'account_banned');
     const senderDevice = sender?.devices.find((dev) => dev.id === auth.d);
     if (!senderDevice) return ack(false, 'unknown_device');
 
@@ -64,8 +70,10 @@ export function createHandlers({ users, redis, pub, config, messages, settings, 
     // only message someone who added them as a friend, or who messaged
     // them first (so replies always work). Verified accounts may message
     // anyone. This is the anti-spam gate a public messenger needs (P0 #1
-    // sibling): names alone cannot harvest the directory.
-    if (config.coldSendRequiresVerification && !sender.verified && rul !== auth.sub) {
+    // sibling): names alone cannot harvest the directory. EFFECTIVE
+    // verified: a staff-timed-out account loses the cold-send privilege
+    // for as long as its timeout runs (lib/moderation.js).
+    if (config.coldSendRequiresVerification && !effectiveVerified(sender) && rul !== auth.sub) {
       const addedMe = (recipient.friends ?? []).some((f) => (typeof f === 'string' ? f : f.u) === auth.sub);
       if (!addedMe) {
         const firstContact = await messages.findOne({ 'from.ul': rul, 'to.ul': auth.sub }, { projection: { _id: 1 } });

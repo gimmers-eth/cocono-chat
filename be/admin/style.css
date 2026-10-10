@@ -618,3 +618,19 @@ button.gv-big { padding: .6rem 1.4rem; font-size: .95rem; border-radius: 10px; }
 .sh-parent .reason-icon { color: var(--gv-brand-lit); margin-right: .1em; }
 #user-shares .sec .linkish { background: none; border: 0; color: var(--accent); cursor: pointer; font: inherit; padding: 0; }
 #user-shares .sec .linkish:hover { text-decoration: underline; }
+
+/* ---- STAFF MODERATION (timeout + ban) ---- */
+/* the danger chip on marked accounts (user list, reports, user panel) —
+   same chip rhythm as ok/no-badge, red like no-badge but bolder: a staff
+   verdict is an alarm, not a status */
+.badge.mod-danger {
+  background: rgba(239, 105, 117, 0.22); color: var(--danger);
+  border: 1px solid currentColor; font-weight: 700;
+}
+/* the preset button row (Reports action column + user panel): one flex row
+   with the existing .row gap rhythm; the live/current action reads pressed */
+.mod-actions { flex-wrap: wrap; margin-top: .2rem; }
+.mod-actions button { margin-right: 0; }
+.mod-actions .mod-live { border-color: var(--danger); color: var(--danger); }
+/* the panel's countdown line rides the existing .small-note rhythm */
+.mod-remaining { color: var(--danger); }

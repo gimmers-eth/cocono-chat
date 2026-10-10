@@ -4,6 +4,7 @@ import { fail, limited, requireAuth } from '../shared.js';
 import { cocoScore } from '../../lib/cocoScore.js';
 import { badgesFor, badgeScore } from '../../lib/badges.js';
 import { effectiveLimit } from '../../lib/limits.js';
+import { cocoPenalty, moderationFlags, verifiedVoucherFilter } from '../../lib/moderation.js';
 
 // GET /api/users/:username/stats — COUNTS ONLY (never who), about a
 // profile's reputation. The three buckets are EXCLUSIVE stages of each
@@ -35,14 +36,31 @@ export default async function userStatsRoutes(app, { users, redis, config, setti
       // identity, so its 'verification' or 'trust' is self-service weight —
       // throwaway-account boosting is exactly what this gate closes.
       // (addedBy stays a plain visibility count: it carries no score.)
-      users.countDocuments({ verified: true, friends: { $elemMatch: { u: ul, v: true, t: { $ne: true } } } }),
-      users.countDocuments({ verified: true, friends: { $elemMatch: { u: ul, t: true } } }),
+      // VERIFIED MEANS EFFECTIVELY VERIFIED: a staff-timed-out voucher's
+      // word counts for nothing while its timeout runs (lib/moderation.js).
+      users.countDocuments({
+        ...verifiedVoucherFilter(),
+        friends: { $elemMatch: { u: ul, v: true, t: { $ne: true } } },
+      }),
+      users.countDocuments({
+        ...verifiedVoucherFilter(),
+        friends: { $elemMatch: { u: ul, t: true } },
+      }),
     ]);
-    // score + Social verdict from the shared calculation module
+    // score + Social verdict from the shared calculation module; a live
+    // staff TIMEOUT subtracts cocoTimeoutPenalty (-1000 CoCo by default)
     const { score, trusted } = cocoScore(
-      { verifiedBy, trustedBy, badgePoints: badgeScore(badgesFor(target), config) },
+      { verifiedBy, trustedBy, badgePoints: badgeScore(badgesFor(target), config), penalty: cocoPenalty(target, config) },
       target.createdAt,
     );
-    return { u: ul, addedBy, verifiedBy, trustedBy, coco: score, socialTrusted: trusted, premium: target.premium === true };
+    return {
+      u: ul, addedBy, verifiedBy, trustedBy, coco: score, socialTrusted: trusted,
+      premium: target.premium === true,
+      // staff moderation marks (public trust metadata, same class as the
+      // verified/premium flags): the client swaps the trust icon for the
+      // danger mark and shows the profile warning. NO clock — remaining
+      // time is admin-only.
+      ...moderationFlags(target),
+    };
   });
 }

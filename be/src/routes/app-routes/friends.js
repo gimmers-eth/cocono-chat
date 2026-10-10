@@ -4,6 +4,7 @@ import { USERNAME_RE } from '../../lib/username.js';
 import { effectiveLimit } from '../../lib/limits.js';
 import { createNotifier } from '../../lib/notify.js';
 import { applyBlock } from '../../lib/blockAccount.js';
+import { effectiveVerified } from '../../lib/moderation.js';
 
 // Friends: a per-account, ONE-WAY trust list ANCHORED TO IDENTITY KEYS.
 //
@@ -88,7 +89,7 @@ export default async function friendsRoutes(app, { users, redis, config, setting
   // week is the real ceiling, the day is only the throttle, so verified
   // accounts never out-vouch unverified ones over time. One resolver for
   // BOTH enforcement and the stage-limits display — they can never drift.
-  const verifyDailyLimiter = (meDoc) => (meDoc?.verified === true ? 'fvdayv' : 'fvday');
+  const verifyDailyLimiter = (meDoc) => (effectiveVerified(meDoc) ? 'fvdayv' : 'fvday');
 
   // Real-time relationship changes ride the shared control-nudge pattern
   // (see lib/notify.js): when MY list gains/loses a peer, the PEER's own
@@ -161,7 +162,7 @@ export default async function friendsRoutes(app, { users, redis, config, setting
     const denied = requireAuth(request, reply);
     if (denied) return denied;
     const ul = request.auth.sub;
-    const meDoc = await users.findOne({ ul }, { projection: { verified: 1 } });
+    const meDoc = await users.findOne({ ul }, { projection: { verified: 1, timeoutUntil: 1 } });
     const spec = [
       ['verifyDaily', verifyDailyLimiter(meDoc)], ['verifyWeekly', 'fvweek'],
       ['trustDaily', 'ftday'], ['trustWeekly', 'ftweek'],
@@ -250,7 +251,7 @@ export default async function friendsRoutes(app, { users, redis, config, setting
     if (!target) return fail(reply, 'bad_username', 'Invalid username', 400);
     const on = request.body?.[bodyKey] === true;
     const ul = request.auth.sub;
-    const user = await users.findOne({ ul }, { projection: { friends: 1, verified: 1 } });
+    const user = await users.findOne({ ul }, { projection: { friends: 1, verified: 1, timeoutUntil: 1 } });
     const list = normalize(user?.friends);
     const existing = list.find((f) => f.u === target);
     if (!existing) return fail(reply, 'not_friends', 'Add this user first', 404);

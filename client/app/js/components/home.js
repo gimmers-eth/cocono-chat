@@ -6,12 +6,12 @@ import { $, setStatus, fmtTime, confirmModal, openLightbox, toast, animateSheetC
 import { humanError } from '../errors.js';
 import { createPeerSuggestions, makeTrustDecorator } from './peers.js';
 import { iconEl } from '../icons.js';
-import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, clearAllMessages, loadPeerVerifications, loadPeerPremiums, loadPeerAvatars, rememberPeerAvatar, rememberPeerVerified, rememberPeerChip, loadPeerChips, AVATARS_EVENT, FRIENDS_EVENT, loadPeerBlocked, saveBlockedSet, rememberPeerMuted, loadPeerMuted, loadPeerTags, saveTagServerMap } from '../store.js';
+import { allMessages, isUnread, loadFriends, loadPins, clearLocalTrustData, clearAllMessages, loadPeerVerifications, loadPeerPremiums, loadPeerAvatars, rememberPeerAvatar, rememberPeerVerified, rememberPeerModeration, loadPeerModeration, PEERS_EVENT, rememberPeerChip, loadPeerChips, AVATARS_EVENT, FRIENDS_EVENT, loadPeerBlocked, saveBlockedSet, rememberPeerMuted, loadPeerMuted, loadPeerTags, saveTagServerMap } from '../store.js';
 import { currentFilter, wireFilterBar } from '../tags.js';
 import { blockUserWithConfirm, unblockUser, blockReasonLabel, blockReasonIcon } from '../blocks.js';
 import { purgeLocalAccount } from '../accountPurge.js';
 import { mountLine, avatarStack, setAvatar, verifiedSubEl, doubleLine } from './userline.js';
-import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl } from './peername.js';
+import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl, moderationOf } from './peername.js';
 import { guessDeviceName, humanPlatform } from '../devices.js';
 import { BADGE_UI, nameChipEl } from '../badges.js';
 import { refreshSettingsUI } from '../install.js';
@@ -503,6 +503,9 @@ export function createHome({ client, chat, onLogout }) {
           if (peer !== selfUl) {
             rememberPeerVerified(peer, undefined, prof.premium);
             rememberPeerChip(peer, prof.displayBadge || null);
+            // staff moderation flags ride the profile read: the sidebar
+            // shows the danger mark without waiting for a chat open
+            rememberPeerModeration(peer, { malicious: prof.malicious, banned: prof.banned });
           } else {
             myBadges = prof.badges ?? myBadges;
             myDisplay = prof.displayBadge ?? myDisplay;
@@ -525,8 +528,8 @@ export function createHome({ client, chat, onLogout }) {
 
   async function renderConversationList() {
     const list = $('conversation-list');
-    const [all, friends, pins, peerVerified, avatars, peerPremium, peerChips, peerBlocked, peerMuted, peerTags] = await Promise.all(
-      [allMessages(), loadFriends(), loadPins(), loadPeerVerifications(), loadPeerAvatars(), loadPeerPremiums(), loadPeerChips(), loadPeerBlocked(), loadPeerMuted(), loadPeerTags()],
+    const [all, friends, pins, peerVerified, avatars, peerPremium, peerChips, peerBlocked, peerMuted, peerTags, peerModeration] = await Promise.all(
+      [allMessages(), loadFriends(), loadPins(), loadPeerVerifications(), loadPeerAvatars(), loadPeerPremiums(), loadPeerChips(), loadPeerBlocked(), loadPeerMuted(), loadPeerTags(), loadPeerModeration()],
     );
     const latestByPeer = new Map();
     for (const m of all) {
@@ -579,6 +582,8 @@ export function createHome({ client, chat, onLogout }) {
         verified: !!ent?.verified,
         trusted: !!ent?.trust,
         conflict: !!pin && !!ent?.pub && pin.p !== ent.pub,
+        // staff TIMEOUT / BAN outranks the ladder (peername.js)
+        moderation: moderationOf(peerModeration.get(peer)),
       });
       // red circle for accounts WITHOUT admin identity verification;
       // only when we actually looked the peer up (Map value false, not undefined)
@@ -883,6 +888,11 @@ export function createHome({ client, chat, onLogout }) {
     window.addEventListener(FRIENDS_EVENT, () => {
       renderConversationList().catch(() => {});
     });
+    // moderation flag learned/changed on any peer — the danger icon lands
+    // in the sidebar without waiting for the next render trigger
+    window.addEventListener(PEERS_EVENT, () => {
+      renderConversationList().catch(() => {});
+    });
     $('btn-self-verify').addEventListener('click', (e) => { e.stopPropagation(); openSettings('verify'); });
     // the whole identity block opens settings (verified → Profile tab,
     // unverified → Verify tab; handled inside openSettings)
@@ -1124,7 +1134,7 @@ export function createHome({ client, chat, onLogout }) {
     rows.sort((x, y) => x.peer.localeCompare(y.peer));
     empty.hidden = rows.length > 0;
     // mirror pulls for the username component (worn chip + identity mark)
-    const [chips, verifiedMap] = await Promise.all([loadPeerChips(), loadPeerVerifications()]);
+    const [chips, verifiedMap, moderationMap] = await Promise.all([loadPeerChips(), loadPeerVerifications(), loadPeerModeration()]);
     const pill = (text, cls) => {
       const p = document.createElement('span');
       p.className = `rel-pill ${cls ?? ''}`;
@@ -1161,12 +1171,15 @@ export function createHome({ client, chat, onLogout }) {
       const cName = document.createElement('td');
       const line = document.createElement('span');
       const ent = r.entry;
-      const state = r.blocked ? PS.BLOCKED
+      // a staff mark OUTRANKS even my own block wall (peername.js)
+      const mod = moderationOf(moderationMap.get(r.peer));
+      const state = r.blocked && !mod ? PS.BLOCKED
         : resolvePeerState({
           gone: !!ent.gone,
           bound: !!ent.trusted,
           verified: !!ent.verified,
           trusted: !!ent.trust,
+          moderation: mod,
         });
       const chip = nameChipEl(chips.get(r.peer) ?? null);
       if (chip) chip.classList.add('name-chip-inline');
