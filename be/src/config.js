@@ -142,6 +142,11 @@ export const config = {
   // admin-tunable app-wide or per user (see lib/limits.js + admin Limits).
   friendVerifyDailyLimit: numOf(env.FRIEND_VERIFY_DAILY_LIMIT, 4),
   friendVerifyDailyWindowSec: numOf(env.FRIEND_VERIFY_DAILY_WINDOW_SEC, 24 * 3600),
+  // ID-verified accounts get a bigger DAILY verification budget (10, not 4):
+  // a proven human can vouch faster. The WEEKLY cap stays 10 for everyone —
+  // the day is a throttle, the week is the real ceiling (slow grinding past
+  // the daily allowance is exactly what the weekly limit exists to stop).
+  friendVerifyDailyVerifiedLimit: numOf(env.FRIEND_VERIFY_DAILY_VERIFIED_LIMIT, 10),
   friendVerifyWeeklyLimit: numOf(env.FRIEND_VERIFY_WEEKLY_LIMIT, 10),
   friendVerifyWeeklyWindowSec: numOf(env.FRIEND_VERIFY_WEEKLY_WINDOW_SEC, 7 * 24 * 3600),
   friendTrustDailyLimit: numOf(env.FRIEND_TRUST_DAILY_LIMIT, 4),

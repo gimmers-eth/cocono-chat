@@ -73,9 +73,6 @@ export function createHome({ client, chat, onLogout }) {
     : sec >= 3600 ? `${Math.ceil(sec / 3600)}h`
       : `${Math.max(1, Math.ceil(sec / 60))}m`);
 
-  // Settings > Limits: a small table of the vouching budgets plus a reset
-  // note line. Cells show what is LEFT (that's what a user is asking when
-  // they open this); an exhausted cell flips red. Offline -> note + dashes.
   // ---- name-badge surface (mine) ----
   function myChipId() {
     // visibility gate: unverified accounts show NO badge name-side, whatever
@@ -142,6 +139,15 @@ export function createHome({ client, chat, onLogout }) {
     }
     host.append(table);
   }
+
+  // Settings > Limits: a small table of the vouching budgets plus a reset
+  // note line. Cells show what is LEFT (that's what a user is asking when
+  // they open this); an exhausted cell flips red. Offline -> note + dashes.
+  // THE BUG THIS ANCHOR GUARDS: an earlier edit MOVED the renderUsage body
+  // here but dropped the USAGE_CELLS const it reads — renderUsage then threw
+  // a silent ReferenceError (openSettings calls it without await) and the
+  // table froze on its '—' placeholders. The const lives beside its function.
+  const USAGE_CELLS = ['usage-vd', 'usage-vw', 'usage-td', 'usage-tw'];
 
   async function renderUsage() {
     const line = $('usage-line');

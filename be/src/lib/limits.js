@@ -40,6 +40,10 @@ export const LIMIT_CATALOG = {
   friends:        { ip: true,  label: 'Friends read (per IP)',      def: (c) => ({ limit: c.friendsIpLimit, windowSec: c.friendsIpWindowSec }) },
   friendschange:  { ip: true,  label: 'Friends change (per IP)',    def: (c) => ({ limit: c.friendsChangeIpLimit, windowSec: c.friendsIpWindowSec }) },
   fvday:          { ip: false, label: 'Verifications / day (acct)', def: (c) => ({ limit: c.friendVerifyDailyLimit, windowSec: c.friendVerifyDailyWindowSec }) },
+  // the SAME daily budget for ID-VERIFIED accounts (bigger: proven humans
+  // vouch faster). Which key applies is resolved per account at the call
+  // site (friends.js verifyDailyLimiter); the week (fvweek) is shared
+  fvdayv:         { ip: false, label: 'Verifications / day (verified acct)', def: (c) => ({ limit: c.friendVerifyDailyVerifiedLimit, windowSec: c.friendVerifyDailyWindowSec }) },
   fvweek:         { ip: false, label: 'Verifications / week (acct)', def: (c) => ({ limit: c.friendVerifyWeeklyLimit, windowSec: c.friendVerifyWeeklyWindowSec }) },
   ftday:          { ip: false, label: 'Trusts / day (acct)',        def: (c) => ({ limit: c.friendTrustDailyLimit, windowSec: c.friendTrustDailyWindowSec }) },
   ftweek:         { ip: false, label: 'Trusts / week (acct)',       def: (c) => ({ limit: c.friendTrustWeeklyLimit, windowSec: c.friendTrustWeeklyWindowSec }) },

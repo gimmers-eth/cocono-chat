@@ -349,6 +349,64 @@ test('friends: per-account verify/trust stage budgets (fvday/ftday) gate the end
   }
 });
 
+test('friends: ID-verified accounts get the bigger DAILY verify budget; the week is shared and unchanged', async () => {
+  const ctx = await setupApp({
+    ...LIMITS,
+    friendVerifyDailyLimit: 1,
+    friendVerifyDailyVerifiedLimit: 3,
+    friendVerifyWeeklyLimit: 10,
+  });
+  const { app, mongo, redis, teardown } = ctx;
+  try {
+    const alice = makeClient();
+    const bobby = makeClient();
+    const a = await signupUser(app, alice, 'alice');
+    const b = await signupUser(app, bobby, 'bobby');
+    const authA = { authorization: `Bearer ${await getToken(app, alice, 'alice', a.d)}` };
+    const authB = { authorization: `Bearer ${await getToken(app, bobby, 'bobby', b.d)}` };
+    await app.inject({ method: 'PUT', url: '/api/me/friends/bobby', headers: authA });
+    await app.inject({ method: 'PUT', url: '/api/me/friends/alice', headers: authB });
+
+    const v = (on) => app.inject({ method: 'PUT', url: '/api/me/friends/bobby/verify',
+      headers: authA, payload: { verified: on } });
+    const limits = () => app.inject({ method: 'GET', url: '/api/me/stage-limits', headers: authA });
+
+    // unverified: the SMALL daily budget applies (fvday, overridden to 1)
+    assert.equal((await v(true)).statusCode, 200); // fvday 1 — spent
+    const capped = await v(true); // attempts still consume (grinding gate)
+    assert.equal(capped.statusCode, 429);
+    assert.match(capped.json().message, /Verification limit: 1 per day/);
+    assert.equal((await limits()).json().verifyDaily.limit, 1, 'display follows the same resolver');
+
+    // admin flips alice to ID-verified (the users-doc flag the resolver reads)
+    await mongo.db.collection('users').updateOne({ ul: 'alice' }, { $set: { verified: true } });
+    const shown = (await limits()).json();
+    assert.equal(shown.verifyDaily.limit, 3, 'verified account sees the fvdayv budget');
+    assert.equal(shown.verifyWeekly.limit, 10, 'the WEEK is untouched by verification');
+    assert.equal(shown.trustDaily.limit, config.friendTrustDailyLimit, 'trust budgets unchanged');
+
+    // enforcement now charges fvdayv, NOT fvday: undoing is free, three
+    // fresh verifications land, the fourth hits the verified-cap wording
+    assert.equal((await v(false)).statusCode, 200);
+    assert.equal((await v(true)).statusCode, 200);
+    assert.equal((await v(false)).statusCode, 200);
+    assert.equal((await v(true)).statusCode, 200);
+    assert.equal((await v(false)).statusCode, 200);
+    assert.equal((await v(true)).statusCode, 200);
+    const vCapped = await v(true);
+    assert.equal(vCapped.statusCode, 429);
+    assert.match(vCapped.json().message, /Verification limit: 3 per day/, 'verified cap named');
+    assert.equal(await redis.get('rl:fvday:alice'), '2', 'the unverified counter stands frozen');
+    assert.equal(await redis.get('rl:fvdayv:alice'), '4', 'fvdayv charged (3 allowed + 1 capped attempt)');
+    // the weekly counter is SHARED across the state flip: 4 allowed calls
+    // spent it (1 unverified + 3 verified) — verification does not buy
+    // extra WEEKLY vouching, exactly the point of keeping it at 10
+    assert.equal(await redis.get('rl:fvweek:alice'), '4');
+  } finally {
+    await teardown();
+  }
+});
+
 test('friends: GET /api/me/stage-limits reports own budgets, spend, and admin tuning', async () => {
   const { app, mongo, teardown } = await setupApp(LIMITS);
   await app.register(limitsAdmin, { config, settings: mongo.db.collection('settings') });

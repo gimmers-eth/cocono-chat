@@ -21,13 +21,15 @@ test('limits: config defaults — IP limiters doubled with 300s windows', () => 
   assert.equal(config.verifyAccountLimit, 40);
   assert.equal(config.msgAccountWindowSec, 300);
   assert.equal(config.userKeysIpLimit, 120);
-  // account budgets: 4/day, 10/week verify AND trust
+  // account budgets: 4/day, 10/week verify AND trust — plus the ID-verified
+  // accounts' bigger DAILY verify budget (10/day; the week stays the cap)
   assert.equal(config.friendVerifyDailyLimit, 4);
+  assert.equal(config.friendVerifyDailyVerifiedLimit, 10);
   assert.equal(config.friendVerifyWeeklyLimit, 10);
   assert.equal(config.friendTrustDailyLimit, 4);
   assert.equal(config.friendTrustWeeklyLimit, 10);
   // catalog covers every budget name and marks them account-scoped
-  for (const n of ['fvday', 'fvweek', 'ftday', 'ftweek']) {
+  for (const n of ['fvday', 'fvdayv', 'fvweek', 'ftday', 'ftweek']) {
     assert.ok(LIMIT_CATALOG[n], `${n} catalogued`);
     assert.equal(LIMIT_CATALOG[n].ip, false, `${n} is account-scoped`);
   }

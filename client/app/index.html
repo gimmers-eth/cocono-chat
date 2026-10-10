@@ -450,6 +450,10 @@
       <ul class="menu-list">
         <li class="menu-row">
           <button id="btn-identity-verify" class="menu-action"></button>
+          <!-- live verify budget under the button (same counters the server
+               enforces on); ID-verified accounts see their higher daily
+               limit automatically — never a guessed copy here -->
+          <p id="identity-verify-budget" class="budget-note" hidden></p>
         </li>
         <li class="menu-row">
           <button id="btn-identity-back" class="menu-action" data-icon="back">Back</button>

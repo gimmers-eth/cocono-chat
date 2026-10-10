@@ -76,6 +76,14 @@ export default async function friendsRoutes(app, { users, redis, config, setting
     return USERNAME_RE.test(ul) ? ul : null;
   }
 
+  // Which DAILY verify budget applies to an account: ID-verified accounts
+  // get the bigger one (fvdayv, default 10 — a proven human can vouch
+  // faster). The weekly budget (fvweek, 10) is SHARED and unchanged: the
+  // week is the real ceiling, the day is only the throttle, so verified
+  // accounts never out-vouch unverified ones over time. One resolver for
+  // BOTH enforcement and the stage-limits display — they can never drift.
+  const verifyDailyLimiter = (meDoc) => (meDoc?.verified === true ? 'fvdayv' : 'fvday');
+
   // Real-time relationship changes ride the shared control-nudge pattern
   // (see lib/notify.js): when MY list gains/loses a peer, the PEER's own
   // view flips too (their addedBack of me unlocks/revokes the verification
@@ -147,8 +155,9 @@ export default async function friendsRoutes(app, { users, redis, config, setting
     const denied = requireAuth(request, reply);
     if (denied) return denied;
     const ul = request.auth.sub;
+    const meDoc = await users.findOne({ ul }, { projection: { verified: 1 } });
     const spec = [
-      ['verifyDaily', 'fvday'], ['verifyWeekly', 'fvweek'],
+      ['verifyDaily', verifyDailyLimiter(meDoc)], ['verifyWeekly', 'fvweek'],
       ['trustDaily', 'ftday'], ['trustWeekly', 'ftweek'],
     ];
     const out = {};
@@ -256,15 +265,16 @@ export default async function friendsRoutes(app, { users, redis, config, setting
       const target = targetOf(request);
       if (!target) return fail(reply, 'bad_username', 'Invalid username', 400);
       const ul = String(request.auth.sub ?? '').toLowerCase();
-      const meDoc = await users.findOne({ ul }, { projection: { friends: 1 } });
+      const meDoc = await users.findOne({ ul }, { projection: { friends: 1, verified: 1 } });
       if (normalize(meDoc?.friends).some((f) => f.u === target)) {
         const tDoc = await users.findOne({ ul: target }, { projection: { friends: 1 } });
         const back = tDoc ? normalize(tDoc.friends).some((f) => f.u === ul) : false;
         if (!back) {
           return fail(reply, 'not_mutual', `${target} has not added you back — verification unlocks once both of you have added each other`, 409);
         }
-        // …and the per-account verify budget must allow it (fvday/fvweek)
-        const over = await stageBudget(reply, ul, ['fvday', 'fvweek'], 'Verification');
+        // …and the per-account verify budget must allow it (fvday, or the
+        // bigger fvdayv for ID-verified accounts / fvweek — see resolver)
+        const over = await stageBudget(reply, ul, [verifyDailyLimiter(meDoc), 'fvweek'], 'Verification');
         if (over) return over;
       }
     }

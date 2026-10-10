@@ -783,6 +783,13 @@ span.avatar.chat-avatar { display: inline-grid; place-items: center; font-size: 
 /* Menu rows: one icon per row (the action), full-width tap targets. */
 .menu-list { display: grid; gap: .1rem; margin: 0; }
 .menu-row { display: flex; align-items: center; }
+/* a budget note lives UNDER its button: wrap the row so the full-width
+   action keeps line one and the quiet gauge line gets line two */
+.menu-row:has(.budget-note) { flex-wrap: wrap; }
+.budget-note {
+  flex: 1 1 100%; margin: .15rem 0 .35rem; font-size: .78rem;
+  color: var(--muted); text-align: center;
+}
 .menu-action {
   flex: 1; text-align: left; background: none; border: 0; border-radius: 10px;
   color: var(--text); padding: .6rem .55rem;

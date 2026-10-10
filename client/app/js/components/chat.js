@@ -504,6 +504,14 @@ export function createChat({ client, onHomeRefresh }) {
   //     a live-matching binding (stranger, legacy/unbound, changed, gone)
   //     shows the stranger/gone marks — strict by policy (option B) ---
 
+  // One budget cell of GET /api/me/stage-limits → 'X of Y' LEFT (the same
+  // 'what remains' question the Settings > Limits table answers). spent
+  // reuses the table's .usage-spent red — one vocabulary for 'cap reached'.
+  function budgetCell(s) {
+    const left = s ? Math.max(0, s.limit - s.used) : null;
+    return { text: left === null ? '—' : left <= 0 ? 'all used' : `${left} of ${s.limit}`, spent: left === 0 };
+  }
+
   async function friendEntryFor(peer) {
     if (!peer) return undefined;
     return (await loadFriends()).find((f) => f.peer === peer);
@@ -757,6 +765,11 @@ export function createChat({ client, onHomeRefresh }) {
     // (live from the stats endpoint) right where the decision is made
     let stats = null;
     try { stats = await client.userStats(currentPeer); } catch { /* offline: unknown */ }
+    // and MY spend on it: the trust budget the server will actually charge
+    // this tap against (same resolver as enforcement, incl. per-account
+    // overrides) — a vouch is scarce, say so where it's spent
+    let budget = null;
+    try { budget = await client.stageLimits(); } catch { /* offline: unknown */ }
     // Facts table (green/red pills, at a glance) instead of the old dot-line:
     // this is the evidence for a trust DECISION, it should read like one.
     const fact = (label, value, cls) => {
@@ -794,6 +807,18 @@ export function createChat({ client, onHomeRefresh }) {
       + 'getting badges and by other people vouching for it (verifying and trusting '
       + 'it). A score of 100 or more is usually really good.';
     wrap.append(bodyP, facts, cocoNote);
+    if (budget) {
+      const d = budgetCell(budget.trustDaily);
+      const w = budgetCell(budget.trustWeekly);
+      const budgetP = document.createElement('p');
+      budgetP.className = 'budget-note';
+      budgetP.replaceChildren(
+        iconEl('tabLimits', 'reason-icon'),
+        document.createTextNode(` Trusts left today ${d.text} · this week ${w.text}`),
+      );
+      budgetP.classList.toggle('usage-spent', d.spent && w.spent);
+      wrap.append(budgetP);
+    }
     // the consequence sits BELOW the button, in a box: read it last, right
     // where the commitment happens
     const box = document.createElement('div');
@@ -1178,6 +1203,10 @@ export function createChat({ client, onHomeRefresh }) {
     if (!currentPeer) return;
     $('chatopts-menu-view').hidden = true;
     $('chatopts-identity-view').hidden = false;
+    // fresh budget line for THIS peer's view: hidden until the live read
+    // lands, so a stale number from the last peer never shows
+    const budgetEl = $('identity-verify-budget');
+    if (budgetEl) budgetEl.hidden = true;
     const pin = await getPin(currentPeer);
     const peerKey = pin?.p ?? peerIdentity;
     // OUR side of the pair: the account identity key (same value on every
@@ -1234,6 +1263,24 @@ export function createChat({ client, onHomeRefresh }) {
       document.createTextNode(verified ? ' Undo verification' : ' We compared — mark verified'),
     );
     vb.classList.toggle('danger', verified);
+    // the verify budget UNDER the button — same counters the server
+    // enforces on (ID-verified accounts automatically see their higher
+    // daily limit; the endpoint resolves it, we never mirror the policy).
+    // Offline / older server: the line stays hidden, the button still works
+    // and the server stays the gatekeeper.
+    if (budgetEl) {
+      try {
+        const u = await client.stageLimits();
+        const d = budgetCell(u.verifyDaily);
+        const w = budgetCell(u.verifyWeekly);
+        budgetEl.replaceChildren(
+          iconEl('tabLimits', 'reason-icon'),
+          document.createTextNode(` Verifications left — today ${d.text} · this week ${w.text}`),
+        );
+        budgetEl.classList.toggle('usage-spent', d.spent && w.spent);
+        budgetEl.hidden = false;
+      } catch { budgetEl.hidden = true; }
+    }
   }
 
   // Tap the number box anywhere: copy, highlight (.copied until next
