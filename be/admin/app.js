@@ -418,9 +418,9 @@ function renderPanel() {
   // repaint kept the DOM fresh — reuse the blob URL we already have so the
   // 10s refresh cycle never refetches the avatar
   const kept = avatarUrls.get(u.ul);
-  if (kept) {
+  if (kept?.url) {
     const img = document.querySelector(`img[data-avatar-for="${CSS.escape(u.ul)}"]`);
-    if (img && !img.src) img.src = kept;
+    if (img && !img.src) img.src = kept.url;
   }
 }
 
