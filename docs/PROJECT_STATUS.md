@@ -162,10 +162,12 @@ is the only FE (audits mentioning `fe/` are historical).
   — tamper-evident history — remains deliberately deferred to P2; groups
   will force it.)
 - **Identity verification (real person, admin-checked)** — distinct from the
-  trust ladder above. Unverified accounts can only message people who ADDED
-  them as a friend, or who MESSAGED them first (cold-send gate, config
-  `COLD_SEND_REQUIRES_VERIFICATION`, enforced in the WS send path — ack
-  `verify_required` surfaces as the failed state on the bubble). Users start
+  trust ladder above. Cold messaging is open to all normal accounts (the
+  historical block on unverified senders was LIFTED, 2026-10); the cold-send
+  gate now bites ONLY while a staff TIMEOUT runs — a timed-out account may
+  message only people who ADDED it, with no prior-contact reply exemption
+  (config `COLD_SEND_REQUIRES_VERIFICATION`, enforced in the WS send path —
+  ack `verify_required` surfaces as the failed state on the bubble). Users start
   the process from the orange "Get verified" link next to their own name or
   the settings drawer: upload an ID photo (PNG/JPEG ≤ `ID_DOC_MAX_BYTES`,
   bodyLimit route-scoped, rate-limited per IP + account, never returned to
@@ -418,6 +420,15 @@ replay dedup · envelope HMAC/sender-mismatch/unknown-recipient · auth flow hap
   blob against deletion, and the admin panel renders images/videos inline and
   files as downloads, with the content type SNIFFED from the bytes (a reported
   `.html` gets `application/octet-stream` + `attachment`, never script).
+- **Media × staff moderation (merged 2026-10):** the ban gate needs no media
+  code of its own — the REST routes are authenticated calls and the bearer hook
+  refuses a banned account (403 `account_banned`), the WS upgrade closes 4403,
+  and `handleSend` refuses the envelope that would reference a blob. Asserted
+  end to end in `be/test/media.test.js`, so the blob locker cannot become a
+  side door around a ban. A TIMEOUT bites media only through the send seam
+  (a timed-out account may still fetch what it was sent — reading is not
+  messaging).
+
 - **Known accepted gaps** (documented in the plan §9): no media backfill for
   newly paired devices; once all devices ack the blob is gone (a reinstall
   shows "no longer available"); no range/streaming downloads; no video

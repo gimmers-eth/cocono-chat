@@ -401,6 +401,30 @@ export async function rememberPeerVerified(peer, verified, premium) {
 }
 
 // The badge a peer chose to wear next to their name (null = server fallback)
+// STAFF MODERATION flags (server lib/moderation.js): a timed-out account is
+// 'malicious', a locked-out one 'banned'. Patch-merge like the other facts
+// (keys/profile/stats reads each know both flags); the sidebar + chat-head
+// icons and the profile warning render from here. The remaining time NEVER
+// reaches the client — only the booleans (admin-only clock).
+export async function rememberPeerModeration(peer, { malicious = false, banned = false } = {}) {
+  const ul = String(peer).toLowerCase();
+  const cur = (await withStore('readonly', (s) => s.get(ul), PEERS)) ?? { peer: ul };
+  const next = { ...cur, malicious: !!malicious, banned: !!banned };
+  await withStore('readwrite', (s) => s.put(next), PEERS);
+  window.dispatchEvent(new Event(PEERS_EVENT));
+}
+
+export const PEERS_EVENT = 'cocono:peers';
+
+export async function loadPeerModeration() {
+  const rows = await withStore('readonly', (s) => s.getAll(), PEERS);
+  const map = new Map();
+  for (const r of rows ?? []) {
+    if (r.banned || r.malicious) map.set(r.peer, { malicious: !!r.malicious, banned: !!r.banned });
+  }
+  return map;
+}
+
 export async function rememberPeerChip(peer, chip) {
   const ul = String(peer).toLowerCase();
   const cur = (await withStore('readonly', (s) => s.get(ul), PEERS)) ?? { peer: ul };

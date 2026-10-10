@@ -3,6 +3,7 @@ import { rateLimit } from '../../lib/rateLimit.js';
 import { b64uDecode } from '../../lib/b64u.js';
 import { effectiveLimit } from '../../lib/limits.js';
 import { badgesFor, evaluateBadges } from '../../lib/badges.js';
+import { effectiveVerified, verifiedVoucherFilter } from '../../lib/moderation.js';
 
 const ID_DOC_TYPES = new Set(['image/png', 'image/jpeg']);
 const ID_DOC_MIN_BYTES = 128; // reject trivially-empty "photos"
@@ -28,7 +29,9 @@ function sniffImage(buf) {
 async function hasTrustedVerifier(users, ul) {
   return users.findOne({
     ul: { $ne: ul },
-    verified: true,
+    // a TIMED-OUT 'verified' voucher stands behind nothing right now —
+    // effectiveVerified as a query (lib/moderation.js)
+    ...verifiedVoucherFilter(),
     friends: { $elemMatch: { u: ul, t: true } },
   }, { projection: { _id: 1 } })
     .then((doc) => !!doc);
@@ -42,13 +45,14 @@ export default async function meRoutes(app, { users, redis, config, idDocs, sett
     const user = await users.findOne({ ul: request.auth.sub });
     if (!user) return fail(reply, 'unknown_account', 'Account not found', 404);
     const idDoc = await idDocs.findOne({ ul: user.ul }, { projection: { contentType: 1, uploadedAt: 1, _id: 0 } });
-    const canUploadId = !config.idUploadRequiresTrustedVerifier || !!idDoc || user.verified === true
+    const canUploadId = !config.idUploadRequiresTrustedVerifier || !!idDoc || effectiveVerified(user)
       || (await hasTrustedVerifier(users, user.ul));
     return {
       u: user.u,
       d: request.auth.d,
       createdAt: user.createdAt,
-      verified: !!user.verified,
+      // while a staff TIMEOUT runs the account behaves UNVERIFIED
+      verified: effectiveVerified(user),
       premium: !!user.premium,
       badges: badgesFor(user),
       displayBadge: user.displayBadge ?? null,
@@ -119,9 +123,10 @@ export default async function meRoutes(app, { users, redis, config, idDocs, sett
     const rlAcct = await rateLimit(redis, `rl:iddoc:${ul}`, limAcct.limit, limAcct.windowSec);
     if (!rlAcct.ok) return limited(reply, rlAcct);
 
-    const user = await users.findOne({ ul }, { projection: { verified: 1 } });
+    const user = await users.findOne({ ul }, { projection: { verified: 1, timeoutUntil: 1 } });
     if (!user) return fail(reply, 'unknown_account', 'Account not found', 404);
-    if (user.verified) return fail(reply, 'already_verified', 'Account is already verified', 400);
+    // a TIMED-OUT account is unverified to the world — it may re-upload
+    if (effectiveVerified(user)) return fail(reply, 'already_verified', 'Account is already verified', 400);
     // Gate: ID upload unlocks only after a verified user has trusted us
     // (already-uploaded users may re-upload; the admin sees the pending doc)
     if (config.idUploadRequiresTrustedVerifier && !(await hasTrustedVerifier(users, ul))) {

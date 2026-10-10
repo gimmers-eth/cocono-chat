@@ -113,10 +113,12 @@ local pin stays the device's own key-change alarm.
 > verification — you confirming a cryptographic key out of band. Separately,
 > the admin-checked *identity* verification (government ID photo, reviewed
 > by a human) removes the red `fa-circle-exclamation` notice that unverified
-> accounts carry after their name everywhere — and gates cold messaging:
-> unverified accounts may only message people who added them or wrote to
-> them first. (The grey `fa-certificate` is reserved for premium status and
-> means nothing here.)
+> accounts carry after their name everywhere. Cold messaging is open to
+> every normal account, verified or not (policy change 2026-10 — the old
+> block on unverified senders is LIFTED); only a STAFF TIMEOUT (lib/
+> moderation.js) closes the gate again: a timed-out account may message
+> only people who ADDED it. (The grey `fa-certificate` is reserved for
+> premium status and means nothing here.)
 
 ### Legacy states
 

@@ -10,6 +10,12 @@
 //   trusted     shield user         GREEN    — "I know this person" (max)
 //   gone        user-slash + italic RED      — account deleted (outranks all)
 //
+// STAFF MODERATION pseudo-states (server lib/moderation.js, flags ride
+// keys/profile/stats reads) OUTRANK the whole ladder:
+//   malicious   DANGER mark instead of any trust icon — a staff TIMEOUT
+//               made this account: identified as malicious by CoCoNo staff
+//   banned      DANGER mark — the account is BANNED by CoCoNo staff
+//
 // A local pin CONFLICT (server binding disagrees with our pinned key) maps
 // to stranger for display; the chat strip carries the detailed alert.
 
@@ -26,6 +32,11 @@ export const PS = {
   // pseudo-state: MY OWN block (see peerStateIcon) — replaces the stranger
   // mark wherever the surface knows the wall exists
   BLOCKED: 'blocked',
+
+  // pseudo-states: staff moderation flags (TIMEOUT / BAN) — REPLACE any
+  // other trust icon everywhere (peerStateIcon), never stack next to it
+  MALICIOUS: 'malicious',
+  BANNED: 'banned',
 };
 
 /**
@@ -37,11 +48,22 @@ export const PS = {
  * @param {boolean} f.trusted    third stage: "I know this person"
  * @param {boolean} f.conflict   local pin disagrees with the binding (alarm)
  */
+/**
+ * @param {'malicious'|'banned'|null} [f.moderation] staff TIMEOUT ('malicious')
+ *   or BAN on the peer — a server flag that outranks the whole ladder
+ */
 export function resolvePeerState({
   isSelf = false, gone = false, bound = false, verified = false, trusted = false, conflict = false,
+  moderation = null,
 } = {}) {
   if (isSelf) return PS.SELF;
   if (gone) return PS.GONE;
+  // staff moderation OUTRANKS the trust ladder: a timed-out or banned
+  // account shows the danger mark even where I verified/trusted it —
+  // my local ladder cannot outvote a staff decision (deleted still wins:
+  // there is no account left to warn about)
+  if (moderation === 'banned') return PS.BANNED;
+  if (moderation === 'malicious') return PS.MALICIOUS;
   if (conflict || !bound) return PS.STRANGER;
   if (!verified) return PS.UNVERIFIED;
   return trusted ? PS.TRUSTED : PS.VERIFIED;
@@ -54,6 +76,15 @@ const MARKS = {
   [PS.UNVERIFIED]: ['friend', 'icon-warn'],
   [PS.VERIFIED]: ['friendVerified', 'icon-warn'],
   [PS.TRUSTED]: ['friendVerified', 'icon-friend'],
+  [PS.MALICIOUS]: ['identityAlert', 'icon-danger'],
+  [PS.BANNED]: ['ban', 'icon-danger'],
+};
+
+// danger marks read as ALARMS, not trust states: the title is the staff
+// verdict, shown wherever the icon paints (hover / a11y label)
+const MOD_TITLES = {
+  [PS.MALICIOUS]: 'WARNING! This user has been identified as malicious by CoCoNo staff',
+  [PS.BANNED]: 'This user was banned by CoCoNo staff',
 };
 
 /** <i> element carrying the state icon. */
@@ -75,7 +106,21 @@ export function peerStateIcon(state) {
     return el;
   }
   const [key, cls] = MARKS[state] ?? MARKS[PS.STRANGER];
-  return iconEl(key, cls);
+  const el = iconEl(key, cls);
+  if (MOD_TITLES[state]) el.title = MOD_TITLES[state];
+  return el;
+}
+
+/**
+ * The moderation input for resolvePeerState from a flags record
+ * ({ malicious, banned } as carried by keys/profile/stats reads):
+ * the BAN (the heavier state) wins; null when neither is live.
+ */
+export function moderationOf(flags) {
+  if (!flags) return null;
+  if (flags.banned) return 'banned';
+  if (flags.malicious) return 'malicious';
+  return null;
 }
 
 /**

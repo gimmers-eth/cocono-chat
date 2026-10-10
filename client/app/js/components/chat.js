@@ -12,7 +12,7 @@
 import { $, setStatus, setChatOpen, fmtTime, confirmModal, toast, animateSheetClose, openLightbox, closeLightbox } from '../ui.js';
 
 import { iconEl } from '../icons.js';
-import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl, premiumBadgeEl } from './peername.js';
+import { PS, resolvePeerState, peerStateIcon, unverifiedBadgeEl, premiumBadgeEl, moderationOf } from './peername.js';
 import { safetyNumber } from '../identity.js';
 import { BADGE_UI, nameChipEl } from '../badges.js';
 import { blockUserWithConfirm, unblockUser } from '../blocks.js';
@@ -28,6 +28,7 @@ import {
   loadFriends, friendAdd, friendDel, friendMarkFlags, setFriends, FRIENDS_EVENT, loadPeerBlocked, loadPeerMuted, rememberPeerMuted, loadPeerChips,
   loadPeerTags,
   getPin, recordPinSeen, markPeerGone, rememberPeerVerified,
+  rememberPeerModeration, loadPeerModeration,
 } from '../store.js';
 // M4 media: prep/policy/lifecycle in ../media.js, painting in the two
 // components beside this file. chat.js stays the ORCHESTRATOR — it owns
@@ -140,6 +141,10 @@ export function createChat({ client, onHomeRefresh }) {
   let badgeModalOpen = null;       // badge id currently shown
   let peerJoinedAt = null; // "joined" date from the live key lookup
   let peerIdentityKnown = false;
+  // staff moderation on the CURRENT peer ('malicious' | 'banned' | null),
+  // learned from keys/profile/stats reads — outranks the whole trust ladder
+  // for the icon (server lib/moderation.js)
+  let peerModeration = null;
 
   // (the red unverified mark now rides the name line via mountLine options —
   // no per-slot painter needed)
@@ -154,9 +159,17 @@ export function createChat({ client, onHomeRefresh }) {
       .then((prof) => {
         rememberPeerAvatar(peer, prof.avatar);
         rememberPeerVerified(peer, undefined, prof.premium);
+        // staff moderation travels on the profile read too — keep the
+        // sidebar cache honest even without a keys round trip
+        rememberPeerModeration(peer, { malicious: prof.malicious, banned: prof.banned });
         if (peer === currentPeer) {
           peerIdentityPremium = !!prof.premium;
           peerDisplay = prof.displayBadge ?? null;
+          const mod = moderationOf(prof);
+          if (mod !== peerModeration) {
+            peerModeration = mod;
+            updateTrustUI().catch(() => {}); // danger icon replaces the ladder
+          }
           // chip state refreshed by the next updateTrustUI/openChat paint
         }
       })
@@ -800,6 +813,7 @@ export function createChat({ client, onHomeRefresh }) {
       verified: !!ent?.verified,
       trusted: !!ent?.trust,
       conflict: !!pin && !!ent?.pub && pin.p !== ent.pub,
+      moderation: peerModeration,
     });
   }
 
@@ -873,7 +887,8 @@ export function createChat({ client, onHomeRefresh }) {
     const blockedByMe = blockedMap.get(currentPeer);
     if (blockedByMe) {
       mountLine($('chat-peer-line'), {
-        peer: currentPeer, state: PS.BLOCKED,
+        // a staff mark OUTRANKS even my own block wall (peername.js)
+        peer: currentPeer, state: peerModeration ?? PS.BLOCKED,
         chipEl: chipFor(peerDisplay, peerIdentityPremium),
         unverified: peerIdentityKnown && !peerIdentityVerified,
       });
@@ -925,7 +940,18 @@ export function createChat({ client, onHomeRefresh }) {
     let tier;
     let iconKey;
     let text;
-    if (conflictAlert(ent, pin)) {
+    // staff moderation OUTRANKS every local signal: a staff TIMEOUT or BAN
+    // is the platform's own verdict — say it first, in red, whatever the
+    // local ladder thinks (server lib/moderation.js)
+    if (peerModeration === 'banned') {
+      tier = 'danger';
+      iconKey = 'ban';
+      text = `${currentPeer} was BANNED by CoCoNo staff — the account may not use the platform.`;
+    } else if (peerModeration === 'malicious') {
+      tier = 'danger';
+      iconKey = 'identityAlert';
+      text = 'WARNING! This user has been identified as malicious by CoCoNo staff.';
+    } else if (conflictAlert(ent, pin)) {
       tier = 'danger';
       iconKey = 'notFriend';
       text = `Heads up: the key this device remembers for ${currentPeer} doesn’t match the server’s. Until you’ve checked the number together, treat this chat with suspicion.`;
@@ -1176,7 +1202,7 @@ export function createChat({ client, onHomeRefresh }) {
     menuActionLabel(state, currentPeer);
     const optsBlocked = (await loadPeerBlocked()).get(currentPeer);
     mountLine($('chatopts-line'), {
-      peer: currentPeer, state: optsBlocked ? PS.BLOCKED : state,
+      peer: currentPeer, state: peerModeration ?? (optsBlocked ? PS.BLOCKED : state),
       chipEl: chipFor(peerDisplay, peerIdentityPremium),
       unverified: peerIdentityKnown && !peerIdentityVerified,
     });
@@ -1221,14 +1247,33 @@ export function createChat({ client, onHomeRefresh }) {
     // the awarded DATE lives in the badge modal only — the row is pure chips
   }
 
+  // The profile sheet's TOP notice: the staff verdict, in red, when the
+  // peer is timed out ('malicious') or banned. Filled from the moderation
+  // fact cached by the keys/profile reads (peerModeration) — the same
+  // flags that replace the trust icon with the danger mark.
+  function renderModerationNotice() {
+    const el = $('profile-moderation');
+    if (!el) return;
+    el.replaceChildren();
+    el.hidden = !peerModeration;
+    if (!peerModeration) return;
+    el.append(iconEl(peerModeration === 'banned' ? 'ban' : 'identityAlert', 'icon-danger'));
+    const span = document.createElement('span');
+    span.textContent = peerModeration === 'banned'
+      ? 'This user was banned by CoCoNo staff. The account is locked out of the platform; its data is preserved.'
+      : 'WARNING! This user has been identified as malicious by CoCoNo staff';
+    el.append(span);
+  }
+
   async function renderProfileView() {
     if (!currentPeer) return;
     const ent = await friendEntryFor(currentPeer);
     const pin = await getPin(currentPeer);
     const state = trustState(ent, pin);
     const profileBlocked = (await loadPeerBlocked()).get(currentPeer);
+    renderModerationNotice(); // the TOP notice paints before anything else
     mountLine($('profile-line'), {
-      peer: currentPeer, state: profileBlocked ? PS.BLOCKED : state,
+      peer: currentPeer, state: peerModeration ?? (profileBlocked ? PS.BLOCKED : state),
       chipEl: chipFor(profileDisplay, sheetPremium),
       unverified: peerIdentityKnown && !peerIdentityVerified,
     });
@@ -1303,6 +1348,14 @@ export function createChat({ client, onHomeRefresh }) {
     let stats = null;
     try { stats = await client.userStats(currentPeer); } catch { /* offline */ }
     if (stats) {
+      // the stats read carries the same moderation flags — they are the
+      // FRESHEST staff verdict; keep banner + ladder + sidebar honest
+      const sm = moderationOf(stats);
+      if (sm !== peerModeration) {
+        peerModeration = sm;
+        renderModerationNotice();
+        rememberPeerModeration(currentPeer, { malicious: stats.malicious, banned: stats.banned }).catch(() => {});
+      }
       const trusted = stats.socialTrusted === true;
       setRow(socialState, socialNote, trusted ? 'ok' : 'bad',
         trusted ? 'Social: Trusted' : 'Social: Not yet trusted',
@@ -1335,6 +1388,8 @@ export function createChat({ client, onHomeRefresh }) {
       profileBadges = prof?.badges ?? [];
       profileDisplay = prof?.displayBadge ?? null;
       sheetPremium = !!prof?.premium;
+      // the sheet's TOP notice: the staff verdict rides the profile read
+      peerModeration = moderationOf(prof);
     } catch { profileBadges = []; }
     primePeerProfile(currentPeer); // avatar/premium cache update stays
     await renderProfileView();
@@ -1553,7 +1608,7 @@ export function createChat({ client, onHomeRefresh }) {
     // blocked peers sit OUTSIDE the ladder — the wall mark shows here too
     const safetyBlocked = (await loadPeerBlocked()).get(currentPeer);
     mountLine($('identity-line'), {
-      peer: currentPeer, state: safetyBlocked ? PS.BLOCKED : trustState(ent, pin),
+      peer: currentPeer, state: peerModeration ?? (safetyBlocked ? PS.BLOCKED : trustState(ent, pin)),
       chipEl: chipFor(peerDisplay, peerIdentityPremium),
       unverified: peerIdentityKnown && !peerIdentityVerified,
     });
@@ -1681,18 +1736,19 @@ export function createChat({ client, onHomeRefresh }) {
   let fwdContacts = [];
 
   async function refreshFwdContacts() {
-    const [friends, chips, blocked, avatars] = await Promise.all(
-      [loadFriends(), loadPeerChips(), loadPeerBlocked(), loadPeerAvatars()],
+    const [friends, chips, blocked, avatars, moderation] = await Promise.all(
+      [loadFriends(), loadPeerChips(), loadPeerBlocked(), loadPeerAvatars(), loadPeerModeration()],
     );
     fwdContacts = friends
       .filter((f) => !blocked.get(f.peer) && !f.gone)
-      .map((f) => ({ ...f, chip: chips.get(f.peer) ?? null, avatar: avatars.get(f.peer)?.avatar ?? null }))
+      .map((f) => ({ ...f, chip: chips.get(f.peer) ?? null, avatar: avatars.get(f.peer)?.avatar ?? null, mod: moderationOf(moderation.get(f.peer)) }))
       .sort((a, b) => a.peer.localeCompare(b.peer));
   }
 
   function fwdLineOpts(c) {
     const state = resolvePeerState({
       gone: !!c.gone, bound: !!c.trusted, verified: !!c.verified, trusted: !!c.trust,
+      moderation: c.mod ?? null,
     });
     const chip = nameChipEl(c.chip ?? null);
     if (chip) chip.classList.add('name-chip-inline');
@@ -1877,8 +1933,14 @@ export function createChat({ client, onHomeRefresh }) {
     peerIdentityVerified = !!peer?.verified;
     peerIdentityPremium = !!peer?.premium;
     peerDisplay = peer?.displayBadge ?? null;
+    // staff TIMEOUT / BAN marks ride every directory read; the sidebar
+    // cache gets them too (danger icon replaces any trust icon there)
+    peerModeration = moderationOf(peer);
     $('chat-sub').replaceChildren(...chatSubNodes(peer));
-    if (peer) await rememberPeerVerified(currentPeer, peerIdentityVerified, peerIdentityPremium);
+    if (peer) {
+      await rememberPeerVerified(currentPeer, peerIdentityVerified, peerIdentityPremium);
+      await rememberPeerModeration(currentPeer, { malicious: peer?.malicious === true, banned: peer?.banned === true });
+    }
   }
 
   // Record a security heads-up in the timeline + sync it to all our devices.

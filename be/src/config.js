@@ -81,6 +81,11 @@ export const config = {
     'username',
     'cocono',
     'co-co-no',
+    'coco',
+    'co-co',
+    'co-con',
+    'co-co-n',
+    'cocon',
   ]),
   // names may not START with these either (brand impersonation): covers the
   // app name 'CoCoNo' in its dashed domain spelling too
@@ -211,10 +216,14 @@ export const config = {
 
   // Identity verification (real-person check by the admin, distinct from
   // the peer trust ladder):
-  // - unverified accounts may only message people who ADDED them as a
-  //   friend, or who MESSAGED them first — no cold-messaging the directory.
   // - users upload an ID photo (image only, size-capped) via the app;
   //   only the admin can flip the verified flag, and can purge the image.
+  // - COLD-SEND GATE (policy change 2026-10): the historical block on
+  //   UNVERIFIED senders is LIFTED — normal accounts, verified or not, may
+  //   message anyone. The flag now enables the moderation-scoped gate:
+  //   a STAFF-TIMED-OUT account may only message people who added it
+  //   (ws-routes/handlers.js, lib/moderation.js). The env name is kept for
+  //   operational continuity; false disables the timed-out gate too.
   coldSendRequiresVerification: env.COLD_SEND_REQUIRES_VERIFICATION !== 'false',
   // CoCo social score (be/src/lib/cocoScore.js): trusted needs score >
   // threshold AND account older than the minimum age
@@ -224,6 +233,9 @@ export const config = {
   cocoTrustMinVouchers: numOf(env.COCO_TRUST_MIN_VOUCHERS, 2),
   // flat reputation gift for PREMIUM subscribers (gold certificate)
   cocoPremiumBonus: numOf(env.COCO_PREMIUM_BONUS, 5),
+  // flat CoCo hit a STAFF-TIMED-OUT account carries while the clock runs
+  // (lib/moderation.js) — big enough to bury any reputation a scammer built
+  cocoTimeoutPenalty: numOf(env.COCO_TIMEOUT_PENALTY, 1000),
   // accounts created before this instant are Early-Bird eligible (capped)
   earlyBirdDeadline: env.EARLY_BIRD_DEADLINE || '2026-12-31T23:59:59Z',
   // badge caps (seat counts) — config so ops/tests can shrink them

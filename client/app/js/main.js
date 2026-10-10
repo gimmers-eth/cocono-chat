@@ -199,6 +199,30 @@ async function enterApp({ gesture = false, offline = false, fresh = false, signe
     reconcileFriends().catch(() => { /* stays on the local mirror */ });
   }
 
+  // Add-headline catch-up (blind-push sibling): adds that landed while NO
+  // device had a live WS consume their pendingAdds entry through the push
+  // path; if every push also died (phone off), the entries wait here. On
+  // entry the app re-pulls them once, raises the same clickable OS notice
+  // for the newest, and acks exactly what it surfaced (one headline per
+  // relationship is structural: the hadAdded gate upstream + this consume).
+  // Silent/offline boots skip; muted adders were never queued server-side.
+  if (!offline) {
+    // async wrapper: pendingAdds() THROWS SYNCRONOUSLY without a token —
+    // inside enterApp that would kill every boot step after it
+    (async () => {
+      try {
+        const { adds } = await client.pendingAdds();
+        if (!adds?.length) return;
+        // surface the newest; ack ALL — the app is open now, the rest are
+        // no longer news (a burst of adders is one tap-target, the latest)
+        for (const a of adds) client.ackPendingAdd(a.by).catch(() => {});
+        const latest = adds[adds.length - 1];
+        osNotify(noticeText('request', latest.by), 'cocono-request', latest.by);
+        reconcileFriends().catch(() => {});
+      } catch { /* offline-ish failure or no token: the next entry retries */ }
+    })();
+  }
+
   // A notification click that cold-booted the app parked the peer in the
   // SW's IDB kv (delete-on-read): open exactly that conversation.
   takePendingChat().then(openChatFromNotice).catch(() => {});
@@ -354,6 +378,11 @@ client.on('notice', async ({ what, by }) => {
     // notifications-off, full stop) — the graph still re-pulls.
     const muted = by ? (await loadPeerMuted().catch(() => new Map())).get(String(by).toLowerCase()) : false;
     if (!muted) osNotify(noticeText(what, by), `cocono-${what}`, by ?? '');
+    // this live device just surfaced the headline — consume the ACCOUNT's
+    // pending-add entry so no closed device's blind 'add' push re-notifies
+    // the same event (one headline per relationship, first surface wins;
+    // muted parties still consume: silence was the ask, not a re-prompt)
+    if (what === 'request' && by) client.ackPendingAdd?.(by).catch(() => {});
     reconcileFriends().catch(() => { /* next entry reconciles */ });
   } else if (what === 'verified') {
     // MY account just became Verified (admin decision): headline notice plus

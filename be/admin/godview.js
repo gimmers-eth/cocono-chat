@@ -48,6 +48,7 @@ const HARD_NODE_CAP = 1500;
 const ICONS = {
   shieldCheck: '<path d="M12 2.6 19 5.4v5.9c0 4.3-2.9 8.1-7 9.5-4.1-1.4-7-5.2-7-9.5V5.4l7-2.8Z"/><path d="m9.1 12.1 2 2 3.9-4"/>',
   alert: '<circle cx="12" cy="12" r="9.2"/><path d="M12 7.6v5.2M12 16.3h.01"/>',
+  ban: '<circle cx="12" cy="12" r="9.2"/><path d="M5.5 5.5 18.5 18.5"/>',
   star: '<path d="m12 3.6 2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8L3.6 9.7l5.8-.8L12 3.6Z"/>',
   ghost: '<path d="M5 20V11a7 7 0 0 1 14 0v9l-2.3-1.8L14.4 20l-2.4-1.8L9.6 20l-2.3-1.8L5 20Z"/><path d="M9.5 10.5h.01M14.5 10.5h.01"/>',
   idCard: '<rect x="2.8" y="5" width="18.4" height="14" rx="2.4"/><circle cx="8.6" cy="11" r="2.1"/><path d="M5.4 16.2c.6-1.5 1.9-2.3 3.2-2.3s2.6.8 3.2 2.3M14.6 9.6h4M14.6 13h4"/>',
@@ -310,6 +311,11 @@ export function initGodView(deps) {
   // ---- node cards ---------------------------------------------------------
   function trustMark(n) {
     if (n.gone) return `<span class="gv-trust gone" title="account deleted — named by a child it created">${svg('ghost')}</span>`;
+    // staff moderation OUTRANKS the trust ladder, exactly like in the app:
+    // a timed-out (malicious) or banned account shows the danger mark no
+    // matter what its verification state says (lib/moderation.js)
+    if (n.banned) return `<span class="gv-trust bad" title="BANNED by CoCoNo staff — account data kept, platform use refused">${svg('ban')}</span>`;
+    if (n.malicious) return `<span class="gv-trust bad" title="TIMED OUT by CoCoNo staff — identified as malicious, treated as unverified">${svg('alert')}</span>`;
     return n.verified
       ? `<span class="gv-trust ok" title="App: verified — an ID document was checked by a human">${svg('shieldCheck')}</span>`
       : `<span class="gv-trust bad" title="App: unverified — no ID has been checked">${svg('alert')}</span>`;

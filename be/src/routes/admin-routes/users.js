@@ -7,6 +7,7 @@ import { effectiveLimit, readLimitsDoc } from '../../lib/limits.js';
 import { effectiveMaxDevices } from '../../lib/devicePolicy.js';
 import { badgeById, badgesFor, badgeOverview, evaluateBadges, grantBadge, revokeBadge } from '../../lib/badges.js';
 import { shareStory } from '../../lib/shares.js';
+import { TIMEOUT_DAY_PRESETS, moderationState } from '../../lib/moderation.js';
 
 // Per-account device cap: 1..MAX_DEVICES_CAP. Raising it lets a user enroll
 // more devices; lowering it below the current device count is allowed (the
@@ -14,7 +15,8 @@ import { shareStory } from '../../lib/shares.js';
 const MAX_DEVICES_CAP = 1000;
 
 // GET /api/admin/users, PATCH max-devices, DELETE user, DELETE device,
-// PUT verified (identity-verification toggle), GET/DELETE id-doc (review).
+// PUT verified (identity-verification toggle), PUT moderation (staff
+// TIMEOUT + BAN), GET/DELETE id-doc (review).
 export default async function usersRoutes(app, { users, redis, config, messages, idDocs, profiles, settings, diagnostics, counters, shares, contacts, graph, media }) {
   // account-review outcomes are invisible to the reviewed user otherwise —
   // content-free 'identity' nudges (lib/notify.js) make the app re-pull
@@ -71,6 +73,10 @@ export default async function usersRoutes(app, { users, redis, config, messages,
         verified: !!doc.verified,
         premium: !!doc.premium,
         verifiedAt: doc.verifiedAt ?? null,
+        // staff moderation: the raw clock + LIVE state + remaining time.
+        // This whole listing is admin-only — the remaining time never
+        // leaves the admin surface (client reads expose flags only).
+        ...moderationState(doc),
         idDoc: byUl.get(doc.ul) ?? null,
         hasAvatar: hasAvatar.has(doc.ul),
         bio: bioBy.get(doc.ul) ?? '',
@@ -115,6 +121,59 @@ export default async function usersRoutes(app, { users, redis, config, messages,
     // the avatar vanished from under everyone who follows this account
     if (!verified) await notifyPeers(ul, 'profile');
     return { ul, verified };
+  });
+
+  // PUT /api/admin/users/:username/moderation {timeoutDays?, banned?} — the
+  // STAFF TIMEOUT and the BAN (lib/moderation.js). One route, two switches:
+  //   timeoutDays: 1 | 7 | 30 | 36500 (the panel's presets; any whole day
+  //     count 1..36500 is accepted) sets timeoutUntil = now + days; null
+  //     clears a running timeout. The account behaves UNVERIFIED while it
+  //     runs, carries the flat CoCo penalty, and every client shows the
+  //     danger mark + staff warning. The stored `verified` flag is NOT
+  //     touched — expiry is derived, so the verification silently returns
+  //     when the clock runs out (and a clear restores it instantly).
+  //   banned: true locks the account out of ALL platform use (login, API,
+  //     WS) with every byte of data intact; false lifts it.
+  // Remaining time lives only in this admin response and the users listing
+  // — app routes expose the flags, never the clock.
+  app.put('/api/admin/users/:username/moderation', async (request, reply) => {
+    const ul = request.params.username.toLowerCase();
+    const { timeoutDays, banned } = request.body ?? {};
+    if (timeoutDays === undefined && banned === undefined) {
+      return fail(reply, 'invalid_request', 'timeoutDays and/or banned are required', 400);
+    }
+    const set = {};
+    const unset = {};
+    if (timeoutDays !== undefined) {
+      if (timeoutDays === null) {
+        unset.timeoutUntil = '';
+      } else if (!Number.isInteger(timeoutDays) || timeoutDays < 1 || timeoutDays > TIMEOUT_DAY_PRESETS.at(-1)) {
+        return fail(reply, 'invalid_request', `timeoutDays must be null or a whole number of days between 1 and ${TIMEOUT_DAY_PRESETS.at(-1)}`, 400);
+      } else {
+        set.timeoutUntil = new Date(Date.now() + timeoutDays * 24 * 60 * 60 * 1000);
+      }
+    }
+    if (banned !== undefined) {
+      if (typeof banned !== 'boolean') {
+        return fail(reply, 'invalid_request', 'banned must be a boolean', 400);
+      }
+      set.banned = banned;
+      set.bannedAt = banned ? new Date() : null;
+    }
+    const update = { $set: set };
+    if (Object.keys(unset).length) update.$unset = unset;
+    const res = await users.updateOne({ ul }, update);
+    if (!res.matchedCount) return fail(reply, 'unknown_account', 'No such user', 404);
+    const doc = await users.findOne({ ul });
+    // the account itself: identity/verification state may have effectively
+    // moved (a timeout hides it, expiry returns it) — re-read GET /api/me
+    await notifyAccount(ul, 'identity');
+    // everyone who follows this account: the trust icon and the profile
+    // sheet change — re-prime the peer-profile cache (flags ride profile,
+    // keys and stats reads; lib/notify.js 'profile' taxonomy entry)
+    await notifyPeers(ul, 'profile');
+    request.log.info(`[admin] moderation @${ul}: timeout=${doc.timeoutUntil ? doc.timeoutUntil.toISOString() : 'none'} banned=${doc.banned === true}`);
+    return { ul, ...moderationState(doc) };
   });
 
   // PUT /api/admin/users/:username/premium {premium} — the premium toggle.

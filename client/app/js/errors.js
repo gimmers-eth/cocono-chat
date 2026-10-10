@@ -18,10 +18,23 @@ export const ERROR_TEXT = {
   blocked: 'Your message could not be delivered.',
   self_blocked: 'You blocked this user — unblock them (chat menu or Settings > Relationships) to send messages.',
   verify_required: 'You need to get verified before messaging new people.',
+  // MEDIA (M4) — an ack can only be refused by a NEW message type, and the
+  // byte half answers over REST; both land here. `media_tampered` is the
+  // client-side one: the download did not match the sender's own digest, so
+  // the copy on the wire is not the copy that was sent.
+  unknown_attachment: 'That attachment is gone — nothing was sent.',
+  media_too_large: 'That attachment is too large (10 MB max).',
+  thumb_too_large: 'That preview image is too large.',
+  media_quota: 'Your storage is full — delete some older files first.',
+  bad_sha256: 'That upload did not check out.',
+  unknown_media: 'No longer available.',
+  media_tampered: 'That download failed its integrity check — not opened.',
   rate_limited: 'Too many requests — try again later.',
   not_connected: 'Not connected right now.',
   no_peer_devices: 'That user has no devices to receive.',
   internal: 'Server hiccup — try again.',
+  no_media: 'Nothing to send — pick a file first.',
+  no_media_key: 'That attachment cannot be opened here.',
 
   // --- accounts / auth ---
   invalid_username: 'Names need 4–64 letters, numbers, - or _.',
@@ -41,6 +54,9 @@ export const ERROR_TEXT = {
   session_expired: 'Session expired — log in again.',
   not_authenticated: 'Log in again.',
   unauthorized: 'Log in again.',
+  // the staff BAN (server lib/moderation.js): honest, short, says the data
+  // is safe — the account is refused, not deleted
+  account_banned: 'Banned by CoCoNo staff — this account may not use the platform. Your data is preserved.',
   identity_exists: 'This browser already has an account.',
   no_identity: 'No saved account here — sign in first.',
   not_supported: 'Not supported by this device.',

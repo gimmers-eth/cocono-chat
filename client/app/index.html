@@ -531,6 +531,10 @@
       <button id="btn-profile-close" class="icon-btn" title="Close" data-icon="close"></button>
     </header>
     <div class="sheet-body">
+      <!-- STAFF MODERATION notice, always at the TOP of the sheet when a
+           peer is timed out (malicious) or banned — filled by chat.js from
+           the profile/keys/stats flags (server lib/moderation.js). -->
+      <div id="profile-moderation" class="moderation-banner" hidden></div>
       <div class="profile-id profile-hero">
         <span id="profile-av" class="avatar-stack"></span>
         <span class="profile-idtext">

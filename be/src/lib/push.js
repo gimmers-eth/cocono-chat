@@ -79,13 +79,41 @@ export async function pushBadgeHint(users, redis, config, ul) {
   return sent ? 'sent' : 'none';
 }
 
+/**
+ * BLIND 'add' push for the push-subscribed devices of the account that was
+ * just ADDED by someone — the closed-app / backgrounded-mobile arm of the
+ * 'request' headline. Payload stays content-free (E2EE contract: no username
+ * ever crosses a push service); the recipient's own service worker wakes on
+ * the signal, silently logs in, and re-pulls GET /api/me/pending-adds over
+ * OUR wire to render "@by added you" and link the tap into their chat.
+ * Mirrors pushBadgeHint exactly: devices with a live WS are skipped (the
+ * content-free 'request' nudge already reached them and the page raised the
+ * notice), the Topic is hashed per actor (once-per-relationship is enforced
+ * UPSTREAM by the hadAdded gate — a repeat add never gets here at all).
+ */
+export async function pushAddHint(users, redis, config, ul, byUl) {
+  if (!pushEnabled(config)) return 'disabled';
+  let user = null;
+  try { user = await users.findOne({ ul }, { projection: { devices: 1 } }); } catch { return 'error'; }
+  let sent = 0;
+  for (const dev of user?.devices ?? []) {
+    if (!dev.push?.endpoint) continue;
+    try {
+      if (await redis.exists(presenceKey(ul, dev.id))) continue; // live device: nudge got it
+      if (await sendBlindPush(config, dev.push, 'add', byUl) === 'sent') sent++;
+    } catch { /* best effort per device */ }
+  }
+  return sent ? 'sent' : 'none';
+}
+
 export async function sendBlindPush(config, subscription, type, senderUl = '') {
   if (!pushEnabled(config)) return 'skipped';
   if (!subscription?.endpoint) return 'no-subscription';
   ensureInit(config);
   try {
     // Padded payload: uniform size hides event frequency/content-length from
-    // the push service. 3 = msg, 4 = pairing-request (Phase 3 uses 5+).
+    // the push service. t is the ONLY signal: 'msg', 'badge', 'add' (the
+    // someone-added-you headline — content-free; the SW re-pulls the who).
     const body = JSON.stringify({ t: type, pad: 'x'.repeat(256) });
     await webpush.sendNotification(subscription, body, {
       TTL: config.pushTtlSec,

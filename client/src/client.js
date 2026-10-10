@@ -592,6 +592,21 @@ export class CoconoClient extends Emitter {
     return this.api.ackBadges(this.#requireToken(), (gids ?? []).map(String).slice(0, 64));
   }
 
+  /** Unconsumed "who added me" memory (closed-app add headlines). */
+  async pendingAdds() {
+    return this.api.pendingAdds(this.#requireToken());
+  }
+
+  /** Consume ONE pending add (this device surfaced "@by added you"). */
+  async ackPendingAdd(by) {
+    try {
+      return await this.api.ackPendingAdd(String(by).toLowerCase(), this.#requireToken());
+    } catch (err) {
+      this.logger.warn('ackPendingAdd failed', err?.code ?? err);
+      return null;
+    }
+  }
+
   /** Peer profile: bio always, avatar ONLY on mutual add (server rule). */
   async viewProfile(username) {
     return this.api.userProfile(this.#requireToken(), String(username).toLowerCase());

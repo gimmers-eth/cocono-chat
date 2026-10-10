@@ -909,3 +909,37 @@ test('media: the new limiters join the catalog (admin labels, overrides, clear-b
     assert.equal(nope.statusCode, 400);
   } finally { await ctx.teardown(); }
 });
+
+test('media: a staff-BANNED account cannot move bytes either (M4 × moderation)', async () => {
+  const ctx = await setupLive();
+  try {
+    const alice = await createUser(ctx, makeClient(), 'alice');
+    const bob = await createUser(ctx, makeClient(), 'bobby');
+    const up = await upload(ctx, alice.token, { kind: 'image' });
+    assert.equal(up.res.statusCode, 201, up.res.body);
+    const id = up.res.json().id;
+
+    // BAN the account the way the admin does (the flag on the user doc): the
+    // bearer hook then refuses EVERY authenticated call, and the media routes
+    // are authenticated calls — the blob locker is not a side door.
+    await ctx.mongo.db.collection('users').updateOne({ ul: 'alice' }, { $set: { banned: true } });
+    const after = await upload(ctx, alice.token, { kind: 'image' });
+    assert.equal(after.res.statusCode, 403);
+    assert.equal(after.res.json().error, 'account_banned');
+    assert.equal((await ctx.app.inject({ method: 'GET', url: `/api/media/${id}`, headers: auth(alice.token) })).statusCode, 403);
+    assert.equal((await ctx.app.inject({
+      method: 'POST', url: `/api/media/${id}/ack`, payload: { downloaded: true }, headers: auth(alice.token),
+    })).statusCode, 403);
+    // and there is no live channel either: the upgrade itself is refused with
+    // 4403 (lib/moderation.js — a dead-session code, so the SDK stops
+    // reconnecting), which means a banned account cannot even deliver the
+    // envelope that would reference a blob
+    const closed = await new Promise((resolve, reject) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${ctx.port}/ws?token=${alice.token}`);
+      const timer = setTimeout(() => { ws.close(); reject(new Error('the banned session was never closed')); }, 8000);
+      ws.on('close', (code) => { clearTimeout(timer); resolve(code); });
+      ws.on('error', () => { clearTimeout(timer); resolve('error'); });
+    });
+    assert.equal(closed, 4403);
+  } finally { await ctx.teardown(); }
+});

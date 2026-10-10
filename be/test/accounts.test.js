@@ -71,7 +71,7 @@ test('signup rejects invalid usernames and reserved names', async () => {
     const tooLong = 'a'.repeat(65); // L3 fix: usernames capped at 64
     // reserved exact names + reserved prefixes ('cocono*' / 'co-co-no*')
     for (const u of ['abc', 'has space', 'punct!', 'server', 'admin', 'user', 'username',
-      'CoCoNo', 'coconofan', 'co-co-no', 'co-co-no-x', tooLong]) {
+      'CoCoNo', 'cocon', 'coconofan', 'co-co-no', 'co-co-no-x', tooLong]) {
       const res = await signupUser(app, client, u, randomAesKey(), d);
       assert.equal(res.statusCode, 400, `username ${u.slice(0, 20)} should be rejected`);
     }

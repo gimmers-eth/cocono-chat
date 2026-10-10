@@ -105,7 +105,12 @@ export default async function wsRoutes(app, { users, redis, config, messages, se
     const token = request.query.token;
     const payload = typeof token === 'string' ? verifyJwt(token, config.jwtSecret) : null;
     if (!payload) return socket.close(4401, 'unauthorized');
-    const user = await users.findOne({ ul: payload.sub }, { projection: { 'devices.id': 1 } });
+    const user = await users.findOne({ ul: payload.sub }, { projection: { 'devices.id': 1, banned: 1 } });
+    if (user?.banned === true) {
+      // staff BAN: no live channel (4403 also stops the SDK's reconnect —
+      // the transport treats it as a dead session; lib/moderation.js)
+      return socket.close(4403, 'account_banned');
+    }
     if (!user?.devices.some((dev) => dev.id === payload.d)) {
       return socket.close(4401, 'unauthorized');
     }

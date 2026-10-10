@@ -3,6 +3,7 @@ import { isValidUsername } from '../../lib/username.js';
 import { fail, limited, requireAuth } from '../shared.js';
 import { effectiveLimit } from '../../lib/limits.js';
 import { badgesFor, visibleDisplayBadge } from '../../lib/badges.js';
+import { effectiveVerified, moderationFlags } from '../../lib/moderation.js';
 
 // GET /api/users/:username/keys — authenticated lookup of a user's device key
 // material (Ed25519 verification key + X25519 agreement key), so clients can
@@ -32,8 +33,12 @@ export default async function userKeysRoutes(app, { users, redis, config, settin
       joinedAt: user.createdAt,
       // public account facts like this are directory-visible metadata (JWT
       // gate already required); drives the grey certificate badge in clients
-      verified: !!user.verified,
+      // — a staff TIMEOUT reads as UNVERIFIED here (lib/moderation.js), and
+      // its malicious/banned marks make clients swap the trust icon for the
+      // staff warning (no clock: remaining time is admin-only)
+      verified: effectiveVerified(user),
       premium: !!user.premium,
+      ...moderationFlags(user),
       badges: badgesFor(user),
       displayBadge: visibleDisplayBadge(user),
       id: user.identity?.p ?? user.devices?.[0]?.pub ?? null,

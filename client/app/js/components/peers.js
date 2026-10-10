@@ -9,8 +9,8 @@
 // dropdown that floats OVER the content below its (position:relative)
 // container and dismisses on outside click.
 
-import { knownPeers, loadFriends, loadPeerChips, loadPeerBlocked, loadPeerVerifications, loadPeerAvatars, loadPeerTags } from '../store.js';
-import { resolvePeerState, PS } from './peername.js';
+import { knownPeers, loadFriends, loadPeerChips, loadPeerBlocked, loadPeerVerifications, loadPeerAvatars, loadPeerTags, loadPeerModeration } from '../store.js';
+import { resolvePeerState, PS, moderationOf } from './peername.js';
 import { lineKids } from './userline.js';
 import { nameChipEl } from '../badges.js';
 import { currentFilter } from '../tags.js';
@@ -114,8 +114,8 @@ export function createPeerSuggestions(listEl, { max = Infinity, floating = false
 export function makeTrustDecorator() {
   return async (nameEl, peer) => {
     const ul = String(peer).toLowerCase();
-    const [fs, chips, blocked, verified] = await Promise.all([
-      loadFriends().catch(() => []), loadPeerChips(), loadPeerBlocked(), loadPeerVerifications(),
+    const [fs, chips, blocked, verified, moderation] = await Promise.all([
+      loadFriends().catch(() => []), loadPeerChips(), loadPeerBlocked(), loadPeerVerifications(), loadPeerModeration(),
     ]);
     const ent = fs.find((f) => f.peer === ul);
     const state = blocked.get(ul) ? PS.BLOCKED
@@ -124,6 +124,8 @@ export function makeTrustDecorator() {
         bound: !!ent?.trusted,
         verified: !!ent?.verified,
         trusted: !!ent?.trust,
+        // staff TIMEOUT / BAN outranks the ladder (peername.js)
+        moderation: moderationOf(moderation.get(ul)),
       });
     const chip = nameChipEl(chips.get(ul) ?? null);
     if (chip) chip.classList.add('name-chip-inline');
