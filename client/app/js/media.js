@@ -57,10 +57,6 @@ export function releaseScope(scope) {
   set.clear();
 }
 
-export function revokeAllObjectUrls() {
-  for (const scope of [...urlScopes.keys()]) releaseScope(scope);
-}
-
 /** m:ss for a video length (shared by the bubble badge and the wall tile —
  *  two call sites that must not disagree about what '0:07' means). */
 export function durationText(sec) {

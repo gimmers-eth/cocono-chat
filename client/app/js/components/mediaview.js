@@ -12,7 +12,7 @@
 // which is also what makes a sender-controlled filename harmless.
 
 import { iconEl } from '../icons.js';
-import { mediaWith, messagesWith, getMedia, updateMedia } from '../store.js';
+import { mediaWith, messagesWith, updateMedia } from '../store.js';
 import {
   formatSize, durationText, isBlurred, objectUrl, releaseScope, filterMedia,
   tabBuckets, downloadMedia, declineMedia, renderableAsImage,
@@ -414,7 +414,3 @@ function previewStill(row) {
   img.src = objectUrl(row.thumb, 'viewer');
   return img;
 }
-
-/** The row a viewer was opened from may be re-read after a download; chat.js
- *  repaints the transcript and re-opens the pane with the fresh record. */
-export const reloadMediaRow = (id) => (id ? getMedia(id) : Promise.resolve(null));
