@@ -7,7 +7,7 @@ import { verifyEnvelope } from './envelope.js';
 import { devKey, sendJson, PENDING_BATCH } from './protocol.js';
 import { sendBlindPush, presenceKey, pushSentKey } from '../../lib/push.js';
 import { recordContactEdge } from '../../lib/shares.js';
-import { effectiveVerified } from '../../lib/moderation.js';
+import { timeoutActive } from '../../lib/moderation.js';
 
 export function createHandlers({ users, redis, pub, config, messages, settings, counters, contacts }) {
   async function handleSend(socket, request, body, auth) {
@@ -66,19 +66,17 @@ export function createHandlers({ users, redis, pub, config, messages, settings, 
     }
     if (sender.blocked?.includes(rul)) return ack(false, 'self_blocked'); // (sender doc already loaded above)
 
-    // Cold-send policy (identity verification): an UNVERIFIED account may
-    // only message someone who added them as a friend, or who messaged
-    // them first (so replies always work). Verified accounts may message
-    // anyone. This is the anti-spam gate a public messenger needs (P0 #1
-    // sibling): names alone cannot harvest the directory. EFFECTIVE
-    // verified: a staff-timed-out account loses the cold-send privilege
-    // for as long as its timeout runs (lib/moderation.js).
-    if (config.coldSendRequiresVerification && !effectiveVerified(sender) && rul !== auth.sub) {
+    // Cold-send policy — MODERATION-SCOPED (policy change 2026-10): normal
+    // accounts, verified OR unverified, may message anyone; the historical
+    // block on unverified senders is LIFTED. The gate now bites ONLY while a
+    // staff TIMEOUT runs (lib/moderation.js): a timed-out account may message
+    // only people who ADDED it. Deliberately stricter than the old ladder —
+    // NO prior-contact reply exemption: an account flagged as malicious could
+    // otherwise wait to be messaged and then walk into any fresh victim.
+    // The multi-device sync copy (rul === own account) is untouched.
+    if (config.coldSendRequiresVerification && timeoutActive(sender) && rul !== auth.sub) {
       const addedMe = (recipient.friends ?? []).some((f) => (typeof f === 'string' ? f : f.u) === auth.sub);
-      if (!addedMe) {
-        const firstContact = await messages.findOne({ 'from.ul': rul, 'to.ul': auth.sub }, { projection: { _id: 1 } });
-        if (!firstContact) return ack(false, 'verify_required');
-      }
+      if (!addedMe) return ack(false, 'verify_required');
     }
 
     const doc = {

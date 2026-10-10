@@ -492,56 +492,76 @@ test('ws presence frame: blur releases presence, focus restores it', async () =>
   }
 });
 
-test('messaging: cold-send policy — unverified senders only reach friend-adders and prior contacts', async () => {
+test('messaging: cold-send policy — normal accounts message freely, staff-timed-out senders only reach friend-adders', async () => {
   const ctx = await setupLive({ coldSendRequiresVerification: true });
   try {
     const alice = await createUser(ctx, makeClient(), 'alice');
     const bobby = await createUser(ctx, makeClient(), 'bobby');
     const carol = await createUser(ctx, makeClient(), 'carol');
     const wsA = await connectWs(ctx.port, alice.token);
-    const wsB = await connectWs(ctx.port, bobby.token);
     await wsA.waitFor((m) => m.type === 'hello');
-    await wsB.waitFor((m) => m.type === 'hello');
 
-    // 1) stranger cold send is rejected for the unverified
+    // 1) POLICY CHANGE: an UNVERIFIED normal account may now cold-message a
+    // stranger — the historical block on unverified senders is LIFTED.
     const cid1 = 'cid-cold-1';
     wsA.send({ type: 'msg', msg: buildEnvelope(alice, bobby, bobby.d, cid1).env });
     const ack1 = await wsA.waitFor((m) => m.type === 'ack' && m.cid === cid1);
-    assert.equal(ack1.ok, false);
-    assert.equal(ack1.error, 'verify_required');
+    assert.equal(ack1.ok, true, `unverified cold send now allowed: ${JSON.stringify(ack1)}`);
 
-    // 2) same in the other direction while nothing connects them
+    // 2) A STAFF TIMEOUT (lib/moderation.js) re-closes the gate: only people
+    // who ADDED the timed-out account may be messaged by it.
+    await ctx.mongo.db.collection('users').updateOne(
+      { ul: 'alice' }, { $set: { timeoutUntil: new Date(Date.now() + 60_000) } });
     const cid2 = 'cid-cold-2';
-    wsB.send({ type: 'msg', msg: buildEnvelope(bobby, alice, alice.d, cid2).env });
-    const ack2 = await wsB.waitFor((m) => m.type === 'ack' && m.cid === cid2);
+    wsA.send({ type: 'msg', msg: buildEnvelope(alice, carol, carol.d, cid2).env });
+    const ack2 = await wsA.waitFor((m) => m.type === 'ack' && m.cid === cid2);
     assert.equal(ack2.ok, false);
+    assert.equal(ack2.error, 'verify_required');
 
-    // 3) recipient ADDS the sender as friend -> sender may now message them
+    // 3) STRICTER than the old ladder on purpose: a prior contact earns a
+    // timed-out sender NOTHING — no reply-back door into a fresh victim.
+    // carol (normal, unrestricted) messages alice first; the old policy
+    // would now let alice reply — the timed-out policy does NOT, because
+    // carol never ADDED alice.
+    const wsC = await connectWs(ctx.port, carol.token);
+    await wsC.waitFor((m) => m.type === 'hello');
+    const cidC = 'cid-inbound-1';
+    wsC.send({ type: 'msg', msg: buildEnvelope(carol, alice, alice.d, cidC).env });
+    const ackC = await wsC.waitFor((m) => m.type === 'ack' && m.cid === cidC);
+    assert.equal(ackC.ok, true, 'a normal account can always message even the timed-out');
+    const cid3 = 'cid-cold-3';
+    wsA.send({ type: 'msg', msg: buildEnvelope(alice, carol, carol.d, cid3).env });
+    const ack3 = await wsA.waitFor((m) => m.type === 'ack' && m.cid === cid3);
+    assert.equal(ack3.ok, false, 'prior-contact exemption removed for timed-out senders');
+    wsC.ws.close();
+
+    // 4) bobby ADDS alice -> the gate opens for exactly that recipient
     const add = await ctx.app.inject({
-      method: 'PUT', url: `/api/me/friends/${alice.ul}`,
+      method: 'PUT', url: '/api/me/friends/alice',
       headers: { authorization: `Bearer ${bobby.token}` },
     });
     assert.equal(add.statusCode, 200);
-    const cid3 = 'cid-friend-1';
-    wsA.send({ type: 'msg', msg: buildEnvelope(alice, bobby, bobby.d, cid3).env });
-    const ack3 = await wsA.waitFor((m) => m.type === 'ack' && m.cid === cid3);
-    assert.equal(ack3.ok, true, JSON.stringify(ack3));
-
-    // 4) once someone messaged you first, you may ALWAYS reply (even unverified)
-    const cid4 = 'cid-reply-1';
-    wsB.send({ type: 'msg', msg: buildEnvelope(bobby, alice, alice.d, cid4).env });
-    const ack4 = await wsB.waitFor((m) => m.type === 'ack' && m.cid === cid4);
+    const cid4 = 'cid-friend-1';
+    wsA.send({ type: 'msg', msg: buildEnvelope(alice, bobby, bobby.d, cid4).env });
+    const ack4 = await wsA.waitFor((m) => m.type === 'ack' && m.cid === cid4);
     assert.equal(ack4.ok, true, JSON.stringify(ack4));
 
-    // 5) verified accounts cold-send freely (admin flipped the flag)
-    await ctx.mongo.db.collection('users').updateOne({ ul: 'alice' }, { $set: { verified: true } });
-    const cid5 = 'cid-verified-1';
+    // 5) timeout EXPIRES -> cold send works again, derived at read time
+    await ctx.mongo.db.collection('users').updateOne(
+      { ul: 'alice' }, { $set: { timeoutUntil: new Date(Date.now() - 1000) } });
+    const cid5 = 'cid-expired-1';
     wsA.send({ type: 'msg', msg: buildEnvelope(alice, carol, carol.d, cid5).env });
     const ack5 = await wsA.waitFor((m) => m.type === 'ack' && m.cid === cid5);
-    assert.equal(ack5.ok, true, JSON.stringify(ack5));
+    assert.equal(ack5.ok, true, 'a lapsed timeout silently restores the privilege');
+
+    // 6) VERIFIED normal accounts were already free and stay free
+    await ctx.mongo.db.collection('users').updateOne({ ul: 'alice' }, { $set: { verified: true } });
+    const cid6 = 'cid-verified-1';
+    wsA.send({ type: 'msg', msg: buildEnvelope(alice, carol, carol.d, cid6).env });
+    const ack6 = await wsA.waitFor((m) => m.type === 'ack' && m.cid === cid6);
+    assert.equal(ack6.ok, true, JSON.stringify(ack6));
 
     wsA.ws.close();
-    wsB.ws.close();
   } finally {
     await ctx.teardown();
   }

@@ -41,7 +41,13 @@
 //               that account has ever added you (hadAdded memory server-side;
 //               unadd/readd loops stay silent, so the notice can't be farmed).
 //               Carries `by`: the client OS-notifies "@by added you", a tap
-//               opens the chat.
+//               opens the chat. The CLOSED-APP arm of this exact headline:
+//               the same gate also writes the target's `pendingAdds` memory
+//               and fires a blind 'add' PUSH at devices with no live WS (lib/
+//               push.js pushAddHint) — their service workers re-pull
+//               GET /api/me/pending-adds over the authenticated wire and
+//               raise the same notice. Mute-gated server-side like everything
+//               else; one ack per relationship, whichever device lands first.
 //   'verify'   A contact CONFIRMED your safety number (their v-flag on you).
 //               Carries `by`. Headline event: always OS-notified.
 //   'trusts'   A contact EXTENDED TRUST to you (their t-flag on you).

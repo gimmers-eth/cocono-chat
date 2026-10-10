@@ -63,7 +63,8 @@ const TIMEOUT_PRESETS = [[1, '1d'], [7, '7d'], [30, '30d'], [36500, '100y']];
 const MOD_TIMEOUT_TEXT = (ul, label, days) => `Timeout @${ul} for ${label}?\n\n`
   + 'The account will ACT LIKE AN UNVERIFIED ONE while the clock runs: '
   + 'every user sees the DANGER icon and the "identified as malicious by '
-  + 'CoCoNo staff" warning, and it takes -1000 CoCo.'
+  + 'CoCoNo staff" warning, it takes -1000 CoCo, and it may only message '
+  + 'people who ADDED it (the cold-send gate — no reply-back door either).'
   + (days >= 36500 ? '\n\n100 YEARS ≈ PERMANENT (only clearing it by hand lifts it).' : '');
 const MOD_BAN_TEXT = (ul, on) => on
   ? `BAN @${ul}?\n\nThe account can NO LONGER USE the platform (login, API, WS all refused) — every byte of its data stays intact and an unban resumes exactly where it stopped.`
@@ -483,7 +484,7 @@ const moderationSection = (u) => `
         : u.malicious
           ? `<p><span class="badge mod-danger">timed out — treated as malicious</span><br />
              <span class="dim small-note">until ${esc(fmtDate(u.timeoutUntil))} · <strong class="mod-remaining">${esc(fmtRemaining(u.timeoutRemainingSec))}</strong> remaining</span><br />
-             <span class="dim small-note">acts like an UNVERIFIED user everywhere (danger icon + staff warning + −1000 CoCo)${u.verified ? ' — stored verification returns when the clock runs out' : ''}</span></p>`
+             <span class="dim small-note">acts like an UNVERIFIED user everywhere (danger icon + staff warning + −1000 CoCo + no cold messaging)${u.verified ? ' — stored verification returns when the clock runs out' : ''}</span></p>`
           : '<p class="dim small-note">no active timeout or ban</p>'}
       <div class="row mod-actions">
         ${TIMEOUT_PRESETS.map(([days, label]) => `<button class="tiny${u.malicious && !u.banned ? ' mod-live' : ''}"

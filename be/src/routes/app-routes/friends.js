@@ -5,6 +5,7 @@ import { effectiveLimit } from '../../lib/limits.js';
 import { createNotifier } from '../../lib/notify.js';
 import { applyBlock } from '../../lib/blockAccount.js';
 import { effectiveVerified } from '../../lib/moderation.js';
+import { pushAddHint } from '../../lib/push.js';
 
 // Friends: a per-account, ONE-WAY trust list ANCHORED TO IDENTITY KEYS.
 //
@@ -192,7 +193,7 @@ export default async function friendsRoutes(app, { users, redis, config, setting
     const target = targetOf(request);
     if (!target) return fail(reply, 'bad_username', 'Invalid username', 400);
     if (target === ul) return fail(reply, 'self_friend', 'You cannot friend yourself', 400);
-    const targetDoc = await users.findOne({ ul: target }, { projection: { identity: 1, devices: 1, blocked: 1 } });
+    const targetDoc = await users.findOne({ ul: target }, { projection: { identity: 1, devices: 1, blocked: 1, muted: 1 } });
     if (!targetDoc) return fail(reply, 'unknown_account', 'No such user', 404);
     // ground-truth binding — whatever the client thinks, we store the NOW
     // BLOCK GATE (add seam): the blocker never learns who tried — the
@@ -230,10 +231,64 @@ export default async function friendsRoutes(app, { users, redis, config, setting
     if (freshAdd && !(user?.hadAdded ?? []).includes(target)) {
       await users.updateOne({ ul }, { $addToSet: { hadAdded: target } });
       await notifyAccount(target, 'request', { by: ul });
+      // CLOSED-APP / BACKGROUND arm of the same headline. pendingAdds is the
+      // per-account memory (WHO added me, unconsumed) that lets a sleeping
+      // device's service worker re-pull the actor over OUR wire after a
+      // blind 'add' push — no username ever crosses the push service, and
+      // the once-per-relationship guarantee is structural: this branch only
+      // runs inside the hadAdded gate, and entries are consumed (acked) by
+      // whichever device wakes first. MUTE GATE (all emitters, doctrine):
+      // the target muted this actor -> the headline stays fully silent.
+      if (!(targetDoc.muted ?? []).includes(ul)) {
+        await users.updateOne(
+          { ul: target },
+          {
+            $push: {
+              pendingAdds: {
+                $each: [{ by: ul, at: new Date() }],
+                // newest last; capped so a never-opened account cannot grow
+                // the doc unbounded (old entries lose their news value fast)
+                $slice: -25, $sort: { at: 1 },
+              },
+            },
+          },
+        );
+        await pushAddHint(users, redis, config, target, ul);
+      }
     } else {
       await notifyAccount(target, 'friends', { by: ul });
     }
     return { friends: await enriched(ul) };
+  });
+
+  // GET /api/me/pending-adds — who added me that no device has surfaced
+  // yet (authed: the caller only ever learns adds on their OWN account).
+  // Newest last; the SW renders the tail. Reads are NOT consumption — the
+  // device acks after it actually shows the headline.
+  app.get('/api/me/pending-adds', async (request, reply) => {
+    const denied = await guard(request, reply, 'friends');
+    if (denied) return denied;
+    const me = await users.findOne(
+      { ul: request.auth.sub },
+      { projection: { pendingAdds: 1 } },
+    );
+    return { adds: me?.pendingAdds ?? [] };
+  });
+
+  // POST /api/me/pending-adds/ack { by } — consume ONE entry (this device
+  // showed or surfaced "@by added you"). Keyed by actor, so a device racing
+  // another that already acked simply acks a no-op — one headline per
+  // relationship, exactly like the hadAdded gate upstream.
+  app.post('/api/me/pending-adds/ack', async (request, reply) => {
+    const denied = await guard(request, reply, 'friendschange');
+    if (denied) return denied;
+    const by = String(request.body?.by ?? '').toLowerCase();
+    if (!by) return fail(reply, 'invalid_request', 'by is required', 400);
+    await users.updateOne(
+      { ul: request.auth.sub },
+      { $pull: { pendingAdds: { by } } },
+    );
+    return { acked: true };
   });
 
   // shared flag setter for the two post-add stages (verify / trust)

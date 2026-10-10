@@ -58,6 +58,16 @@ export class Api {
     return this.#request(`/api/users/${encodeURIComponent(ul)}/stats`, { token });
   }
 
+  // who added me, not yet surfaced by any device (the blind-push wake reads
+  // this over the authenticated wire; the username NEVER crosses the push
+  pendingAdds(token) {
+    return this.#request('/api/me/pending-adds', { token });
+  }
+
+  ackPendingAdd(by, token = undefined) {
+    return this.#request('/api/me/pending-adds/ack', { method: 'POST', body: { by }, token });
+  }
+
   submitIdDoc(token, { contentType, data }) {
     return this.#request('/api/me/verify-id', { method: 'POST', body: { contentType, data }, token });
   }

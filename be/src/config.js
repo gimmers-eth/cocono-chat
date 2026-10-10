@@ -207,10 +207,14 @@ export const config = {
 
   // Identity verification (real-person check by the admin, distinct from
   // the peer trust ladder):
-  // - unverified accounts may only message people who ADDED them as a
-  //   friend, or who MESSAGED them first — no cold-messaging the directory.
   // - users upload an ID photo (image only, size-capped) via the app;
   //   only the admin can flip the verified flag, and can purge the image.
+  // - COLD-SEND GATE (policy change 2026-10): the historical block on
+  //   UNVERIFIED senders is LIFTED — normal accounts, verified or not, may
+  //   message anyone. The flag now enables the moderation-scoped gate:
+  //   a STAFF-TIMED-OUT account may only message people who added it
+  //   (ws-routes/handlers.js, lib/moderation.js). The env name is kept for
+  //   operational continuity; false disables the timed-out gate too.
   coldSendRequiresVerification: env.COLD_SEND_REQUIRES_VERIFICATION !== 'false',
   // CoCo social score (be/src/lib/cocoScore.js): trusted needs score >
   // threshold AND account older than the minimum age

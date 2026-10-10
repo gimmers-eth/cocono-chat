@@ -162,10 +162,12 @@ is the only FE (audits mentioning `fe/` are historical).
   — tamper-evident history — remains deliberately deferred to P2; groups
   will force it.)
 - **Identity verification (real person, admin-checked)** — distinct from the
-  trust ladder above. Unverified accounts can only message people who ADDED
-  them as a friend, or who MESSAGED them first (cold-send gate, config
-  `COLD_SEND_REQUIRES_VERIFICATION`, enforced in the WS send path — ack
-  `verify_required` surfaces as the failed state on the bubble). Users start
+  trust ladder above. Cold messaging is open to all normal accounts (the
+  historical block on unverified senders was LIFTED, 2026-10); the cold-send
+  gate now bites ONLY while a staff TIMEOUT runs — a timed-out account may
+  message only people who ADDED it, with no prior-contact reply exemption
+  (config `COLD_SEND_REQUIRES_VERIFICATION`, enforced in the WS send path —
+  ack `verify_required` surfaces as the failed state on the bubble). Users start
   the process from the orange "Get verified" link next to their own name or
   the settings drawer: upload an ID photo (PNG/JPEG ≤ `ID_DOC_MAX_BYTES`,
   bodyLimit route-scoped, rate-limited per IP + account, never returned to

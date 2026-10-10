@@ -171,10 +171,68 @@ async function showMsgNotification() {
   await upgrade.catch(() => {});
 }
 
+// ---- 'add' push: the closed-app arm of "@x added you" -------------------
+// The push is BLIND (type only — no username crosses the push service).
+// We wake, do the same silent login the message-preview path uses, and
+// re-pull GET /api/me/pending-adds over OUR authenticated wire: the WHO
+// arrives locally, the notification can name the actor and carry the peer
+// for the tap-straight-into-chat. Consumption is the account's, not the
+// device's: an ack removes the entry for every device (same rule the badge
+// dispatch follows — one headline per relationship, first surface wins).
+// Nothing new to show (another device already surfaced it, or the adder is
+// not actually pending) => stay SILENT: no generic downgrade of a spent
+// headline. Only a hard FAILURE gets the generic 'open to see' banner.
+async function showAddNotification() {
+  const lib = swLib();
+  const record = await lib.loadIdentity();
+  if (!record) throw new Error('no identity on this device');
+  const { token } = await lib.login(record);
+  const res = await fetch('/api/me/pending-adds', {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`pending-adds HTTP ${res.status}`);
+  const adds = (await res.json()).adds ?? [];
+  // only adds NEWER than what this worker last surfaced (a failed ack must
+  // not re-notify yesterday's headline on tomorrow's push)
+  const seenAt = Number(await lib.kvGet('lastaddseen')) || 0;
+  const fresh = adds.filter((a) => new Date(a.at).getTime() > seenAt);
+  if (!fresh.length) return false; // spent: stay silent
+  const latest = fresh.reduce((m, a) => (new Date(a.at) > new Date(m.at) ? a : m), fresh[0]);
+  try { cachedTitle = await appTitle(); } catch { /* keep cache */ }
+  pendingPeerTag = latest.by;
+  await showNotification(cachedTitle, `@${latest.by} added you — tap to chat`, 'add');
+  await lib.kvSet('lastaddseen', String(new Date(latest.at).getTime()));
+  // consume for the whole account; a lost ack just means the next push
+  // re-shows it — the client-side seenAt guard keeps THIS worker honest
+  await fetch('/api/me/pending-adds/ack', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify({ by: latest.by }),
+  }).catch(() => {});
+  return true;
+}
+
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { /* blind */ }
   const type = data.t || 'activity';
+
+  if (type === 'add') {
+    event.waitUntil(
+      showAddNotification().catch(async (err) => {
+        const why = String(err?.message ?? err).slice(0, 160);
+        console.warn('[sw] add headline failed:', why);
+        reportSwFailure(why);
+        // failure only: the account DID gain a contact, we just cannot say
+        // who — the open app's reconcile will show it. The peer is cleared
+        // first: a STALE pendingPeerTag from an earlier rich notification
+        // must not ride the generic banner and open the wrong chat.
+        pendingPeerTag = null;
+        await showNotification(cachedTitle, 'New activity — open to see', 'add');
+      }),
+    );
+    return;
+  }
 
   if (type !== 'msg') {
     // type is the ONLY signal (blind push); deliberately generic —

@@ -7,7 +7,9 @@
 //   unverified), the worn badge chip hides, the profile photo goes (it was
 //   shown under a trust state just withdrawn), every client shows the
 //   DANGER mark in place of any trust icon + a staff warning on the
-//   profile, and the account's CoCo carries a flat -cocoTimeoutPenalty.
+//   profile, the account's CoCo carries a flat -cocoTimeoutPenalty, and the
+//   COLD-SEND GATE closes: a timed-out account may only message people who
+//   ADDED it — no prior-contact reply-back door (ws-routes/handlers.js).
 //   Expiry is DERIVED (stored timeoutUntil vs now) at every read — there is
 //   no cleanup job to forget and no window where a lapsed timeout still
 //   bites or a live one silently early-expires. A 100-year timeout is just
