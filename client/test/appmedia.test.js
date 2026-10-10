@@ -141,6 +141,24 @@ test('media: local pruning drops bytes, keeps records, honours Keep', () => {
   assert.equal(pruneDue(rows, { now, days: LOCAL_RETENTION_DAYS_DEFAULT }).length, 1);
 });
 
+test('media: the retention window is measured from when the bytes ARRIVED', () => {
+  const day = 86_400_000;
+  const now = 40 * day;
+  const rows = [
+    // a photo in a three-week-old chat, downloaded yesterday: the message is
+    // old, the bytes are not — dropping them would delete what the user just
+    // waited for, which is the bug this guards
+    { id: 'fresh-download', state: 'stored', ts: now - 21 * day, storedAt: now - day, keep: false },
+    // the same thing pulled three weeks ago: now it is due
+    { id: 'stale-download', state: 'stored', ts: now - 21 * day, storedAt: now - 20 * day, keep: false },
+    // a sender's own copy (written when the bytes were made, no storedAt yet):
+    // falls back to the message time, and it is due
+    { id: 'own-old-copy', state: 'stored', ts: now - 21 * day, keep: false },
+  ];
+  assert.deepEqual(M.pruneDue(rows, { now, days: 7 }).map((r) => r.id),
+    ['stale-download', 'own-old-copy']);
+});
+
 test('media: links are pulled out of the transcript client-side', () => {
   const links = extractLinks('see https://co.co.no/x?a=1, and http://example.com/y. also https://co.co.no/x?a=1 again');
   assert.deepEqual(links.map((l) => l.url), ['https://co.co.no/x?a=1', 'http://example.com/y'],

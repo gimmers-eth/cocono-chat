@@ -506,3 +506,35 @@ test('expand: an expanded photo is a rectangle, an avatar stays a circle', async
     'and the avatar zoom this control was born for is untouched');
   teardown();
 });
+
+test('viewer: a PRUNED file may be fetched again; an expired one may not', async () => {
+  await fresh();
+  // 'pruned' is this device dropping bytes it already had — only the server
+  // knows whether a copy survives (another device may still owe an ack), so
+  // the honest UI asks it rather than guessing either way
+  const pruned = await stored({ id: 'vPrune' });
+  await store.updateMedia('vPrune', M.prunePatch(pruned));
+  const again = await store.getMedia('vPrune');
+  const host = dom.byId('msg-media');
+  let teardown = view.openViewer(host, {
+    client: fakeClient(), msg: { dir: 'in', kind: 'file' }, row: again,
+    verified: true, onChange: () => {}, onStatus: () => {},
+  });
+  const dl = host.querySelectorAll('.viewer-toggle').find((b) => /Download again/i.test(b.textContent));
+  assert.ok(dl, 'the button admits a second attempt is possible');
+  assert.equal(dl.disabled, false, 'and does not refuse on the app\'s own guess');
+  assert.ok(!/cannot be downloaded again/i.test(host.textContent), 'no claim it cannot back');
+  teardown();
+
+  // 'expired' IS settled — the server already said it has nothing
+  const gone = row({ id: 'vGone2' });
+  gone.state = 'expired'; gone.data = null; gone.thumb = null;
+  await store.saveMedia(gone);
+  teardown = view.openViewer(dom.byId('msg-media'), {
+    client: fakeClient(), msg: { dir: 'in', kind: 'image' }, row: gone,
+    verified: true, onChange: () => {}, onStatus: () => {},
+  });
+  const dead = dom.byId('msg-media').querySelectorAll('.viewer-toggle').find((b) => /Cannot be downloaded/i.test(b.textContent));
+  assert.ok(dead && dead.disabled === true, 'a gone blob is stated, not retried');
+  teardown();
+});

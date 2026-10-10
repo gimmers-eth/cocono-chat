@@ -162,6 +162,30 @@ test('pipeline: decline deletes nothing locally that the user still sees, and ac
   assert.equal(after.data, null, 'req 6: delete-before-download leaves no bytes behind');
 });
 
+test('pipeline: a completed download is stamped, so the next sweep spares it', async () => {
+  await freshAccount();
+  M.setLocalRetentionDays(7);
+  const day = 86_400_000;
+  const oldTs = Date.now() - 30 * day;   // a message from a month ago
+  const cli = fakeClient();
+  const row = M.mediaRow({ key: 'late', peer: 'bobby', dir: 'in', kind: 'file',
+    media: { id: 'late', kind: 'file', name: 'late.pdf', key: 'k', iv: 'i', sha256: 's' },
+    msgId: 'in:late', ts: oldTs });
+  await store.saveMedia(row);
+  await M.downloadMedia(cli, row);
+
+  const after = await store.getMedia('late');
+  assert.equal(after.state, 'stored');
+  assert.ok(after.storedAt >= oldTs, 'the record knows WHEN the bytes arrived');
+  assert.equal(await M.pruneLocalMedia(), 0,
+    'and a file the user just chose to download is not dropped minutes later');
+
+  // pin it into the past and the very same record IS due
+  await store.updateMedia('late', { storedAt: Date.now() - 9 * day });
+  assert.equal(await M.pruneLocalMedia(), 1);
+  assert.equal((await store.getMedia('late')).state, 'pruned');
+});
+
 test('pipeline: an outgoing row with no blob id yet never calls the wire', async () => {
   await freshAccount();
   const cli = fakeClient();
@@ -179,11 +203,13 @@ test('pipeline: local retention drops bytes, keeps the record, honours Keep', as
   // this exercises the same path the settings drawer uses
   M.setLocalRetentionDays(7);
   const old = Date.now() - 40 * day;
-  const mk = (id, kind, over) => store.saveMedia(stubRow({ id, kind, ts: old, state: 'stored', data: new Blob(['bytes']), thumb: new Blob(['t']), ...over }));
+  // storedAt is set with the bytes (the retention clock starts when they
+  // LAND, not when the message was sent) — these rows are genuinely old copies
+  const mk = (id, kind, over) => store.saveMedia(stubRow({ id, kind, ts: old, storedAt: old, state: 'stored', data: new Blob(['bytes']), thumb: new Blob(['t']), ...over }));
   await mk('img-old', 'image');
   await mk('img-pinned', 'image', { keep: true });
   await mk('file-old', 'file');
-  await store.saveMedia(stubRow({ id: 'img-new', kind: 'image', ts: Date.now(), state: 'stored', data: new Blob(['bytes']), thumb: new Blob(['t']) }));
+  await store.saveMedia(stubRow({ id: 'img-new', kind: 'image', ts: Date.now(), storedAt: Date.now(), state: 'stored', data: new Blob(['bytes']), thumb: new Blob(['t']) }));
 
   const dropped = await M.pruneLocalMedia();
   assert.equal(dropped, 2, 'the two unpinned out-of-window rows (not the pinned one, not the fresh one)');

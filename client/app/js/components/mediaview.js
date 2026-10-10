@@ -374,12 +374,20 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
     controls.append(b);
   }
   if (row.state !== 'stored') {
-    const dl = btn('viewer-toggle', 'mediaDownload', row.state === 'pruned' ? 'Cannot re-download' : 'Download',
-      'Download the full file to this device');
-    if (row.state === 'pruned' || row.state === 'expired' || row.state === 'declined') dl.disabled = true;
-    dl.title = row.state === 'pruned' || row.state === 'expired'
+    // 'pruned' is NOT 'expired': the local retention job dropped bytes this
+    // device already had, and only the server knows whether a copy is still
+    // there (another device may still owe an ack). So that case OFFERS the
+    // attempt and lets the answer speak — a refused download is a fact, a
+    // guessed one is a lie. 'expired'/'declined' are settled: nothing to ask.
+    const retry = row.state === 'pruned';
+    const settled = row.state === 'expired' || row.state === 'declined';
+    const dl = btn('viewer-toggle', 'mediaDownload',
+      retry ? 'Download again' : settled ? 'Cannot be downloaded' : 'Download',
+      retry ? 'Fetch it again — if the server still holds a copy' : 'Download the full file to this device');
+    dl.disabled = settled;
+    dl.title = settled
       ? 'The server no longer holds this file — it cannot be downloaded again.'
-      : 'Download the full file to this device';
+      : dl.title;
     dl.addEventListener('click', async () => {
       dl.disabled = true;
       status('Downloading…');

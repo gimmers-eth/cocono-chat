@@ -287,19 +287,34 @@ export function isBlurred(rec, verified) {
   return verified !== true;
 }
 
-/** Records whose DECRYPTED bytes are past the local window and unpinned.
- *  `keep` (the viewer's 'Keep on this device') is the only exemption —
- *  re-download is impossible once the server deleted the blob, so a pinned
- *  record is a deliberate choice, not an oversight. */
+/**
+ * Records whose DECRYPTED bytes are past the local window and unpinned.
+ *
+ * The clock starts when the bytes LANDED ON THIS DEVICE (`storedAt`), not when
+ * the message was sent. Reading `ts` instead — which an earlier version did —
+ * made manual downloads meaningless: open a three-week-old conversation, tap
+ * Download on a file, and the next prune pass drops the bytes you just waited
+ * for, because the message is old. `ts` stays what it always was: the position
+ * of the media in the conversation timeline.
+ *
+ * `keep` (the viewer's 'Keep on this device') is the only exemption.
+ */
 export function pruneDue(records, { now = Date.now(), days = LOCAL_RETENTION_DAYS_DEFAULT } = {}) {
   const cutoff = now - Math.max(0, Number(days) || 0) * 86_400_000;
-  return (records ?? []).filter((r) => r && r.state === 'stored' && r.keep !== true && Number(r.ts) < cutoff);
+  return (records ?? []).filter((r) => r && r.state === 'stored' && r.keep !== true
+    && Number(r.storedAt ?? r.ts) < cutoff);
 }
 
 /** Dropping bytes keeps the record: name, size, date and direction stay (the
  *  transcript row never moves), only the payload goes. Images/videos KEEP
  *  their thumbnail so the wall still has something to show; a file's thumb is
  *  the icon the renderer draws anyway, so it goes with the bytes. */
+/**
+ * Dropping the bytes keeps everything the user can still act on: the
+ * transcript row, the name/size/date, and for a picture or a video the
+ * thumbnail (the wall would otherwise empty out). A file's thumb goes with its
+ * bytes because the row draws an icon anyway.
+ */
 export function prunePatch(rec) {
   const keepThumb = rec.kind === 'image' || rec.kind === 'video';
   return { data: null, thumb: keepThumb ? rec.thumb ?? null : null, state: 'pruned' };
@@ -512,6 +527,8 @@ export function mediaRow({ key, blobId = key, peer, dir, kind, media, msgId, ts 
     animated: media?.animated === true,
     state: 'pending',      // nothing on this device yet (the sender's own row
                            // is written 'stored' by the caller — it made the bytes)
+    storedAt: null,        // when the bytes ARRIVED here: the prune clock
+                           // (ts is the conversation position, a different thing)
     keep: false,
     blurred: null,         // null = no override, use the verified-flag default
     data: null,
@@ -560,7 +577,7 @@ export async function downloadMedia(client, row, { thumbOnly = false } = {}) {
     }
     await updateMedia(row.id, { state: 'downloading' });
     const { data, thumb } = await client.downloadMedia(blob, row);
-    await updateMedia(row.id, { data, ...(thumb ? { thumb } : {}), state: 'stored' });
+    await updateMedia(row.id, { data, ...(thumb ? { thumb } : {}), state: 'stored', storedAt: Date.now() });
     // ack AFTER the bytes are safely on the device: that is what lets the
     // server delete the blob (req 8)
     await client.ackMedia(blob, true).catch(() => {});
