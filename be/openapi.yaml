@@ -417,6 +417,60 @@ paths:
           description: Exclusive vouch-stage buckets (addedBy / verifiedBy / trustedBy) plus the CoCo score (verifiedBy + 3×trustedBy, see docs/COCO_SCORE.md).
         '404': { description: 'No such user.' }
 
+  /api/share/hit:
+    post:
+      tags: [accounts]
+      operationId: shareHit
+      summary: Report that this account opened someone's share link
+      description: |
+        The "seen" half of share-link attribution (docs/SHARES.md): an account
+        that ALREADY existed opened `/?chat=<o>`. Requires a session — the fact
+        being stored is a relation between two accounts, and an anonymous
+        endpoint here would be a free write-anywhere graph spoofer. The write
+        is an upsert on the (owner, viewer) pair, so repeated clicks bump a
+        counter instead of adding rows; rate limited per account (`sharehit`).
+
+        Opening your OWN link is not an attribution event: `{recorded:false}`.
+        Nothing about any conversation is recorded.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [o]
+              properties:
+                o:
+                  allOf:
+                    - $ref: '#/components/schemas/Username'
+                  description: The link owner (the account that shared).
+            example: { o: alice }
+      responses:
+        '200': { description: '`{recorded: true|false, o}` — false for your own link.' }
+        '400': { description: 'Malformed username.' }
+        '401': { description: 'Missing or invalid token.' }
+        '404': { description: 'The link owner no longer exists.' }
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /api/me/share-link:
+    get:
+      tags: [accounts]
+      operationId: myShareLink
+      summary: Your own share-link path and what it has produced (counts only)
+      description: |
+        `{ ul, path, created, clicked }` — the deep link to hand out, how many
+        accounts were CREATED from it, and how many accounts have opened it.
+        Counts only: the app never learns WHO, that view belongs to the admin
+        panel (docs/SHARES.md).
+      security:
+        - bearerAuth: []
+      responses:
+        '200': { description: 'Link path + created/clicked counts.' }
+        '401': { description: 'Missing or invalid token.' }
+
   /api/me/verify-id:
     post:
       tags: [auth]
@@ -776,7 +830,7 @@ components:
       properties:
         limit:
           type: integer
-          description: Actions allowed in the window (admin layering: user > app > default).
+          description: 'Actions allowed in the window (admin layering: user > app > default).'
         used:
           type: integer
           description: Spend so far, clamped to the limit (blocked attempts still count).
@@ -823,7 +877,7 @@ components:
 
     SignupRequest:
       type: object
-      required: [u, p, a, d, t, s]
+      required: [u, p, x, a, d, t, s]
       properties:
         u:
           $ref: '#/components/schemas/Username'
@@ -843,8 +897,25 @@ components:
             - $ref: '#/components/schemas/Signature'
           description: |
             Ed25519 signature over the UTF-8 bytes of the canonical JSON of
-            `{ a, d, p, t, u }` (keys sorted, no whitespace). Single-use:
+            `{ a, d, p, t, u, x }` (keys sorted, no whitespace). Single-use:
             the server rejects any signature it has seen before.
+        x:
+          allOf:
+            - $ref: '#/components/schemas/PublicKey'
+          description: |
+            Raw 32-byte X25519 key-agreement public key, base64url-encoded
+            (milestone 3: pairwise conversation keys). Covered by `s`.
+        r:
+          allOf:
+            - $ref: '#/components/schemas/Username'
+          description: |
+            OPTIONAL, UNSIGNED referral: the username whose share link
+            (`/?chat=<r>`) this signup followed. Recorded as the new account's
+            parent (`users.ref`) and as a `created` edge in the admin graph.
+            Deliberately outside the signature — widening it would break every
+            shipped client for a field that grants nothing (no reward, no
+            score, no capability). Junk, self-referrals and unknown names are
+            ignored; see docs/SHARES.md.
 
     SignupResponse:
       type: object
@@ -852,6 +923,10 @@ components:
       properties:
         u:
           $ref: '#/components/schemas/Username'
+        ref:
+          allOf:
+            - $ref: '#/components/schemas/Username'
+          description: Echoed when `r` was accepted (the account's parent).
 
     ChallengeRequest:
       type: object

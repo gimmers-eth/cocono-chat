@@ -92,7 +92,7 @@ and read markers (`deleteAccountData()` in `client/app/js/store.js`).
 
 | Method | Description |
 | ------ | ----------- |
-| `register(username)` | Create account + first device, store identity, log in. → `{username, deviceId, token}` |
+| `register(username, {referrer})` | Create account + first device, store identity, log in. → `{username, deviceId, token}`. `referrer` (optional) is the username whose share link this signup followed — see [Share links](#share-links). |
 | `login()` | Challenge/response login with the stored identity. → `token` |
 | `logout()` | Drop the session token (identity stays). |
 | `forget()` | `logout()` + wipe the on-device identity. |
@@ -102,6 +102,31 @@ and read markers (`deleteAccountData()` in `client/app/js/store.js`).
 
 Usernames: 5–64 chars of `[a-zA-Z0-9_-]`, case-insensitive, some reserved —
 see [SIGNUP.md](./SIGNUP.md).
+
+### Share links
+
+Attribution metadata for `/?chat=<username>` deep links — who brought whom to
+the app. Full model, admin views and honest limits:
+[SHARES.md](./SHARES.md).
+
+| Method | Description |
+| ------ | ----------- |
+| `register(username, {referrer})` | `referrer` is sent as the UNSIGNED `r` field of the signup body and stored as the new account's parent. Omit for an organic signup. |
+| `reportShareHit(owner)` | "This session opened `owner`'s link." → `{ok, recorded}`. **Never throws**: a failure (offline, deleted owner) is reported in the result, because attribution must not be able to disturb a boot path. Your own link is not sent at all. |
+| `myShareLink()` | → `{ul, path, created, clicked}` — your link plus how many accounts it created / how many opened it. Counts only, never who. |
+
+```js
+// a visitor arrived from @alice's link and has no account yet
+await client.register('gimmers', { referrer: 'alice' });
+
+// an EXISTING account opening a link, once the session is up
+const res = await client.reportShareHit('alice');   // {ok: true, recorded: true}
+```
+
+The shipped app parks the clicked link in `localStorage`
+(`client/app/js/shares.js`) so it survives the auth screen: a signup carries it
+as `referrer`, a login reports it as a hit, and an offline boot leaves it
+parked for the next entry.
 
 ### Device pairing (multi-device)
 

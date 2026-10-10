@@ -1,10 +1,12 @@
 import { generateKeyPairSync, randomBytes, sign } from 'node:crypto';
+import Fastify from 'fastify';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { buildApp } from '../src/app.js';
 import { config } from '../src/config.js';
 import { b64uEncode } from '../src/lib/b64u.js';
 import { canonical } from '../src/lib/canon.js';
 import { connectMongo, connectRedis } from '../src/db.js';
+import adminRoutes from '../src/routes/admin-routes/index.js';
 
 export const TEST_REDIS_URL = process.env.TEST_REDIS_URL ?? 'redis://127.0.0.1:6379/15';
 
@@ -59,3 +61,57 @@ export function makeClient() {
 }
 
 export const randomAesKey = () => b64uEncode(randomBytes(32));
+
+// Admin panel harness: the real admin route tree mounted on a bare Fastify
+// over the SAME stores as the app (that is how src/admin.js runs it, minus the
+// token gate). Every collection the routes touch is passed explicitly, so a
+// new store shows up here as a missing dependency rather than a silent null.
+export async function setupAdmin(overrides = {}) {
+  const ctx = await setupApp(overrides);
+  const db = ctx.mongo.db;
+  const admin = Fastify({ logger: false });
+  await admin.register(adminRoutes, {
+    users: db.collection('users'),
+    redis: ctx.redis,
+    config: { ...config, coldSendRequiresVerification: false, ...overrides },
+    diagnostics: db.collection('diagnostics'),
+    reports: db.collection('reports'),
+    settings: db.collection('settings'),
+    messages: db.collection('messages'),
+    idDocs: db.collection('id_docs'),
+    profiles: db.collection('profiles'),
+    counters: db.collection('counters'),
+    shares: db.collection('shares'),
+    contacts: db.collection('contacts'),
+    graph: db.collection('graph'),
+  });
+  return {
+    ...ctx,
+    admin,
+    db,
+    async teardown() {
+      await admin.close();
+      await ctx.teardown();
+    },
+  };
+}
+
+// Signup (+ optional share-link referrer `r`) through the real route, then a
+// session token for the authed endpoints. Returns the created user's handle.
+export async function signupUser(app, client, u, { r, d = `device-${Math.random().toString(36).slice(2, 10)}-1` } = {}) {
+  const a = randomAesKey();
+  const t = nowEpoch();
+  const s = client.signSignup({ u, a, d, t });
+  const res = await app.inject({
+    method: 'POST',
+    url: '/api/signup',
+    payload: { u, p: client.p, x: client.x, a, d, t, s, ...(r ? { r } : {}) },
+  });
+  if (res.statusCode !== 201) return { res, ul: u.toLowerCase(), d };
+  const { n } = (await app.inject({ method: 'POST', url: '/api/auth/challenge', payload: { u, d } })).json();
+  const ve = await app.inject({
+    method: 'POST', url: '/api/auth/verify',
+    payload: { u, d, n, s: client.signBytes(Buffer.from(n, 'utf8')) },
+  });
+  return { res, ul: u.toLowerCase(), d, token: ve.json()?.token ?? null };
+}

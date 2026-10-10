@@ -371,3 +371,56 @@ test('sdk: dead session (4401) surfaces authFailed and stops reconnecting', asyn
     await srv.stop();
   }
 });
+
+test('sdk: share-link attribution — referrer at signup, hit report afterwards', async (t) => {
+  const srv = await startServer();
+  const owner = randUser('share');
+  const joiner = randUser('join');
+  t.after(async () => {
+    await srv.deleteUser(owner);
+    await srv.deleteUser(joiner);
+    await srv.stop();
+  });
+
+  const alice = srv.client({ storage: new MemoryStorage() });
+  await alice.register(owner);
+
+  // A signup that followed alice's /?chat= link names her as the parent.
+  const bobby = srv.client({ storage: new MemoryStorage() });
+  await bobby.register(joiner, { referrer: owner.toUpperCase() }); // normalised server-side
+  const users = srv.mongo.db.collection('users');
+  const doc = await users.findOne({ ul: joiner });
+  assert.equal(doc.ref.by, owner);
+  const pair = await srv.mongo.db.collection('shares').findOne({ o: owner, viewer: joiner });
+  assert.ok(pair?.created instanceof Date, 'created edge recorded at signup');
+  assert.equal(pair.n, 0, 'creation is not also counted as a click');
+
+  // An EXISTING account opening the same link reports a 'seen' click...
+  const res = await bobby.reportShareHit(owner);
+  assert.equal(res.ok, true);
+  assert.equal(res.recorded, true);
+  const after = await srv.mongo.db.collection('shares').findOne({ o: owner, viewer: joiner });
+  assert.equal(after.n, 1);
+
+  // ...your own link is not an attribution event, and is not even sent.
+  assert.deepEqual(await bobby.reportShareHit(joiner), { ok: true, recorded: false });
+  assert.equal(await srv.mongo.db.collection('shares').countDocuments({ o: joiner }), 0);
+
+  // A deleted/unknown owner is reported as a soft failure, never a throw:
+  // attribution must not be able to disturb the app's boot path.
+  const gone = await bobby.reportShareHit('nobody-here-at-all');
+  assert.equal(gone.ok, false);
+  assert.equal(gone.error, 'unknown_account');
+
+  // Without an identity/session the call is refused outright (the app-side
+  // wrapper in js/shares.js never gets that far — it checks for a session
+  // first and leaves the link parked for the next entry).
+  const anon = srv.client({ storage: new MemoryStorage() });
+  await assert.rejects(anon.reportShareHit(owner), /No identity|Not logged in/);
+
+  // The owner can see what its link produced — counts only, never who.
+  const mine = await alice.myShareLink();
+  assert.equal(mine.path, `/?chat=${owner}`);
+  assert.equal(mine.created, 1);
+  assert.equal(mine.clicked, 1);
+});

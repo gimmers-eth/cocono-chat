@@ -124,6 +124,17 @@ export class Api {
     return this.#request('/api/app-info');
   }
 
+  // --- share links (attribution metadata; see be/src/lib/shares.js) ---
+  // 'I opened <owner>'s /?chat= link and I already have an account.'
+  shareHit(token, owner) {
+    return this.#request('/api/share/hit', { method: 'POST', body: { o: owner }, token });
+  }
+
+  // own share-link path + what it has produced (counts only)
+  myShareLink(token) {
+    return this.#request('/api/me/share-link', { token });
+  }
+
   setPushSubscription(token, subscription) {
     return this.#request('/api/devices/push-subscription', { method: 'PUT', body: subscription, token });
   }

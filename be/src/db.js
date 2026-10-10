@@ -41,6 +41,16 @@ export async function connectMongo(url) {
   // confirmed pulled; MongoDB's TTL monitor removes them once past it.
   // Never-pulled copies have no expireAt and stay queued for delivery.
   await messages.createIndex({ expireAt: 1 }, { expireAfterSeconds: 0 });
+  // Share-link attribution (lib/shares.js): one doc per (link owner -> the
+  // account that followed it). The pair IS the identity, and the admin
+  // Shares tab reads both directions.
+  const shares = db.collection('shares');
+  await shares.createIndex({ o: 1, viewer: 1 }, { unique: true });
+  await shares.createIndex({ viewer: 1 });
+  // Durable "A has messaged B" edges for the God View graph — the message
+  // queue itself expires, so the graph needs its own bounded record.
+  // Metadata only (no envelope, no content).
+  await db.collection('contacts').createIndex({ from: 1, to: 1 }, { unique: true });
   return { client, db };
 }
 

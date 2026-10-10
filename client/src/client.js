@@ -184,18 +184,55 @@ export class CoconoClient extends Emitter {
   /**
    * Register a new account with this device as its first member and log in.
    * (Devices have no roles — the first one is simply the first.)
+   * @param {string} username
+   * @param {object} [options]
+   * @param {string} [options.referrer] username whose share link (`/?chat=<name>`)
+   *   this signup followed — recorded server-side as the account's parent
+   *   (admin Shares tab + God View graph). Sent UNSIGNED and worth no
+   *   reward: it is origin metadata, not a capability. Omit for an organic
+   *   signup; an unknown/deleted referrer is simply ignored by the server.
    * @returns {Promise<{username: string, deviceId: string, token: string}>}
    */
-  async register(username) {
+  async register(username, { referrer = null } = {}) {
     if (this.#identity) throw new CoconoError('This device already holds an identity — log out or use a fresh client.', 'identity_exists');
     const canSeal = iosLike();
     const device = await this.#generateDevicePayload(username, { extractable: canSeal });
     // Seal BEFORE touching the server: a failure here must not leave a
     // half-created account we cannot safely key.
     const sealed = await this.#sealStrategy(device);
-    await this.api.signup(device.payload);
+    const payload = referrer
+      ? { ...device.payload, r: String(referrer).toLowerCase() }
+      : device.payload;
+    await this.api.signup(payload);
     const identity = await this.#persistIdentity(device, true, sealed);
     return { username: identity.username, deviceId: identity.deviceId, token: this.token };
+  }
+
+  /**
+   * Report that this session opened another account's share link
+   * (`/?chat=<owner>`). Best-effort by nature: it only feeds the server's
+   * attribution graph, so a failure is reported in the returned object
+   * rather than thrown into the caller's boot path.
+   * @returns {Promise<{ok: boolean, recorded?: boolean, error?: string}>}
+   */
+  async reportShareHit(owner) {
+    const identity = await this.#requireIdentity();
+    this.#requireToken();
+    const o = String(owner ?? '').trim().toLowerCase();
+    if (!o || o === identity.username) return { ok: true, recorded: false }; // own link: nothing to attribute
+    try {
+      const res = await this.api.shareHit(this.token, o);
+      return { ok: true, recorded: res?.recorded !== false };
+    } catch (err) {
+      this.logger.debug(`share hit for @${o} not recorded: ${err?.code ?? err?.message ?? err}`);
+      return { ok: false, error: err?.code ?? String(err?.message ?? err) };
+    }
+  }
+
+  /** This account's own share-link path + created/clicked counts. */
+  async myShareLink() {
+    this.#requireToken();
+    return this.api.myShareLink(this.token);
   }
 
   /** Log in with the identity stored on this device. @returns {Promise<string>} token */

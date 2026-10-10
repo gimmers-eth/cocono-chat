@@ -78,6 +78,7 @@ example and adjust when needed.
 - [docs/CLIENT_SDK.md](./docs/CLIENT_SDK.md) — client SDK: usage, events, pairing, storage, logging
 - [docs/FRIENDS.md](./docs/FRIENDS.md) — friends & identity verification: model, sync, pins, safety numbers, threat limits
 - [docs/COCO_SCORE.md](./docs/COCO_SCORE.md) — the CoCo reputation score: formula, weights, roadmap signals, honest limits
+- [docs/SHARES.md](./docs/SHARES.md) — share links & referral attribution: created/seen/messaged edges, the admin Shares tab and the God View graph
 - [docs/THEMES.md](./docs/THEMES.md) — bootstrapping FE themes
 - [docs/SIGNUP.md](./docs/SIGNUP.md) — signup, passwordless login and multi-device pairing (with API examples)
 - [docs/MESSAGES.md](./docs/MESSAGES.md) — message sending & delivery: online, offline, multi-device (with protocol examples)

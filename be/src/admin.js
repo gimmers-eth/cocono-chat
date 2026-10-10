@@ -71,6 +71,11 @@ await app.register(async function adminScope(instance) {
     messages: mongo.db.collection('messages'),
     idDocs: mongo.db.collection('id_docs'),
     profiles: mongo.db.collection('profiles'),
+    // share attribution + durable contact edges + the saved God View
+    // snapshot (all three are read/written by the admin routes)
+    shares: mongo.db.collection('shares'),
+    contacts: mongo.db.collection('contacts'),
+    graph: mongo.db.collection('graph'),
   });
 });
 

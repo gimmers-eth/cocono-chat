@@ -50,6 +50,20 @@ is the only FE (audits mentioning `fe/` are historical).
   script skip silently instead of racing). Restore is double-gated (typed
   'RESTORE' in UI + API + script confirmation + existence & name-pattern
   check of the archive).
+- **Share-link attribution + God View (admin)**: the app's `/?chat=<name>`
+  deep link is now recorded server-side — an account CREATED from a link
+  (`signup`'s unsigned `r` → `users.ref` + a `shares` pair doc) and an
+  existing account that OPENED one (`POST /api/share/hit`). A third durable
+  edge (`contacts`) records "A has messaged B", because the message queue
+  itself expires once pulled. The admin panel gained a per-user **Shares**
+  tab (created / seen / clicked / came-from), the parent line on **Details**,
+  and a **God View** page: the whole graph on one canvas (solid brand purple
+  = created, dotted dark purple = seen, dashed teal = messaged, all directed)
+  with profile-photo cards, trust icon, worn badge and CoCo score, plus
+  pan/zoom/drag/inspect. Snapshots are generated ON DEMAND and stored
+  (`graph` collection); the settled layout is saved back so a reload shows the
+  same picture. Physics: vendored d3-force (`be/admin/vendor/d3/`). Model,
+  trust level and honest limits: [SHARES.md](./SHARES.md).
 - **Diagnostics**: in-app ring buffer (`cocono-sw` IDB) + server-stored
   reports (`diagnostics` collection, 30-day TTL) + admin panel section with
   copy/delete/'un-limit IP'. Admin 'clear limits for IP' sweeps all

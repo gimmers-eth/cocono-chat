@@ -6,8 +6,9 @@ import { effectiveLimit } from '../../lib/limits.js';
 import { verifyEnvelope } from './envelope.js';
 import { devKey, sendJson, PENDING_BATCH } from './protocol.js';
 import { sendBlindPush, presenceKey, pushSentKey } from '../../lib/push.js';
+import { recordContactEdge } from '../../lib/shares.js';
 
-export function createHandlers({ users, redis, pub, config, messages, settings, counters }) {
+export function createHandlers({ users, redis, pub, config, messages, settings, counters, contacts }) {
   async function handleSend(socket, request, body, auth) {
     const env = body.msg;
     const m = env?.m;
@@ -85,7 +86,19 @@ export function createHandlers({ users, redis, pub, config, messages, settings, 
     // design): feeds the 'You've got mail' badge. Idempotent retries landed
     // in the catch above, so this increments exactly once per accepted send.
     // Self-sends count too — the badge counts messages SENT, period.
-    if (counters) await counters.updateOne({ _id: `sent:${auth.sub}` }, { $inc: { n: 1 } }, { upsert: true });
+    // Durable "who talks to whom" edge for the admin God View graph, written
+    // CONCURRENTLY (same latency, one round trip each). The queued copy
+    // expires once pulled, so this is the only lasting record that the
+    // conversation happened — metadata (pair, count, timestamps), never
+    // content, and a failure here can never fail a delivery.
+    await Promise.all([
+      counters ? counters.updateOne({ _id: `sent:${auth.sub}` }, { $inc: { n: 1 } }, { upsert: true }) : null,
+      contacts && rul !== auth.sub
+        ? recordContactEdge(contacts, { from: auth.sub, to: rul }).catch((err) => {
+          request.log.warn(`[graph] contact edge ${auth.sub}->${rul} not recorded: ${err.message}`);
+        })
+        : null,
+    ]);
 
     await pub.publish(devKey(rul, m.dv), JSON.stringify({ type: 'msg', id: doc.mid, ts: doc.ts.getTime(), env }));
     const acked = ack(true);

@@ -126,6 +126,11 @@ app.addHook('onSend', async (request, reply, payload) => {
     messages: mongo.db.collection('messages'),
     idDocs: mongo.db.collection('id_docs'),
     profiles: mongo.db.collection('profiles'),
+    // share-link attribution (created/seen edges) + the durable
+    // "has messaged" edges the God View graph draws — see lib/shares.js
+    shares: mongo.db.collection('shares'),
+    contacts: mongo.db.collection('contacts'),
+    graph: mongo.db.collection('graph'),
   };
   // Kill switch: env hard-off, else the runtime settings-doc flag (cached 5s
   // inside rateLimit; admin writes invalidate this process instantly).

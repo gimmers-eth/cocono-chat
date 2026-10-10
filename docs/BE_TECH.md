@@ -107,6 +107,35 @@ Store-and-forward queue: one doc per recipient device, deleted once that device 
 Indexes: `{ to.ul, to.dv, ts }` (pending fetch) and unique `{ from.ul, from.fd, cid }`
 (idempotent retries).
 
+### MongoDB — `shares` / `contacts` (share-link attribution + graph edges)
+
+Metadata only — no content, no envelope. Model, trust level and the admin
+views built on them: [SHARES.md](./SHARES.md); helpers in `src/lib/shares.js`.
+
+```javascript
+// shares: ONE doc per (link owner -> account that followed it)
+{ o: 'alice', viewer: 'bobby', n: 3, firstAt, lastAt, created: Date? }
+//   n        clicks, excluding the creation itself
+//   created  set only when `viewer` was CREATED from o's link
+
+// contacts: ONE doc per (sender -> recipient), written on every accepted send
+{ from: 'alice', to: 'bobby', n: 12, firstAt, lastAt }
+```
+
+Indexes: unique `{o, viewer}` + `{viewer}` (the reverse read) on `shares`;
+unique `{from, to}` on `contacts`. Both are bounded by real relationships, not
+by traffic — a repeat click bumps a counter. `users.ref = { by, at }` (written
+once at signup from the UNSIGNED `r` field) is the account's parent, and
+survives the parent's deletion so the graph can draw a ghost node.
+`deleteAccountFully` purges both collections in BOTH directions.
+
+### MongoDB — `graph` collection (one doc, `_id: 'godview'`)
+
+The stored God View snapshot: `{ generatedAt, stats, nodes[], edges[], layout,
+layoutSavedAt }`. Derived data — replaced by `POST /api/admin/graph`, never
+refreshed on a timer; `layout` holds the panel's settled node positions so a
+reload shows the same picture without re-simulating.
+
 ### Redis key namespace
 
 | Key | Meaning |
@@ -254,10 +283,14 @@ exposes internal-only endpoints:
 | ------ | ---- | ------- |
 | GET | `/api/admin/users` | users + devices (public keys omitted) |
 | PATCH | `/api/admin/users/:username/max-devices` | set the account's device cap (1–1000) |
+| GET | `/api/admin/users/:username/shares` | share-link story: created / seen / clicked / parent |
 | GET | `/api/admin/rate-limits` | live `rl:*` counters via Redis SCAN |
 | POST | `/api/admin/rate-limits/clear` | clear by `{ ip }` (all IP-scoped counters) or exact `{ key }` |
 | DELETE | `/api/admin/users/:username` | delete an account |
 | DELETE | `/api/admin/users/:username/devices/:deviceId` | remove a device (refuses the last one) |
+| GET | `/api/admin/graph` | the STORED God View snapshot (never recomputes) |
+| POST | `/api/admin/graph` | regenerate it on demand (`{keepLayout:true}` keeps surviving positions) |
+| PUT | `/api/admin/graph/layout` | save the panel's node positions into the snapshot |
 
 If `ADMIN_TOKEN` is set, every admin API request must carry it in the `x-admin-token`
 header; the UI keeps the token in localStorage. Security properties of the gate:

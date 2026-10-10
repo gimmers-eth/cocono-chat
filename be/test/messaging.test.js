@@ -154,6 +154,15 @@ test('messaging: online delivery with E2EE + pulled ack + delivered receipt', as
     assert.ok(kept.pulledAt instanceof Date, 'pulledAt marked');
     assert.ok(kept.expireAt instanceof Date && kept.expireAt > kept.pulledAt, 'expireAt set');
 
+    // The durable "has messaged" edge (admin God View graph) is written with
+    // the accepted send: the queued copy above expires, this record does not.
+    const edge = await ctx.mongo.db.collection('contacts').findOne({ from: 'alice', to: 'bobby' });
+    assert.ok(edge, 'contact edge recorded');
+    assert.equal(edge.n, 1);
+    assert.ok(edge.firstAt instanceof Date && edge.lastAt instanceof Date);
+    // one direction only: bob has not messaged alice
+    assert.equal(await ctx.mongo.db.collection('contacts').countDocuments({ from: 'bobby' }), 0);
+
     wsA.ws.close();
     wsB.ws.close();
   } finally {

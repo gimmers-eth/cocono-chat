@@ -1,3 +1,8 @@
+// God View (the social graph page) is its own module; everything else in the
+// panel lives here. Imports are hoisted, so the graph can use the helpers
+// defined below at call time (initGodView is invoked at the bottom).
+import { initGodView } from './godview.js';
+
 const $ = (id) => document.getElementById(id);
 
 const tokenInput = $('token');
@@ -84,24 +89,43 @@ function renderLimits(limits) {
     .join('');
 }
 
-const avatarUrls = new Map(); // ul -> live object URL (revoked on re-fill)
+const avatarUrls = new Map(); // ul -> { url } on success, { failedAt } on a miss
+const AVATAR_RETRY_MS = 30_000;
+
+// ONE cached fetch per account, shared by every surface that shows a photo
+// (users table, side panel, God View cards). The endpoint is token-gated, so
+// a plain <img src> would 401: fetch as a blob, hand out an object URL.
+// Successes are cached for the session; a FAILURE is only cached briefly, so a
+// network blip (or a photo uploaded after the panel loaded) still recovers
+// instead of leaving the account faceless until a reload.
+async function avatarUrl(ul) {
+  if (!ul) return null;
+  const cached = avatarUrls.get(ul);
+  if (cached?.url) return cached.url;
+  if (cached?.failedAt && Date.now() - cached.failedAt < AVATAR_RETRY_MS) return null;
+  try {
+    const res = await fetch(`/api/admin/users/${encodeURIComponent(ul)}/avatar`, {
+      headers: { 'x-admin-token': tokenInput.value.trim() },
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    const prev = avatarUrls.get(ul)?.url;
+    const url = URL.createObjectURL(await res.blob());
+    if (prev && prev !== url) URL.revokeObjectURL(prev);
+    avatarUrls.set(ul, { url });
+    return url;
+  } catch {
+    avatarUrls.set(ul, { failedAt: Date.now() });
+    return null;
+  }
+}
 
 async function fillAvatarThumbs(users) {
   for (const u of users) {
     if (!u.hasAvatar) continue;
     const img = document.querySelector(`img[data-avatar-for="${CSS.escape(u.ul)}"]`);
     if (!img || img.src) continue; // absent (panel closed) or already showing
-    try {
-      const res = await fetch(`/api/admin/users/${encodeURIComponent(u.ul)}/avatar`, {
-        headers: { 'x-admin-token': tokenInput.value.trim() },
-      });
-      if (!res.ok) throw new Error(String(res.status));
-      const url = URL.createObjectURL(await res.blob());
-      const prev = avatarUrls.get(u.ul);
-      if (prev) URL.revokeObjectURL(prev);
-      avatarUrls.set(u.ul, url);
-      img.src = url;
-    } catch { /* offline/none: stays empty */ }
+    const url = await avatarUrl(u.ul);
+    if (url) img.src = url;
   }
 }
 
@@ -171,7 +195,9 @@ function showUserTab(tab) {
     t.classList.toggle('active', on);
     t.setAttribute('aria-selected', String(on));
   }
-  $('user-panel-body').hidden = tab === 'relations' || tab === 'blockers';
+  // the three lazy tabs own their own containers (a server round-trip each)
+  $('user-panel-body').hidden = ['relations', 'blockers', 'shares'].includes(tab);
+  $('user-shares').hidden = tab !== 'shares';
   $('user-relations').hidden = tab !== 'relations';
   $('user-blockers').hidden = tab !== 'blockers';
   if (tab === 'relations') {
@@ -182,7 +208,19 @@ function showUserTab(tab) {
     loadBlockers();
     return;
   }
+  if (tab === 'shares') {
+    loadShares();
+    return;
+  }
   renderPanel();
+}
+
+// Open the user side panel straight onto a tab (the God View's card icons and
+// the Shares tab's own links both use it).
+function openUser(ul, tab = 'details') {
+  if (!ul) return;
+  openPanel(ul);
+  if (tab !== 'details') showUserTab(tab);
 }
 
 function openPanel(ul) {
@@ -253,6 +291,98 @@ function closePanel() {
   $('user-overlay').hidden = true;
 }
 
+// ---- Shares tab -----------------------------------------------------------
+// The share-link story of ONE account, straight from the server's two facts
+// (users.ref + the `shares` pair docs — see be/src/lib/shares.js). Order
+// tells the growth story: who you brought in, who already had an account and
+// opened your link, which links you opened, and where YOU came from.
+const shareRow = (r, { created = false } = {}) => `
+  <tr class="${r.gone ? 'sh-gone' : ''}">
+    <td><span class="sh-who">
+      <span class="sh-av" data-sh-av="${esc(r.ul)}">${esc(r.ul.slice(0, 1))}</span>
+      <button class="linkish" data-view-user="${esc(r.ul)}">${unameHtml(r.ul, { premium: r.premium })}</button>
+      ${r.gone ? '<span class="badge orphan" title="this account no longer exists">deleted</span>' : ''}
+    </span></td>
+    <td class="dim">${created ? esc(fmtDate(r.at)) : esc(fmtAgo(r.at))}${
+      r.firstAt && r.lastAt && String(r.firstAt) !== String(r.lastAt)
+        ? `<br /><span class="small-note">first ${esc(fmtAgo(r.firstAt))}</span>`
+        : ''
+    }</td>
+    <td class="mono">${r.clicks ?? 0}</td>
+  </tr>`;
+
+const shareTable = (rows, { created = false, empty, clicksLabel = 'Clicks' }) => (rows.length
+  ? `<table class="rel-table sh-table">
+      <thead><tr><th>User</th><th>${created ? 'Created' : 'Last click'}</th><th>${clicksLabel}</th></tr></thead>
+      <tbody>${rows.map((r) => shareRow(r, { created })).join('')}</tbody>
+    </table>`
+  : `<p class="dim small-note">${esc(empty)}</p>`);
+
+async function loadShares() {
+  const el = $('user-shares');
+  if (!selectedUl) return;
+  const ul = selectedUl;
+  el.innerHTML = '<p class="dim">Loading shares…</p>';
+  try {
+    const data = await api(`/api/admin/users/${encodeURIComponent(ul)}/shares`);
+    if (ul !== selectedUl || userTab !== 'shares') return; // stale response guard
+    const { ref, created, seen, clicked } = data;
+    const stat = (n, label) => `<span class="sh-stat"><b>${n}</b><span>${esc(label)}</span></span>`;
+    el.innerHTML = `
+      <div class="sec">
+        <div class="sh-stats">
+          ${stat(created.length, 'created from this link')}
+          ${stat(seen.length, 'opened it with an account')}
+          ${stat(clicked.length, 'links this user opened')}
+        </div>
+      </div>
+      <div class="sec">
+        <h3>Created from @${esc(ul)}’s link</h3>
+        <p class="dim small-note">accounts that came into existence because of this user’s <span class="mono">/?chat=${esc(ul)}</span> link — the solid purple lines in the God View.</p>
+        ${shareTable(created, { created: true, clicksLabel: 'Clicks since', empty: 'Nobody has created an account from this link yet.' })}
+      </div>
+      <div class="sec">
+        <h3>Opened the link (already had an account)</h3>
+        <p class="dim small-note">existing accounts that clicked through — the dotted dark-purple “seen” lines. Repeats bump the click count instead of adding rows.</p>
+        ${shareTable(seen, { empty: 'No existing account has opened this link (or none has reported it yet — clicks are recorded once the opener has a session).' })}
+      </div>
+      <div class="sec">
+        <h3>Links @${esc(ul)} clicked</h3>
+        ${shareTable(clicked, { empty: 'This account has not opened anyone’s share link.' })}
+      </div>
+      <div class="sec">
+        <h3>This account came from</h3>
+        ${ref
+          ? `<p class="sh-parent">${svgShareIcon()} created from
+              <button class="linkish" data-view-user="${esc(ref.ul)}">${unameHtml(ref.ul, { premium: ref.premium })}</button>
+              ${ref.gone ? '<span class="badge orphan" title="the parent account no longer exists">deleted</span>' : ''}
+              <span class="dim">${esc(fmtDate(ref.at))}</span></p>`
+          : '<p class="dim small-note">No share link — this account was created without one (organic, or predates attribution).</p>'}
+      </div>`;
+    paintShareAvatars(el, [...created, ...seen, ...clicked, ...(ref ? [ref] : [])]);
+  } catch (err) {
+    el.innerHTML = `<p class="dim">Shares failed: ${esc(err.message)}</p>`;
+  }
+}
+
+// small share glyph for the tab's origin line (the panel carries no icon font)
+const svgShareIcon = () => '<svg class="reason-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5.6" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="18.4" r="2.6"/><path d="m8.3 10.8 7.4-3.9M8.3 13.2l7.4 3.9"/></svg>';
+
+// Every named account in the tab gets its photo (one cached fetch each) —
+// the tab is a face list, so faces matter.
+async function paintShareAvatars(root, rows) {
+  for (const r of rows) {
+    if (r.gone) continue;
+    const u = lastUsers.find((x) => x.ul === r.ul);
+    if (u && !u.hasAvatar) continue;
+    const slots = root.querySelectorAll(`[data-sh-av="${CSS.escape(r.ul)}"]`);
+    if (!slots.length) continue;
+    const url = await avatarUrl(r.ul);
+    if (!url) continue;
+    for (const slot of slots) { slot.style.backgroundImage = `url("${url}")`; slot.textContent = ''; }
+  }
+}
+
 // The panel is tabbed like the client's settings drawer: each tab renders
 // only its own sections; relations lazy-loads into its own container.
 function renderPanel() {
@@ -284,6 +414,15 @@ const accountHead = (u) => `
 const PANEL_SECTIONS = {
   // What the world (well — mutual friends) sees: the client's public profile.
   details: (u) => `${accountHead(u)}
+    <div class="sec">
+      <h3>Origin</h3>
+      ${u.ref
+        ? `<p class="sh-parent">${svgShareIcon()} created from
+            <button class="linkish" data-view-user="${esc(u.ref.by)}">@${esc(u.ref.by)}</button>
+            <span class="dim">${esc(fmtDate(u.ref.at))}</span>
+            <button class="tiny" data-view-shares="${esc(u.ul)}">shares →</button></p>`
+        : '<p class="dim small-note">no parent — this account was not created from a share link</p>'}
+    </div>
     <div class="sec">
       <h3>Profile photo</h3>
       ${u.hasAvatar
@@ -404,6 +543,7 @@ const PANEL_SECTIONS = {
 
   relations: () => '',
   blockers: () => '',
+  shares: () => '',
 };
 
 // Account-scoped limiters for the user panel's limits table (IP-subject
@@ -628,6 +768,7 @@ async function refresh() {
     renderUsers(users);
     if (!$('user-panel').hidden && userTab === 'relations') loadRelations();
     if (!$('user-panel').hidden && userTab === 'blockers') loadBlockers();
+    if (!$('user-panel').hidden && userTab === 'shares') loadShares();
     renderDiags(diags);
     renderReports(reports);
     renderBranding(branding);
@@ -871,6 +1012,12 @@ document.addEventListener('click', (e) => {
     openPanel(viewUser);
     return;
   }
+  // Details tab → this user's Shares tab (parent link)
+  const viewShares = e.target.closest?.('[data-view-shares]')?.dataset.viewShares;
+  if (viewShares) {
+    openUser(viewShares, 'shares');
+    return;
+  }
 
   // panel → traffic page: search this user + their known IPs
   const rlFor = e.target.closest?.('[data-rl-for]')?.dataset.rlFor;
@@ -1039,33 +1186,69 @@ document.addEventListener('click', async (e) => {
   }
 });
 
+// ---- God View (social graph) ----
+// Lives in its own module (admin/godview.js) because it is a self-contained
+// canvas + force-layout app; it gets the panel's shared plumbing from here
+// (token-gated api(), the avatar cache, the user side panel) instead of
+// duplicating any of it.
+const godView = initGodView({
+  api,
+  esc,
+  fmtDate,
+  fmtAgo,
+  avatarUrl,
+  openUser,
+  setStatus,
+});
+
 // ---- pages ----
 // Left-nav switches one section at a time; the URL hash carries the page so
 // a reload (or a shared link) lands where you left it. Data keeps refreshing
 // every 10s regardless of the visible page — hidden sections re-render
 // cheaply and the side panel lives outside the pager.
-const PAGES = ['users', 'app', 'traffic', 'reports', 'diagnostics', 'ops'];
+// God View is the exception: its snapshot is fetched when the page opens and
+// rebuilt ONLY on demand, so the 10s refresh never touches it.
+const PAGES = ['users', 'godview', 'app', 'traffic', 'reports', 'diagnostics', 'ops'];
 // set by the user panel's "search rate limits" button: the subjects to load
 // into the traffic page when it opens (cleared on use)
 let pendingTrafficSearch = null;
+// set by '#godview/<username>' links: the node to centre once the page is up
+let pendingGodFocus = null;
 function showPage(page) {
   const want = PAGES.includes(page) ? page : 'users';
   for (const sec of document.querySelectorAll('.page')) sec.hidden = sec.dataset.page !== want;
   for (const btn of document.querySelectorAll('.nav-item')) {
     btn.setAttribute('aria-current', btn.dataset.page === want ? 'page' : 'false');
   }
+  // the graph wants the whole window; every other page keeps the reading width
+  document.querySelector('.admin-main').classList.toggle('wide', want === 'godview');
   if (want === 'traffic' && pendingTrafficSearch !== null) {
     showTrafficSub('search');
     $('rl-search').value = pendingTrafficSearch;
     pendingTrafficSearch = null;
     searchRateLimits();
   }
+  if (want === 'godview') {
+    godView.onShow().then(() => {
+      const ul = pendingGodFocus;
+      pendingGodFocus = null;
+      if (ul && !godView.focusUser(ul)) setStatus(`@${ul} is not in the saved snapshot — regenerate the graph`, 'error');
+    }).catch((err) => setStatus(`God View failed: ${err.message}`, 'error'));
+  }
 }
-window.addEventListener('hashchange', () => showPage(location.hash.replace(/^#/, '')));
+window.addEventListener('hashchange', () => showPage(pageFromHash()));
 for (const btn of document.querySelectorAll('.nav-item')) {
   btn.addEventListener('click', () => { location.hash = btn.dataset.page; });
 }
-showPage(location.hash.replace(/^#/, ''));
+// '#godview/<username>' deep-links a single node (the Shares tab and the user
+// panel both offer it) — the page reads the target once it is up.
+function pageFromHash() {
+  const raw = location.hash.replace(/^#/, '');
+  const [page, target] = raw.split('/');
+  if (page === 'godview' && target) pendingGodFocus = decodeURIComponent(target).toLowerCase();
+  return page;
+}
+showPage(pageFromHash());
 
 refresh();
 setInterval(refresh, 10000);

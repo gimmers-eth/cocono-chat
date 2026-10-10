@@ -17,12 +17,14 @@ export function makeCtx({ baseUrl, adminUrl, adminToken, mongo, redis, config, q
 
     // One real account: SDK register (node WebCrypto keys, MemoryStorage →
     // nothing persists past process exit), then resolve its device id.
-    async account(username) {
+    // `referrer` rides the signup as the share-link parent (the God View's
+    // solid purple edge) — see be/src/lib/shares.js.
+    async account(username, { referrer = null } = {}) {
       const client = new CoconoClient({ baseUrl, storage: new MemoryStorage(), logging: false });
-      await client.register(username);
+      await client.register(username, { referrer });
       const list = await client.devices();
       const current = list.devices.find((d) => d.current) ?? list.devices[0];
-      return { ul: username.toLowerCase(), client, deviceId: current?.id ?? '' };
+      return { ul: username.toLowerCase(), client, deviceId: current?.id ?? '', referrer: referrer ?? null };
     },
 
     async admin(method, path, body) {

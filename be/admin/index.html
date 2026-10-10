@@ -12,6 +12,7 @@
       <div class="nav-brand" id="admin-title">CoCoNo</div>
       <nav aria-label="Sections">
         <button class="nav-item" data-page="users" aria-current="page">Users</button>
+        <button class="nav-item" data-page="godview">God View</button>
         <button class="nav-item" data-page="app">App</button>
         <button class="nav-item" data-page="traffic">Traffic</button>
         <button class="nav-item" data-page="reports">Reports</button>
@@ -52,6 +53,118 @@
             <tbody id="users-body"></tbody>
           </table>
           <p id="users-empty" class="dim" hidden>No users yet.</p>
+        </div>
+      </section>
+
+      <!-- ===== God View: the whole social graph ===== -->
+      <!-- Generated ON DEMAND and stored server-side (collection `graph`):
+           opening the page shows the saved snapshot, never a fresh rebuild.
+           Physics: vendored d3-force (see admin/vendor/d3/README.md); the
+           cards, camera and canvas edge layer are ours (admin/godview.js). -->
+      <section class="page" data-page="godview" hidden>
+        <div class="gv-head">
+          <div class="gv-head-text">
+            <h2>God View</h2>
+            <p class="dim small-text">who brought whom here, whose link was opened, and who talks to whom</p>
+          </div>
+          <div class="gv-head-actions">
+            <span id="gv-stamp" class="dim small-text"></span>
+            <label class="gv-check" title="Re-generate the data but keep the positions of nodes that are still here">
+              <input type="checkbox" id="gv-keep-layout" checked /> keep layout
+            </label>
+            <button id="gv-regen" class="gv-primary">Regenerate</button>
+            <button id="gv-save-layout" class="tiny" disabled title="Store the current positions on the server">Save layout</button>
+          </div>
+        </div>
+
+        <div class="gv-toolbar" id="gv-toolbar" hidden>
+          <div class="gv-filters" role="group" aria-label="Edge kinds">
+            <label class="gv-kind" data-kind="created">
+              <input type="checkbox" checked /><svg class="gv-sample" viewBox="0 0 34 8" aria-hidden="true"><line x1="1" y1="4" x2="27" y2="4" /><path d="M27 1l6 3-6 3z" /></svg>
+              <span>created <b id="gv-n-created">0</b></span>
+            </label>
+            <label class="gv-kind" data-kind="seen">
+              <input type="checkbox" checked /><svg class="gv-sample" viewBox="0 0 34 8" aria-hidden="true"><line x1="1" y1="4" x2="27" y2="4" /><path d="M27 1l6 3-6 3z" /></svg>
+              <span>seen <b id="gv-n-seen">0</b></span>
+            </label>
+            <label class="gv-kind" data-kind="msg">
+              <input type="checkbox" checked /><svg class="gv-sample" viewBox="0 0 34 8" aria-hidden="true"><line x1="1" y1="4" x2="27" y2="4" /><path d="M27 1l6 3-6 3z" /></svg>
+              <span>messaged <b id="gv-n-msg">0</b></span>
+            </label>
+            <label class="gv-check" title="Nodes with no lines at all">
+              <input type="checkbox" id="gv-hide-loners" /> hide loners
+            </label>
+            <label class="gv-check" title="Cap the picture on the most connected accounts">
+              max
+              <select id="gv-max">
+                <option value="150">150</option>
+                <option value="400" selected>400</option>
+                <option value="1000">1000</option>
+                <option value="0">all</option>
+              </select>
+              nodes
+            </label>
+          </div>
+          <div class="gv-tools">
+            <input id="gv-search" type="search" size="16" autocomplete="off" placeholder="find @user… (Enter centres)" />
+            <span id="gv-counts" class="dim small-text"></span>
+          </div>
+        </div>
+
+        <div id="gv-stage" hidden>
+          <canvas id="gv-canvas" aria-hidden="true"></canvas>
+          <div id="gv-world"></div>
+
+          <div class="gv-legend" id="gv-legend">
+            <span class="gv-legend-row"><svg class="gv-sample" viewBox="0 0 34 8" aria-hidden="true"><line class="s-created" x1="1" y1="4" x2="27" y2="4" /><path class="f-created" d="M27 1l6 3-6 3z" /></svg> created from a share link</span>
+            <span class="gv-legend-row"><svg class="gv-sample" viewBox="0 0 34 8" aria-hidden="true"><line class="s-seen" x1="1" y1="4" x2="27" y2="4" /><path class="f-seen" d="M27 1l6 3-6 3z" /></svg> link opened (had an account)</span>
+            <span class="gv-legend-row"><svg class="gv-sample" viewBox="0 0 34 8" aria-hidden="true"><line class="s-msg" x1="1" y1="4" x2="27" y2="4" /><path class="f-msg" d="M27 1l6 3-6 3z" /></svg> has messaged</span>
+            <span class="gv-legend-hint">drag a node to move it · double-click to release · scroll to zoom · drag the backdrop to pan</span>
+          </div>
+
+          <div class="gv-hud">
+            <button id="gv-zoom-out" class="gv-hud-btn" title="Zoom out">−</button>
+            <button id="gv-zoom-in" class="gv-hud-btn" title="Zoom in">+</button>
+            <button id="gv-fit" class="gv-hud-btn gv-hud-wide" title="Fit the whole graph">fit</button>
+            <button id="gv-physics" class="gv-hud-btn gv-hud-wide" title="Freeze / resume the layout">❚❚</button>
+          </div>
+
+          <aside id="gv-inspector" class="gv-inspector" hidden aria-label="Node details"></aside>
+        </div>
+
+        <div id="gv-empty" class="gv-empty">
+          <div class="gv-empty-card">
+            <div class="gv-empty-art" aria-hidden="true">
+              <!-- a miniature of what the page draws: one solid purple
+                   created edge, one dotted dark-purple seen edge, one dashed
+                   teal message edge — all directed -->
+              <svg viewBox="0 0 320 120">
+                <defs>
+                  <radialGradient id="gvArtAv" cx="35%" cy="30%">
+                    <stop offset="0%" stop-color="#a798f7" /><stop offset="100%" stop-color="#4b3fa8" />
+                  </radialGradient>
+                </defs>
+                <path d="M74 60 C110 34 132 30 158 40" fill="none" stroke="#7d6ce0" stroke-width="2.4" />
+                <path d="M158 40 l-11 -1 5 -9 z" fill="#7d6ce0" transform="rotate(18 158 40)" />
+                <path d="M74 66 C104 92 130 96 156 84" fill="none" stroke="#6c5fd0" stroke-width="1.9" stroke-dasharray=".1 6" stroke-linecap="round" />
+                <path d="M156 84 l-11 -1 5 -9 z" fill="#6c5fd0" transform="rotate(-24 156 84)" />
+                <path d="M178 46 C206 52 224 56 244 60" fill="none" stroke="#2fb3a5" stroke-width="1.6" stroke-dasharray="7 5" />
+                <path d="M244 60 l-11 -4 1 -9 z" fill="#2fb3a5" transform="rotate(12 244 60)" />
+                <circle cx="60" cy="60" r="17" fill="url(#gvArtAv)" stroke="rgba(255,255,255,.18)" />
+                <circle cx="170" cy="42" r="13" fill="url(#gvArtAv)" stroke="rgba(255,255,255,.18)" />
+                <circle cx="168" cy="88" r="13" fill="#22222e" stroke="rgba(255,255,255,.14)" />
+                <circle cx="258" cy="62" r="13" fill="url(#gvArtAv)" stroke="rgba(255,255,255,.18)" />
+                <path d="M253 62.5 l3.4 3.4 6.4-7" fill="none" stroke="#3ddc97" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </div>
+            <h3>The graph has not been generated yet</h3>
+            <p class="dim">One snapshot of every account: <b class="gv-c-created">created-from</b> links,
+              <b class="gv-c-seen">opened links</b> and <b class="gv-c-msg">messages sent</b> — drawn as
+              directed lines between profile cards.</p>
+            <p class="dim small-text">It is computed on purpose, not on page load: a rebuild reads every
+              account, so the server keeps the snapshot until you ask for a new one.</p>
+            <button id="gv-generate" class="gv-primary gv-big">Generate the graph</button>
+          </div>
         </div>
       </section>
 
@@ -189,6 +302,7 @@
           <button class="uptab" data-uptab="badges" role="tab" aria-selected="false">Badges</button>
           <button class="uptab" data-uptab="devices" role="tab" aria-selected="false">Devices</button>
           <button class="uptab" data-uptab="traffic" role="tab" aria-selected="false">Traffic</button>
+          <button class="uptab" data-uptab="shares" role="tab" aria-selected="false">Shares</button>
           <button class="uptab" data-uptab="relations" role="tab" aria-selected="false">Relationships</button>
           <button class="uptab" data-uptab="blockers" role="tab" aria-selected="false">Blocked&nbsp;by</button>
         </div>
@@ -196,6 +310,7 @@
       <button id="btn-user-close" class="tiny">close</button>
     </header>
     <div id="user-panel-body"></div>
+    <div id="user-shares" hidden></div>
     <div id="user-relations" hidden></div>
     <div id="user-blockers" hidden></div>
   </aside>
@@ -209,6 +324,13 @@
     <div id="badge-modal-body"></div>
   </aside>
   <div id="lightbox" hidden><img id="lightbox-img" alt="profile photo, enlarged" /></div>
+  <!-- God View physics: vendored d3-force UMD builds, in dependency order
+       (each merges into window.d3 — see admin/vendor/d3/README.md). Classic
+       scripts, so they are ready before the deferred module scripts. -->
+  <script src="/vendor/d3/d3-dispatch.min.js"></script>
+  <script src="/vendor/d3/d3-quadtree.min.js"></script>
+  <script src="/vendor/d3/d3-timer.min.js"></script>
+  <script src="/vendor/d3/d3-force.min.js"></script>
   <script type="module" src="/badges-art.js"></script>
   <script type="module" src="/app.js"></script>
 </body>

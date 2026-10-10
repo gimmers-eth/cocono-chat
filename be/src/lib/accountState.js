@@ -76,8 +76,13 @@ export async function purgeFriendReferences(users, deletedUl, redis) {
 //     old blocks or reasons aimed at its previous owner)
 //   * own profile+avatar doc, ID photo, ALL messages both directions,
 //     diagnostics reports, Redis state (nonces, enrollments, limiters)
+//   * share-link attribution and contact edges naming this account, BOTH
+//     directions (lib/shares.js): referral/click metadata is data ABOUT the
+//     account, so it goes with it. The CHILDREN of a deleted referrer keep
+//     their own `ref.by` string — that is the child's origin story, and the
+//     God View renders the missing parent as a ghost node.
 //   * the account doc itself last (the reverse scans read from it)
-export async function deleteAccountFully({ users, profiles, idDocs, messages, diagnostics, settings, redis }, ul) {
+export async function deleteAccountFully({ users, profiles, idDocs, messages, diagnostics, settings, redis, shares, contacts }, ul) {
   await purgeFriendReferences(users, ul, redis);
   // admin-set limit overrides (per-user caps, device IP-flap budgets) are
   // keyed by USERNAME — the new owner of the name must start clean
@@ -94,6 +99,8 @@ export async function deleteAccountFully({ users, profiles, idDocs, messages, di
   if (idDocs) await idDocs.deleteOne({ ul });
   if (profiles) await profiles.deleteOne({ ul });
   if (messages) await messages.deleteMany({ $or: [{ 'to.ul': ul }, { 'from.ul': ul }] });
+  if (shares) await shares.deleteMany({ $or: [{ o: ul }, { viewer: ul }] });
+  if (contacts) await contacts.deleteMany({ $or: [{ from: ul }, { to: ul }] });
   await cleanupAccountState(redis, ul);
   await users.deleteOne({ ul });
 }

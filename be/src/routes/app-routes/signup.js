@@ -4,6 +4,7 @@ import { importRawPublicKey, importRawX25519PublicKey, verifySignature } from '.
 import { rateLimit } from '../../lib/rateLimit.js';
 import { isValidUsername, isValidDeviceId, isReserved } from '../../lib/username.js';
 import { evaluateBadges } from '../../lib/badges.js';
+import { recordReferral, shareableName } from '../../lib/shares.js';
 import { fail, limited, isReplayedSignature, payloadTooOld } from '../shared.js';
 import { effectiveLimit } from '../../lib/limits.js';
 
@@ -14,7 +15,12 @@ const AES_KEY_BYTES = new Set([16, 24, 32]);
 // X25519 key-agreement public key (milestone 3), t a client epoch-seconds
 // timestamp, and s the Ed25519 signature over canonical({ a, d, p, t, u, x })
 // (M6 fix: freshness + replay protection).
-export default async function signupRoutes(app, { users, redis, config, settings , counters}) {
+// Optional UNSIGNED `r`: the username whose share link (`/?chat=<r>`) this
+// signup followed — the account's parent. Kept out of the signature on
+// purpose (widening it would break every shipped client) and worth no
+// reward, so the worst a lying client can do is mislabel its own origin in
+// the admin Shares tab / God View. See lib/shares.js.
+export default async function signupRoutes(app, { users, redis, config, settings , counters, shares}) {
   app.post('/api/signup', async (request, reply) => {
     const lim = await effectiveLimit(settings, config, 'signup');
     const rl = await rateLimit(redis, `rl:signup:${request.ip}`, lim.limit, lim.windowSec);
@@ -63,6 +69,12 @@ export default async function signupRoutes(app, { users, redis, config, settings
     // above is checked against the `u` as sent, so older clients that sign
     // mixed-case input keep working.
     const ul = u.toLowerCase();
+    // The share link this signup arrived from (optional, unsigned — see the
+    // header note). Junk, self-referrals and unknown usernames are dropped:
+    // attribution must never fail a signup, so nothing here throws outward.
+    const referrer = shareableName(request.body?.r);
+    const ref = referrer && referrer !== ul ? { by: referrer, at: now } : null;
+    if (referrer && !ref) request.log.info(`[shares] signup @${ul}: ignored referral '${referrer}'`);
     try {
       await users.insertOne({
         u: ul,
@@ -74,6 +86,10 @@ export default async function signupRoutes(app, { users, redis, config, settings
         identity: { d, p, createdAt: now },
         devices: [{ id: d, pub: p, x, aes: a, createdAt: now, lastSeenAt: now }],
         maxDevices: config.maxDevicesDefault,
+        // parent: whose share link created this account (null = organic).
+        // Written at creation and never changed — it is the account's origin
+        // story, and the God View's solid 'created' edges come from it.
+        ...(ref ? { ref } : {}),
         createdAt: now,
       });
     } catch (err) {
@@ -87,6 +103,14 @@ export default async function signupRoutes(app, { users, redis, config, settings
     // serially so the ten OG seats / 1000 early-bird seats can never be
     // double-booked. Never blocks or fails the signup itself.
     evaluateBadges(users, config, ul, counters).catch(() => {});
-    return reply.code(201).send({ u: ul });
+    // The owner side of the same fact: a 'created' edge in the shares graph.
+    // AWAITED (unlike the badge queue) so the referral is durable by the time
+    // the client gets its 201 — but still unable to fail the signup: the
+    // account exists, and a bookkeeping write must not orphan it.
+    if (ref) {
+      await recordReferral(shares, { owner: ref.by, viewer: ul, now })
+        .catch((err) => request.log.warn(`[shares] referral ${ref.by} -> ${ul} not recorded: ${err.message}`));
+    }
+    return reply.code(201).send({ u: ul, ...(ref ? { ref: ref.by } : {}) });
   });
 }

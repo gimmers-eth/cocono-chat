@@ -294,3 +294,316 @@ details.diag summary { display: flex; gap: 0.6rem; align-items: center; flex-wra
 /* username component (mirrors the client's .uname rhythm) */
 .uname { font-weight: 700; white-space: nowrap; }
 .uname .gold-badge { margin-left: .3em; }
+
+/* ==========================================================================
+   God View — the social graph page
+   Palette comes from the CLIENT's brand (themes/dark/theme.css): created edges
+   are the brand purple (--accent #7d6ce0, solid), "seen" edges the dark purple
+   (--accent-strong #4b3fa8, dotted), messages a separate dashed teal so the
+   third fact never reads as a shade of the first two.
+   ========================================================================== */
+:root {
+  --gv-brand: #7d6ce0;        /* brand purple: created-from-a-link */
+  --gv-brand-lit: #a798f7;    /* same hue, legible as text on dark */
+  --gv-deep: #6c5fd0;         /* dark purple: link opened (seen) */
+  --gv-msg: #2fb3a5;          /* teal: has messaged */
+  --gv-ok: #3ddc97;
+  --gv-bad: #ef6975;
+  --gv-stage-1: #17152a;
+  --gv-stage-2: #0c0d14;
+  --gv-card-1: #1d1a2e;
+  --gv-card-2: #14131e;
+}
+
+/* the graph wants the whole window (set by showPage in app.js) */
+.admin-main.wide { max-width: none; }
+.page[data-page="godview"] h2 { margin: 0; }
+
+.gv-head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 1rem; flex-wrap: wrap; margin-bottom: .8rem;
+}
+.gv-head-text p { margin: .15rem 0 0; }
+.gv-head-actions { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.gv-check { display: inline-flex; align-items: center; gap: .35rem; color: var(--dim); font-size: .82rem; cursor: pointer; }
+.gv-check input { accent-color: var(--gv-brand); }
+button.gv-primary {
+  background: linear-gradient(160deg, var(--gv-brand-lit), var(--gv-brand) 45%, var(--gv-deep));
+  border: 1px solid rgba(167, 152, 247, .5); color: #fff; font-weight: 600;
+  box-shadow: 0 4px 16px rgba(125, 108, 224, .32);
+}
+button.gv-primary:hover { filter: brightness(1.08); box-shadow: 0 6px 22px rgba(125, 108, 224, .45); }
+button.gv-primary:disabled { filter: none; opacity: .6; box-shadow: none; }
+button.gv-big { padding: .6rem 1.4rem; font-size: .95rem; border-radius: 10px; }
+
+/* ---- toolbar: edge-kind filters + search ---- */
+.gv-toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  flex-wrap: wrap; margin-bottom: .7rem;
+}
+/* display:flex beats the UA [hidden] rule — same trap as .rl-banner */
+.gv-toolbar[hidden] { display: none; }
+.gv-filters { display: flex; align-items: center; gap: .85rem; flex-wrap: wrap; }
+.gv-tools { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; }
+.gv-tools input[type="search"] { background: var(--bg); border-radius: 999px; padding: .3rem .8rem; }
+.gv-kind {
+  display: inline-flex; align-items: center; gap: .4rem; cursor: pointer;
+  font-size: .84rem; color: var(--dim); user-select: none;
+}
+.gv-kind b { color: var(--text); font-variant-numeric: tabular-nums; }
+.gv-kind input { accent-color: var(--gv-brand); }
+.gv-kind:hover { color: var(--text); }
+.gv-kind[data-kind="created"] .gv-sample line { stroke: var(--gv-brand); }
+.gv-kind[data-kind="created"] .gv-sample path { fill: var(--gv-brand); }
+.gv-kind[data-kind="seen"] .gv-sample line { stroke: var(--gv-deep); stroke-dasharray: .1 4; stroke-linecap: round; }
+.gv-kind[data-kind="seen"] .gv-sample path { fill: var(--gv-deep); }
+.gv-kind[data-kind="msg"] .gv-sample line { stroke: var(--gv-msg); stroke-dasharray: 5 3.5; }
+.gv-kind[data-kind="msg"] .gv-sample path { fill: var(--gv-msg); }
+.gv-sample { width: 34px; height: 8px; flex: none; overflow: visible; }
+.gv-sample line { stroke-width: 2; fill: none; }
+.gv-filters select { max-width: 6rem; padding: .15rem .35rem; }
+
+/* ---- stage: canvas edges + transformed card layer ---- */
+#gv-stage {
+  position: relative; overflow: hidden; touch-action: none;
+  height: calc(100vh - 15rem); min-height: 32rem;
+  border: 1px solid var(--line); border-radius: 14px;
+  background: radial-gradient(1100px 620px at 50% -8%, var(--gv-stage-1), var(--gv-stage-2) 72%);
+  box-shadow: inset 0 0 90px rgba(0, 0, 0, .55);
+  cursor: grab;
+}
+#gv-stage.gv-dragging { cursor: grabbing; }
+#gv-canvas {
+  position: absolute; inset: 0; pointer-events: none;
+  /* the world-locked dot grid; applyCamera() writes size + position from the
+     same numbers as the card layer's transform */
+  background-image: radial-gradient(circle, rgba(255, 255, 255, .055) 1px, transparent 1.4px);
+  background-size: 31px 31px;
+}
+/* the dot grid is world-locked: applyCamera() writes position/size from the
+   same transform the cards use, so it pans and zooms with the graph */
+#gv-world {
+  position: absolute; left: 0; top: 0; width: 0; height: 0;
+  overflow: visible; pointer-events: none; transform-origin: 0 0;
+}
+
+/* ---- node cards ---- */
+.gv-node { position: absolute; left: 0; top: 0; pointer-events: auto; will-change: transform; }
+.gv-card {
+  position: absolute; left: 0; top: 0;
+  width: 150px; height: 94px; box-sizing: border-box;
+  transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; justify-content: space-between;
+  padding: .5rem .55rem .35rem;
+  border-radius: 12px; cursor: grab;
+  /* a dragged card must not select its own text (or drag the <img> out) */
+  user-select: none; -webkit-user-select: none;
+  background: linear-gradient(158deg, var(--gv-card-1), var(--gv-card-2));
+  border: 1px solid rgba(255, 255, 255, .09);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .5);
+  transition: box-shadow .18s ease, border-color .18s ease, opacity .2s ease;
+}
+.gv-card:hover { border-color: rgba(167, 152, 247, .55); box-shadow: 0 8px 26px rgba(0, 0, 0, .6), 0 0 0 1px rgba(125, 108, 224, .3); }
+.gv-card.is-verified { border-left: 3px solid rgba(61, 220, 151, .55); }
+.gv-card.is-unverified { border-left: 3px solid rgba(239, 105, 117, .45); }
+.gv-card.is-ghost {
+  border-style: dashed; border-left-style: dashed;
+  background: linear-gradient(158deg, #1a1a22, #121218);
+}
+.gv-card.gv-sel {
+  border-color: var(--gv-brand-lit);
+  box-shadow: 0 0 0 2px rgba(125, 108, 224, .45), 0 12px 34px rgba(0, 0, 0, .65);
+}
+.gv-card.gv-focus { border-color: rgba(167, 152, 247, .8); }
+.gv-card.gv-dim { opacity: .14; }
+.gv-card.gv-hit { animation: gv-hit 1.6s ease-in-out infinite; }
+@keyframes gv-hit {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(167, 152, 247, .5), 0 6px 18px rgba(0, 0, 0, .5); }
+  50% { box-shadow: 0 0 0 6px rgba(167, 152, 247, .16), 0 6px 18px rgba(0, 0, 0, .5); }
+}
+/* a dropped node stays where it was put — mark it so the pin is discoverable */
+.gv-card.gv-pinned::after {
+  content: ''; position: absolute; top: 5px; right: 5px; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--gv-brand-lit); box-shadow: 0 0 6px rgba(167, 152, 247, .9);
+}
+.gv-card-main { display: flex; align-items: center; gap: .45rem; min-width: 0; }
+.gv-av {
+  width: 34px; height: 34px; flex: none; border-radius: 50%;
+  display: grid; place-items: center; text-transform: uppercase;
+  font-weight: 700; font-size: .95rem; color: #fff;
+  background-color: var(--gv-deep);
+  background-image: linear-gradient(150deg, var(--gv-brand), var(--gv-deep));
+  background-size: cover; background-position: center;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .14);
+}
+.gv-ghost .gv-av, .is-ghost .gv-av { background-image: none; background-color: #2a2a35; color: #8a93a6; }
+.gv-id { min-width: 0; display: flex; flex-direction: column; gap: .15rem; }
+.gv-name { display: flex; align-items: center; gap: .25em; font-weight: 700; font-size: .82rem; min-width: 0; }
+.gv-uname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gv-sub { display: flex; align-items: center; gap: .3em; min-height: 16px; }
+.gv-badge { flex: none; }
+.gv-badge svg { border-radius: 4px; display: block; }
+.gv-coco { font-size: .72rem; font-weight: 700; color: var(--gv-brand-lit); white-space: nowrap; display: inline-flex; align-items: center; gap: .3em; }
+.gv-coco.trusted { color: var(--gv-ok); }
+.gv-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; }
+.gv-i { width: 14px; height: 14px; display: block; flex: none; }
+.gv-trust { display: inline-flex; }
+.gv-trust.ok { color: var(--gv-ok); }
+.gv-trust.bad { color: var(--gv-bad); }
+.gv-trust.gone { color: #8a93a6; }
+.gv-trust .gv-i { width: 13px; height: 13px; }
+.gv-prem { display: inline-flex; color: #f0c04a; }
+.gv-prem .gv-i { width: 11px; height: 11px; fill: rgba(240, 192, 74, .35); stroke: #f0c04a; }
+.gv-links {
+  display: flex; align-items: center; gap: .15rem;
+  border-top: 1px solid rgba(255, 255, 255, .07); padding-top: .25rem;
+  transition: opacity .2s ease;
+}
+.gv-link {
+  background: none; border: 0; padding: .15rem .3rem; border-radius: 6px;
+  color: var(--dim); cursor: pointer; line-height: 0;
+}
+.gv-link:hover { color: #fff; background: rgba(125, 108, 224, .28); }
+.gv-gen { margin-left: auto; font-size: .68rem; color: #6d7386; font-variant-numeric: tabular-nums; }
+/* zoomed out: the box stays the same size (edge trimming depends on it) but
+   the small print gets out of the way — the map reads as colour + shape */
+.gv-far .gv-links, .gv-far .gv-coco, .gv-far .gv-badge { opacity: 0; pointer-events: none; }
+.gv-far .gv-card { border-radius: 9px; }
+.gv-far .gv-name { font-size: .78rem; }
+.gv-near .gv-card { box-shadow: 0 10px 30px rgba(0, 0, 0, .55); }
+
+/* ---- legend + HUD ---- */
+.gv-legend {
+  position: absolute; left: .8rem; bottom: .8rem; z-index: 3;
+  display: flex; flex-direction: column; gap: .3rem;
+  padding: .6rem .8rem; border-radius: 10px; font-size: .78rem; color: var(--dim);
+  background: rgba(12, 13, 20, .72); border: 1px solid rgba(255, 255, 255, .08);
+  backdrop-filter: blur(8px); max-width: 17rem;
+}
+.gv-legend-row { display: flex; align-items: center; gap: .45rem; }
+.gv-legend .s-created { stroke: var(--gv-brand); } .gv-legend .f-created { fill: var(--gv-brand); }
+.gv-legend .s-seen { stroke: var(--gv-deep); stroke-dasharray: .1 4; stroke-linecap: round; }
+.gv-legend .f-seen { fill: var(--gv-deep); }
+.gv-legend .s-msg { stroke: var(--gv-msg); stroke-dasharray: 5 3.5; }
+.gv-legend .f-msg { fill: var(--gv-msg); }
+.gv-legend-hint { margin-top: .2rem; font-size: .7rem; line-height: 1.4; opacity: .8; }
+.gv-hud {
+  position: absolute; right: .8rem; bottom: .8rem; z-index: 3;
+  display: flex; flex-direction: column; gap: .3rem;
+}
+.gv-hud-btn {
+  width: 2.1rem; padding: .3rem 0; text-align: center; line-height: 1;
+  background: rgba(12, 13, 20, .78); border: 1px solid rgba(255, 255, 255, .1);
+  color: var(--text); border-radius: 9px; cursor: pointer; font-size: .95rem;
+  backdrop-filter: blur(8px);
+}
+.gv-hud-btn:hover { border-color: var(--gv-brand); color: #fff; }
+.gv-hud-wide { width: auto; padding: .3rem .6rem; font-size: .74rem; letter-spacing: .04em; }
+/* when the inspector is open the HUD moves out from under it */
+#gv-stage:has(.gv-inspector:not([hidden])) .gv-hud { bottom: .8rem; right: 21.6rem; }
+
+/* ---- inspector ---- */
+.gv-inspector {
+  position: absolute; top: .8rem; right: .8rem; bottom: .8rem; z-index: 4;
+  width: 20rem; overflow-y: auto;
+  display: flex; flex-direction: column;
+  background: rgba(16, 17, 26, .93); border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 12px; box-shadow: 0 18px 46px rgba(0, 0, 0, .6);
+  backdrop-filter: blur(10px);
+}
+.gv-inspector[hidden] { display: none; }
+.gv-ins-head {
+  display: flex; align-items: center; gap: .6rem; padding: .75rem .8rem;
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+  position: sticky; top: 0; background: rgba(16, 17, 26, .97); z-index: 2;
+  border-radius: 12px 12px 0 0;
+}
+.gv-ins-av {
+  width: 40px; height: 40px; flex: none; border-radius: 50%;
+  display: grid; place-items: center; text-transform: uppercase; font-weight: 700;
+  color: #fff; background-color: var(--gv-deep);
+  background-image: linear-gradient(150deg, var(--gv-brand), var(--gv-deep));
+  background-size: cover; background-position: center;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .14);
+}
+.gv-ins-id { min-width: 0; flex: 1; }
+.gv-ins-name { display: flex; align-items: center; gap: .3em; font-weight: 700; font-size: .95rem; min-width: 0; }
+.gv-ins-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gv-ins-sub { display: flex; align-items: center; gap: .35em; margin-top: .15rem; }
+.gv-ins-close {
+  background: none; border: 0; color: var(--dim); cursor: pointer; padding: .2rem;
+  border-radius: 6px; line-height: 0; flex: none;
+}
+.gv-ins-close:hover { color: #fff; background: rgba(255, 255, 255, .08); }
+.gv-ins-body { padding: .7rem .8rem .9rem; }
+.gv-facts { display: grid; grid-template-columns: 1fr; gap: .1rem; margin-bottom: .7rem; }
+.gv-fact {
+  display: flex; align-items: baseline; justify-content: space-between; gap: .6rem;
+  padding: .25rem 0; border-bottom: 1px solid rgba(255, 255, 255, .05); font-size: .82rem;
+}
+.gv-fact span { color: var(--dim); }
+.gv-fact b { font-weight: 600; text-align: right; }
+.gv-fact.num b { font-variant-numeric: tabular-nums; }
+.gv-fact.ok b { color: var(--gv-ok); }
+.gv-fact.bad b { color: var(--gv-bad); }
+.gv-ins-sec { margin: .6rem 0; }
+.gv-ins-sec h4 {
+  margin: 0 0 .35rem; font-size: .72rem; color: var(--dim);
+  text-transform: uppercase; letter-spacing: .05em; font-weight: 600;
+}
+.gv-parent {
+  display: flex; align-items: center; gap: .45rem; width: 100%;
+  background: rgba(125, 108, 224, .12); border: 1px solid rgba(125, 108, 224, .35);
+  color: var(--text); border-radius: 9px; padding: .45rem .6rem; cursor: pointer; font: inherit; font-size: .84rem;
+}
+.gv-parent:hover { background: rgba(125, 108, 224, .22); }
+.gv-parent .gv-i { color: var(--gv-brand-lit); }
+.gv-ins-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .8rem; }
+.gv-ins-actions button { flex: 1 1 auto; }
+
+/* ---- empty state ---- */
+.gv-empty { display: grid; place-items: center; padding: 2.5rem 1rem; }
+.gv-empty[hidden] { display: none; }
+.gv-empty-card {
+  max-width: 34rem; text-align: center; padding: 2rem 2.2rem 2.2rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, .4);
+}
+.gv-empty-card h3 { margin: .4rem 0 .5rem; font-size: 1.1rem; }
+.gv-empty-card p { line-height: 1.5; }
+.gv-empty-art { margin-bottom: .4rem; }
+.gv-empty-art svg { width: 100%; max-width: 22rem; height: auto; overflow: visible; }
+.gv-c-created { color: var(--gv-brand-lit); }
+.gv-c-seen { color: #9a8df0; }
+.gv-c-msg { color: var(--gv-msg); }
+@media (prefers-reduced-motion: reduce) {
+  .gv-card, .gv-card.gv-hit { transition: none; animation: none; }
+}
+
+/* ==========================================================================
+   Shares tab (user side panel) — the share-link story of one account
+   ========================================================================== */
+.sh-stats { display: flex; gap: .6rem; flex-wrap: wrap; }
+.sh-stat {
+  flex: 1 1 7rem; display: flex; flex-direction: column; gap: .1rem;
+  padding: .5rem .7rem; border-radius: 10px;
+  background: rgba(125, 108, 224, .1); border: 1px solid rgba(125, 108, 224, .24);
+}
+.sh-stat b { font-size: 1.25rem; font-variant-numeric: tabular-nums; color: var(--gv-brand-lit); }
+.sh-stat span { font-size: .74rem; color: var(--dim); line-height: 1.25; }
+.sh-table td { vertical-align: middle; }
+.sh-table th:nth-child(3), .sh-table td:nth-child(3) { text-align: right; }
+.sh-who { display: inline-flex; align-items: center; gap: .45rem; min-width: 0; }
+.sh-av {
+  width: 24px; height: 24px; flex: none; border-radius: 50%;
+  display: grid; place-items: center; text-transform: uppercase;
+  font-size: .74rem; font-weight: 700; color: #fff;
+  background-color: var(--gv-deep);
+  background-image: linear-gradient(150deg, var(--gv-brand), var(--gv-deep));
+  background-size: cover; background-position: center;
+}
+.sh-gone { opacity: .62; }
+.sh-parent { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; margin: 0; }
+.sh-parent .reason-icon { color: var(--gv-brand-lit); margin-right: .1em; }
+#user-shares .sec .linkish { background: none; border: 0; color: var(--accent); cursor: pointer; font: inherit; padding: 0; }
+#user-shares .sec .linkish:hover { text-decoration: underline; }

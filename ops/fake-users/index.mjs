@@ -29,8 +29,9 @@ import { IPRatelimited } from './types/ipratelimited.js';
 import { IpFlapper } from './types/ipflapper.js';
 import { Friendly } from './types/friendly.js';
 import { Premium } from './types/premium.js';
+import { Referred } from './types/referred.js';
 
-const TYPES = [Normal, Verified, Premium, Friendly, Diagnostic, Ratelimited, IPRatelimited, IpFlapper];
+const TYPES = [Normal, Verified, Premium, Friendly, Referred, Diagnostic, Ratelimited, IPRatelimited, IpFlapper];
 
 function parseArgs(argv) {
   const args = { count: 3, types: null, fresh: false, keepLimits: false };
@@ -100,6 +101,9 @@ try {
       await mongoConn.db.collection('users').deleteOne({ ul });
       await mongoConn.db.collection('messages').deleteMany({ $or: [{ 'from.ul': ul }, { 'to.ul': ul }] });
       await mongoConn.db.collection('diagnostics').deleteMany({ account: ul });
+      // share-link attribution + God View contact edges naming this account
+      await mongoConn.db.collection('shares').deleteMany({ $or: [{ o: ul }, { viewer: ul }] });
+      await mongoConn.db.collection('contacts').deleteMany({ $or: [{ from: ul }, { to: ul }] });
       for await (const batch of redis.scanIterator({ MATCH: `rl:*:${ul}`, COUNT: 100 })) {
         for (const k of batch) await redis.del(k);
       }

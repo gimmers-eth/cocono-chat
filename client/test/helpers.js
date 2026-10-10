@@ -60,6 +60,9 @@ export async function startServer() {
       await mongo.db
         .collection('messages')
         .deleteMany({ $or: [{ 'to.ul': ul }, { 'from.ul': ul }] });
+      // share-link attribution + graph contact edges naming this account
+      await mongo.db.collection('shares').deleteMany({ $or: [{ o: ul }, { viewer: ul }] });
+      await mongo.db.collection('contacts').deleteMany({ $or: [{ from: ul }, { to: ul }] });
       for (const key of [
         `rl:verify:${ul}`,
         `rl:dapprove:${ul}`,

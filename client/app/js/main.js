@@ -16,6 +16,7 @@ import { mountDiagnostics } from './diag.js';
 import { applyIcons } from './icons.js';
 import { initInstallAndNotify } from './install.js';
 import { initBadgeNotify, osNotify } from './notify.js';
+import { noteShareLink, reportShareHit } from './shares.js';
 
 // Generic lock-screen-safe copy for relationship headline notices — no names,
 // no counts: the notification surfaces on the lock screen and the push/OS
@@ -50,12 +51,16 @@ for (const t of ['gesturestart', 'gesturechange', 'gestureend']) {
 // A logged-out opener must NOT lose the link: capture it at boot into
 // localStorage, strip the URL, and let enterApp consume it — which happens
 // right after login/signup, so the conversation with the RIGHT user opens.
+// The same capture also PARKS the link for attribution (js/shares.js): the
+// server learns who referred whom — an account created from a link, or an
+// existing account that opened one.
 const SHARED_CHAT_KEY = 'cocono.shared.chat';
 function captureSharedChat() {
   const url = new URL(location.href);
   const peer = String(url.searchParams.get('chat') ?? '').trim().toLowerCase();
   if (!peer) return;
   try { localStorage.setItem(SHARED_CHAT_KEY, peer); } catch { /* private mode */ }
+  noteShareLink(peer);
   url.searchParams.delete('chat');
   history.replaceState(null, '', url);
 }
@@ -77,7 +82,7 @@ export const client = new CoconoClient({
 
 const chat = createChat({ client, onHomeRefresh: () => home.renderConversationList() });
 const home = createHome({ client, chat, onLogout: () => showAuth() });
-const auth = createAuth({ client, onLoggedIn: (res) => enterApp({ gesture: true, fresh: res?.fresh === true }) });
+const auth = createAuth({ client, onLoggedIn: (res) => enterApp({ gesture: true, fresh: res?.fresh === true, signedUp: res?.signedUp === true }) });
 
 // Phase 1 push: service worker (registered eagerly; permission is only asked
 // for after a login click). iOS additionally requires the app to be added to
@@ -161,7 +166,7 @@ function openChatFromNotice(peer) {
   chat.openChat(ul).catch(() => {});
 }
 
-async function enterApp({ gesture = false, offline = false, fresh = false } = {}) {
+async function enterApp({ gesture = false, offline = false, fresh = false, signedUp = false } = {}) {
   // Durability: ask the browser to keep our IndexedDB (identity + message
   // store) out of eviction under storage pressure. Best-effort: Chrome/
   // Android honours it (reported as persistent=true in Storage
@@ -207,6 +212,17 @@ async function enterApp({ gesture = false, offline = false, fresh = false } = {}
   // exactly that conversation opened once there is an account to open it as.
   const sharedChat = takeSharedChat();
   if (sharedChat) chat.openChat(sharedChat).catch(() => {});
+
+  // Attribution for that same link (server-side graph): an EXISTING account
+  // opening it is a 'seen' edge; a brand-new ACCOUNT already carried the
+  // referrer in its signup body, so this only consumes the parked record.
+  // Offline boots leave it parked for the next entry.
+  if (!offline) {
+    reportShareHit(client, { fresh: signedUp }).then((r) => {
+      if (r.reported) client.logger.debug(`share link of @${r.o} reported (opened by @${client.username})`);
+      else if (r.reason && r.reason !== 'none') client.logger.debug(`share link of @${r.o} not reported: ${r.reason}`);
+    }).catch(() => {});
+  }
 
   // OS notifications: from a gesture (login/signup button) this may prompt
   // for permission; on silent boot-resume it only re-registers a

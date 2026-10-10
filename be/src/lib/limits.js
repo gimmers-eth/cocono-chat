@@ -56,6 +56,8 @@ export const LIMIT_CATALOG = {
   profile:        { ip: false, label: 'Profile edit (per account)', def: (c) => ({ limit: c.profileEditAccountLimit, windowSec: c.profileEditWindowSec }) },
   profileip:      { ip: true,  label: 'Profile view (per IP)',      def: (c) => ({ limit: c.userKeysIpLimit, windowSec: c.userKeysIpWindowSec }) },
   appinfo:        { ip: true,  label: 'App info (per IP)',          def: (c) => ({ limit: c.appInfoIpLimit, windowSec: c.appInfoWindowSec }) },
+  // share-link click reports ('seen' edges, lib/shares.js) — signed-in only
+  sharehit:       { ip: false, label: 'Share-link clicks (per acct)', def: (c) => ({ limit: c.shareHitAccountLimit, windowSec: c.shareHitWindowSec }) },
   // per-DEVICE egress-IP change budget; the subject is 'user:deviceId', so
   // overrides for it are written per device (user panel), app-wide here,
   // and the enforcement lives in the auth hook (app.js)

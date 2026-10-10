@@ -105,3 +105,37 @@ test('theme registry is well-formed and every referenced file exists', async (t)
     assert.match(body, /--bg|--panel|--text/, 'theme must define design tokens');
   }
 });
+
+test('share-link attribution is wired through the served app modules', async (t) => {
+  const srv = await serve();
+  t.after(() => srv.stop());
+
+  // the module itself is served (no bundler: a missing file is a boot crash)
+  const shares = await fetch(`${srv.base}/js/shares.js`);
+  assert.equal(shares.status, 200);
+  const sharesSrc = await shares.text();
+  for (const fn of ['noteShareLink', 'referrerForSignup', 'reportShareHit', 'clearPendingShare']) {
+    assert.match(sharesSrc, new RegExp(`export (async )?function ${fn}\\b`), `${fn} must be exported`);
+  }
+
+  // boot captures the ?chat= link for BOTH jobs: opening the chat and
+  // attributing the account (main.js owns the URL rewrite)
+  const mainSrc = await (await fetch(`${srv.base}/js/main.js`)).text();
+  assert.match(mainSrc, /import \{ noteShareLink, reportShareHit \} from '\.\/shares\.js';/);
+  assert.match(mainSrc, /noteShareLink\(peer\)/, 'captureSharedChat parks the link');
+  assert.match(mainSrc, /reportShareHit\(client, \{ fresh: signedUp \}\)/,
+    'a fresh ACCOUNT suppresses the seen report (signup already carried the referrer)');
+
+  // signup hands the parked link to the SDK as the referrer
+  const authSrc = await (await fetch(`${srv.base}/js/components/auth.js`)).text();
+  assert.match(authSrc, /import \{ referrerForSignup \} from '\.\.\/shares\.js';/);
+  assert.match(authSrc, /client\.register\(username, \{ referrer: referrerForSignup\(username\) \}\)/);
+  assert.match(authSrc, /signedUp: true/, 'signup marks the account as new (pairing does not)');
+
+  // and the SDK sends it unsigned next to the signed identity payload
+  const clientSrc = await (await fetch(`${srv.base}/sdk/client.js`)).text();
+  assert.match(clientSrc, /r: String\(referrer\)\.toLowerCase\(\)/, 'signup body carries r');
+  assert.match(clientSrc, /async reportShareHit\(owner\)/, 'SDK exposes the hit report');
+  const apiSrc = await (await fetch(`${srv.base}/sdk/api.js`)).text();
+  assert.match(apiSrc, /\/api\/share\/hit/, 'the report has an endpoint');
+});

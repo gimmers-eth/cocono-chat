@@ -6,6 +6,7 @@ import { pushBadgeHint } from '../../lib/push.js';
 import { effectiveLimit, readLimitsDoc } from '../../lib/limits.js';
 import { effectiveMaxDevices } from '../../lib/devicePolicy.js';
 import { badgeById, badgesFor, badgeOverview, evaluateBadges, grantBadge, revokeBadge } from '../../lib/badges.js';
+import { shareStory } from '../../lib/shares.js';
 
 // Per-account device cap: 1..MAX_DEVICES_CAP. Raising it lets a user enroll
 // more devices; lowering it below the current device count is allowed (the
@@ -14,7 +15,7 @@ const MAX_DEVICES_CAP = 1000;
 
 // GET /api/admin/users, PATCH max-devices, DELETE user, DELETE device,
 // PUT verified (identity-verification toggle), GET/DELETE id-doc (review).
-export default async function usersRoutes(app, { users, redis, config, messages, idDocs, profiles, settings, diagnostics, counters }) {
+export default async function usersRoutes(app, { users, redis, config, messages, idDocs, profiles, settings, diagnostics, counters, shares, contacts, graph }) {
   // account-review outcomes are invisible to the reviewed user otherwise —
   // content-free 'identity' nudges (lib/notify.js) make the app re-pull
   const { notify: notifyAccount, notifyPeers } = createNotifier({ redis, users });
@@ -75,6 +76,9 @@ export default async function usersRoutes(app, { users, redis, config, messages,
         bio: bioBy.get(doc.ul) ?? '',
         badges: badgesFor(doc),
         displayBadge: doc.displayBadge ?? null,
+        // whose share link created this account (null = organic signup) —
+        // written once at signup, never changed (lib/shares.js)
+        ref: doc.ref?.by ? { by: doc.ref.by, at: doc.ref.at ?? null } : null,
         // 'known IPs' = the LATEST egress IP per device (written by the auth
         // hook's flap tracker); feeds the user panel's rate-limit search link
         ips: devices.map((d) => d.lastIp).filter(Boolean),
@@ -284,6 +288,19 @@ export default async function usersRoutes(app, { users, redis, config, messages,
     return { ul, blockers: rows };
   });
 
+  // GET /api/admin/users/:username/shares — the share-link story of ONE
+  // account (admin Shares tab): who it CREATED, who already had an account
+  // and merely OPENED its link, which links IT opened, and the link it was
+  // born from. All four come from the same two facts (users.ref + the
+  // `shares` pair docs), so they can never disagree with each other.
+  app.get('/api/admin/users/:username/shares', async (request, reply) => {
+    const ul = request.params.username.toLowerCase();
+    if (!await users.findOne({ ul }, { projection: { _id: 1 } })) {
+      return fail(reply, 'unknown_account', 'No such user', 404);
+    }
+    return shareStory(shares, users, ul);
+  });
+
   // GET /api/admin/users/:username/id-doc — the photo itself (admin-only,
   // token-gated + loopback-bound surface).
   app.get('/api/admin/users/:username/id-doc', async (request, reply) => {
@@ -334,8 +351,9 @@ export default async function usersRoutes(app, { users, redis, config, messages,
     const existing = await users.findOne({ ul }, { projection: { _id: 1 } });
     if (!existing) return fail(reply, 'unknown_account', 'No such user', 404);
     // THE full teardown (friends refs + OTHERS' blocked/blockReasons walls,
-    // diagnostics, photos, messages, redis) — one helper, no per-path gaps
-    await deleteAccountFully({ users, profiles, idDocs, messages, diagnostics, settings, redis }, ul);
+    // diagnostics, photos, messages, share/contact edges, redis) — one
+    // helper, no per-path gaps
+    await deleteAccountFully({ users, profiles, idDocs, messages, diagnostics, settings, redis, shares, contacts }, ul);
     return { deleted: ul };
   });
 
@@ -358,7 +376,7 @@ export default async function usersRoutes(app, { users, redis, config, messages,
     // reserved usernames). Bearer tokens need no explicit revocation — the
     // hook re-checks membership and the account is gone.
     if (after.devices.length === 0) {
-      await deleteAccountFully({ users, profiles, idDocs, messages, diagnostics, settings, redis }, ul);
+      await deleteAccountFully({ users, profiles, idDocs, messages, diagnostics, settings, redis, shares, contacts }, ul);
       return { removed: deviceId, devices: 0, accountDeleted: true };
     }
     return { removed: deviceId, devices: after.devices.length };

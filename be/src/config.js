@@ -240,6 +240,14 @@ export const config = {
   // app-info endpoint poll guard (the FE fetches it on boot; cached 30s)
   appInfoIpLimit: numOf(env.APP_INFO_IP_LIMIT, 240),
   appInfoWindowSec: numOf(env.APP_INFO_WINDOW_SEC, IP_TIME_WINDOW),
+
+  // Share-link click reports (POST /api/share/hit, lib/shares.js). Per
+  // ACCOUNT, not per IP: only a signed-in session can report one, and the
+  // write is an upsert on a bounded (owner -> viewer) pair, so the budget
+  // only has to stop a client hammering the endpoint in a loop. 60/hour is
+  // far past any real usage (a click is reported once per link open).
+  shareHitAccountLimit: numOf(env.SHARE_HIT_ACCOUNT_LIMIT, 60),
+  shareHitWindowSec: numOf(env.SHARE_HIT_WINDOW_SEC, 3600),
 };
 
 config.jwtSecretInsecure = config.jwtSecret === 'dev-secret-change-me' || config.jwtSecret.length < 32;

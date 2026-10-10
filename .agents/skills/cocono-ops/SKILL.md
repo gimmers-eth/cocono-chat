@@ -85,7 +85,10 @@ here — the wiped server simply refuses old identities and devices re-pair.
 `./ops/fake-users.sh [--count N] [--types a,b] [--fresh] [--keep-limits] [--list]`
 — generates scenario accounts through the REAL SDK/API (keys live in memory
 only): `normal`, `verified` (admin flag), `friendly` (pairs that mutually
-add/verify/trust + exchange live E2EE messages), `diagnostic` (report pile),
+add/verify/trust + exchange live E2EE messages), `referred` (a share-link
+REFERRAL TREE: each account is created from an earlier one's `/?chat=` link,
+opens another member's link, and messages its parent — the data the admin
+**God View** graph draws), `diagnostic` (report pile),
 `ratelimited` (account limiters seeded spent), `ipratelimited` / `ipflapper`
 (TEST-NET egress IPs + live counters, visible via the user panel's
 "search rate limits" link). At least 1 of every scenario always; usernames
@@ -96,6 +99,21 @@ leave it off by hand unless you mean to.
 New scenarios: drop a `FakeUserType` subclass in `ops/fake-users/types/` and
 add it to `TYPES` in `index.mjs`. Seeded limiter state is indistinguishable
 from earned state on the Traffic page — that is the point.
+
+## God View (admin social graph)
+
+`http://127.0.0.1:3001/#godview` — the whole network as a directed graph:
+solid brand purple = created-from-a-share-link, dotted dark purple = link
+opened by an existing account, dashed teal = has messaged. Cards show photo,
+app-trust icon, name + worn badge, CoCo score; drag/zoom/click for the
+inspector, and the icon links under a name open that user's panel.
+
+The snapshot is generated **on demand** (`POST /api/admin/graph`) and stored in
+the `graph` collection — opening the page never rebuilds it, and the settled
+layout is saved back (`PUT /api/admin/graph/layout`) so a reload shows the same
+picture. After generating demo data (`./ops/fake-users.sh --types referred
+--count 8 --fresh`) press **Regenerate**; the stamp says how old the snapshot is.
+Model + honest limits: `docs/SHARES.md`.
 
 ## Deploying updates
 

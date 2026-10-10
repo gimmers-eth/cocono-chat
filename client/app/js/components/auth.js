@@ -3,6 +3,7 @@
 
 import { $, showView, setStatus, confirmModal } from '../ui.js';
 import { deleteAccountData } from '../store.js';
+import { referrerForSignup } from '../shares.js';
 
 export function createAuth({ client, onLoggedIn }) {
   const els = {
@@ -106,11 +107,16 @@ export function createAuth({ client, onLoggedIn }) {
         const username = $('signup-username').value.trim();
         if (username.length < 4) throw new Error('Username must be at least 4 characters.');
         setStatus(els.status, 'Creating account and keys on this device…');
-        const res = await client.register(username);
+        // If this signup followed someone's /?chat= link, the server records
+        // that account as this one's parent (admin Shares tab + God View).
+        // Unsigned, unrewarded, best-effort — never able to fail the signup.
+        const res = await client.register(username, { referrer: referrerForSignup(username) });
         // FRESH identity: a brand-new keypair/device — main.js purges any
         // local data this username's PREVIOUS owner left behind (see
-        // store.ensureScoped)
-        await onLoggedIn({ ...res, fresh: true });
+        // store.ensureScoped). signedUp marks the ACCOUNT as new too (pairing
+        // is also 'fresh' but joins an existing account, which must not
+        // suppress that link's 'seen' report).
+        await onLoggedIn({ ...res, fresh: true, signedUp: true });
       }),
     );
 
