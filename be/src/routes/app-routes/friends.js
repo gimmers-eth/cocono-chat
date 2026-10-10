@@ -236,26 +236,42 @@ export default async function friendsRoutes(app, { users, redis, config, setting
   });
 
   // shared flag setter for the two post-add stages (verify / trust)
-  async function setFlag(request, reply, field, bodyKey, requires) {
+  // budgetFor (optional): { names, verb } derived from the FRESH doc read
+  // inside setFlag — the stage budget is charged HERE, after every validation
+  // passed and immediately before the write + headline nudge. The routes'
+  // earlier candidate reads are only for friendlier pre-rejection; charging
+  // inside the setter is what makes "a capped vouch emits NO notification"
+  // structural: no stale or racing read can steer a capped request into the
+  // write+notify line.
+  async function setFlag(request, reply, field, bodyKey, requires, budgetFor = null) {
     const denied = await guard(request, reply, 'friendschange');
     if (denied) return denied;
     const target = targetOf(request);
     if (!target) return fail(reply, 'bad_username', 'Invalid username', 400);
     const on = request.body?.[bodyKey] === true;
     const ul = request.auth.sub;
-    const user = await users.findOne({ ul }, { projection: { friends: 1 } });
+    const user = await users.findOne({ ul }, { projection: { friends: 1, verified: 1 } });
     const list = normalize(user?.friends);
     const existing = list.find((f) => f.u === target);
     if (!existing) return fail(reply, 'not_friends', 'Add this user first', 404);
     if (on && requires && !existing[requires]) {
       return fail(reply, 'stage_required', 'Verify the safety number before trusting', 409);
     }
+    // budget AFTER validation (impossible calls stay free: the 404/409 above
+    // never charges ftday) and BEFORE the write + nudge below
+    if (on && budgetFor) {
+      const { names, verb } = budgetFor(user);
+      const over = await stageBudget(reply, ul, names, verb);
+      if (over) return over;
+    }
     existing[field] = on;
     if (!on && field === 'v') existing.t = false; // un-verifying revokes trust too
     await users.updateOne({ ul }, { $set: { friends: list } });
     // The peer's derived view moved too — and when someone CONFIRMS us
     // (verify) or EXTENDS trust, that is a headline event: dedicated nudge
-    // kinds so the client always OS-notifies. Undoing is quiet churn.
+    // kinds so the client always OS-notifies. Undoing is quiet churn. A
+    // request the budget capped above never reaches this line — the notified
+    // party hears NOTHING about vouches that hit the tagger's limit.
     if (on) await notifyAccount(target, field === 'v' ? 'verify' : 'trusts', { by: ul });
     else await notifyAccount(target, 'friends');
     return { friends: await enriched(ul) };
@@ -265,46 +281,37 @@ export default async function friendsRoutes(app, { users, redis, config, setting
   // SETTING requires the MUTUAL add: a stranger list is exactly the surface
   // a MITM would target, and there is no two-way relationship to confirm a
   // key inside. Undo is always allowed. (The "add this user first" 404 keeps
-  // priority: no entry at all → not_friends, not not_mutual.)
+  // priority: no entry at all → not_friends, not not_mutual.) The budget
+  // (fvday — fvdayv for ID-verified accounts — + fvweek) is charged inside
+  // setFlag against the FRESH doc; the resolver never lives twice.
   app.put('/api/me/friends/:ul/verify', async (request, reply) => {
     if (request.body?.verified === true) {
       const target = targetOf(request);
       if (!target) return fail(reply, 'bad_username', 'Invalid username', 400);
       const ul = String(request.auth.sub ?? '').toLowerCase();
-      const meDoc = await users.findOne({ ul }, { projection: { friends: 1, verified: 1 } });
+      const meDoc = await users.findOne({ ul }, { projection: { friends: 1 } });
       if (normalize(meDoc?.friends).some((f) => f.u === target)) {
         const tDoc = await users.findOne({ ul: target }, { projection: { friends: 1 } });
         const back = tDoc ? normalize(tDoc.friends).some((f) => f.u === ul) : false;
         if (!back) {
           return fail(reply, 'not_mutual', `${target} has not added you back — verification unlocks once both of you have added each other`, 409);
         }
-        // …and the per-account verify budget must allow it (fvday, or the
-        // bigger fvdayv for ID-verified accounts / fvweek — see resolver)
-        const over = await stageBudget(reply, ul, [verifyDailyLimiter(meDoc), 'fvweek'], 'Verification');
-        if (over) return over;
       }
     }
-    return setFlag(request, reply, 'v', 'verified', null);
+    return setFlag(request, reply, 'v', 'verified', null,
+      (me) => ({ names: [verifyDailyLimiter(me), 'fvweek'], verb: 'Verification' }));
   });
 
   // PUT /api/me/friends/:ul/trust — third stage: "I know this person".
   // Requires the verify stage (a key you never confirmed cannot be trusted),
-  // and spends the per-account trust budget (ftday/ftweek) — but only for a
-  // genuine candidate (existing + verified), so impossible calls that
-  // setFlag rejects with 404/409 never consume the budget.
+  // and spends the per-account trust budget (ftday/ftweek) charged inside
+  // setFlag — AFTER validation, BEFORE the write and the 'trusts' headline
+  // nudge. That ordering is the guarantee: a truster who hits their limit
+  // gets 429 and NOBODY is notified; impossible calls (no entry / unverified)
+  // are rejected before the budget, so they never consume it either.
   app.put('/api/me/friends/:ul/trust', async (request, reply) => {
-    if (request.body?.trust === true) {
-      const target = targetOf(request);
-      if (!target) return fail(reply, 'bad_username', 'Invalid username', 400);
-      const ul = String(request.auth.sub ?? '').toLowerCase();
-      const meDoc = await users.findOne({ ul }, { projection: { friends: 1 } });
-      const existing = normalize(meDoc?.friends).find((f) => f.u === target);
-      if (existing?.v === true) {
-        const over = await stageBudget(reply, ul, ['ftday', 'ftweek'], 'Trust');
-        if (over) return over;
-      }
-    }
-    return setFlag(request, reply, 't', 'trust', 'v');
+    return setFlag(request, reply, 't', 'trust', 'v',
+      () => ({ names: ['ftday', 'ftweek'], verb: 'Trust' }));
   });
 
   // ---- BLOCKING ------------------------------------------------------
