@@ -159,6 +159,11 @@ past the deadline.
 | `disconnect()` | Close it. |
 | `connectionState` | `'connecting' \| 'open' \| 'closing' \| 'closed'`. |
 | `sendMessage(username, text, opts?)` | E2EE text message. Fans out **one envelope per recipient device** (pairwise keys, DESIGN.md) sharing one `localId`. Unless the target is your own account (self-chat), the message is ALSO mirrored to your other devices as an outgoing **sync copy** — those surface as `sync` events there, never as `message`, and their acks/receipts never reach you (`{ sync: false }` opts out; the mirror is best-effort). → `{localId, peer, cids: string[]}` (`cids` = peer copies only) |
+| `sendMedia(username, media, opts?)` | E2EE **photo / video / file** (M4). `{ kind: 'image'\|'video'\|'file', bytes, thumb?, name?, mime?, w?, h?, dur?, animated? }` — `bytes`/`thumb` are `ArrayBuffer`/`Uint8Array`/`Blob` (the SDK has no DOM, so the APP resizes and thumbnails). Generates a per-file AES-GCM-256 key, encrypts, uploads the CIPHERTEXT (`POST /api/media`), then fans out one envelope per recipient device carrying the key inside it, plus the plaintext `att` descriptor; own other devices get the same media object as a **sync copy** whose `att` makes them owe a download+ack like any recipient. `{ localId }` in `opts` lets the caller pre-claim the id (the app writes the sender's own copy BEFORE the upload). Upload failure throws before any envelope leaves; a post-upload failure is reclaimed by the server's orphan sweep. → `{localId, peer, cids, media}` where `media` is the descriptor to store locally |
+| `downloadMedia(id, media)` | Fetch a blob's ciphertext, **verify it against the sender's `sha256`**, decrypt → `{ data: Blob, thumb: Blob\|null }` (the thumbnail is fetched only when `media.thumbIv` exists). Mismatch throws `media_tampered` and must NOT be acked. 404 → `unknown_media` (the blob is gone: render "no longer available"). |
+| `downloadThumb(id, media)` | Poster/preview bytes only — what a video arrival auto-fetches without pulling the file. Deliberately does **not** ack (only a full download or a decline settles the lifecycle). |
+| `ackMedia(id, downloaded)` | Settle this device's debt: `true` = downloaded, `false` = declined ("delete it before I download it" — that counts as received). When every authorised device has acked, the server deletes the blob. |
+| `reportUser(username, { reason, description, messages, media?, block? })` | `media` (M4) is `[{ blobId, kind, name, mime, key, iv, thumbIv?, bytes? }]` — the file keys this device legitimately holds for the reported conversation, plus its own plaintext where it still has it (`bytes`; the SDK base64url-encodes and trims to the server's 3-item cap). This is what makes reported media readable server-side; the UI warning says so before sending. |
 
 Messages are pulled-and-confirmed: when you receive a `'message'` event the
 SDK has already told the server the copy was pulled (it is kept only for the
@@ -176,7 +181,7 @@ All on the client itself (`client.on(type, fn)` → returns an `off()` function;
 | `ready` | `{username, deviceId}` | After register/login/pairing completes. |
 | `state` | `{state}` | WebSocket: `'connecting'`, `'open'`, `'closed'`. |
 | `message` | `{mid, peer, from, fromDeviceId, text, ts, self}` | Decrypted incoming message. `ts` is the **server-assigned** receive time (ms epoch) — use it for ordering, never client clocks. `self: true` for a message from another device of your own account (e.g. the other half of a self-chat). |
-| `sync` | `{id, peer, text, ts, fromDeviceId}` | An OUTGOING message mirrored from another of your own devices (multi-device sync). Store it as an outgoing record under `id` (the originating device's `localId` — same id on every device, so replays dedupe naturally). Never raise notifications, read markers or delivery ticks for it — status lives on the device that sent it. |
+| `sync` | `{id, peer, text, media?, ts, fromDeviceId}` | An OUTGOING message mirrored from another of your own devices (multi-device sync). Store it as an outgoing record under `id` (the originating device's `localId` — same id on every device, so replays dedupe naturally). `media` (M4) is set instead of `text` for a media send: the SAME descriptor the sender stored, so this device can join the blob lifecycle (download + ack) like any recipient. Never raise notifications, read markers or delivery ticks for it — status lives on the device that sent it. |
 | `ack` | `{cid, localId, ok, error?}` | Server accepted/rejected one envelope. A fan-out send to a 2-device peer yields 2 acks with the same `localId`. |
 | `delivered` | `{cid, localId, to}` | A recipient device pulled that copy. Expect one per recipient device. |
 | `notice` | `{what}` | Content-free server nudge: a slice of server-authoritative state this account caches moved because of **someone else** (`what`: `friends`, `gone`, `profile`, `identity` — taxonomy in `be/src/lib/notify.js`). Re-pull that data yourself; never trust the frame for content. Offline = missed; reconcile-on-entry covers it. |
@@ -184,7 +189,9 @@ All on the client itself (`client.on(type, fn)` → returns an `off()` function;
 
 Wire-level error codes on failed acks (`error.code` … see envelope checks in
 `be/src/routes/ws-routes/`): `bad_hmac`, `sender_mismatch`,
-`unknown_recipient`, `stale_payload`, `rate_limited`, …
+`unknown_recipient`, `stale_payload`, `rate_limited`, `verify_required`,
+`blocked`, `self_blocked`, and for media envelopes `unknown_attachment`
+(the `att` names a blob that is gone, or is not this sender's own upload).
 
 Errors thrown by the SDK:
 
@@ -193,7 +200,12 @@ Errors thrown by the SDK:
 - `CoconoError` — local misuse: `code` is one of `no_identity`,
   `identity_exists`, `not_authenticated`, `not_connected`,
   `no_peer_devices`, `no_pending_pairing`, `pairing_expired`,
-  `pairing_cancelled`, `decrypt_failed`.
+  `pairing_cancelled`, `decrypt_failed`, and for media
+  `no_media` / `no_media_key` (missing inputs) or `media_tampered`
+  (a download whose bytes do not match the sender's digest).
+- Media REST codes arrive as `CoconoApiError`: `media_too_large`,
+  `thumb_too_large`, `media_quota`, `bad_sha256`, `unknown_media`,
+  `rate_limited` — the app maps them to sentences (see `client/app/js/media.js`).
 
 ## Displaying messages (the sender's side)
 
@@ -259,8 +271,12 @@ Local overrides go in `client/.env.test` (gitignored): `TEST_REDIS_URL`,
   yields `bad_signature` on login (the BE keeps that message deliberately
   generic to avoid account enumeration). Pick one URL per device; to migrate,
   pair the new location through the pairing flow.
-- Text messages only (milestone 3); files/groups/tags land in later milestones
-  and will extend `sendMessage` or add typed variants.
+- Media (milestone 4) is 1:1 only: ≤ 10 MB per blob, images resized to 1600 px
+  client-side, no streaming/range downloads, no server-side transcoding, and
+  once every device has acked the blob is gone for good (a reinstall shows
+  "no longer available"). Groups (M5) will extend `sendMedia`'s fan-out.
+- Text messages: `sendMessage` (milestone 3); media has its own `sendMedia`
+  rather than an overload, because the transport is different (REST bytes).
 - One tab per device in browsers (the app-level guard in the FE; the SDK
   itself doesn't enforce it).
 - The peer key cache is only refreshed via `peerKeys(_, {refresh: true})` /

@@ -27,7 +27,7 @@ import { fail, requireAuth, limited } from '../shared.js';
 import { rateLimit } from '../../lib/rateLimit.js';
 import { effectiveLimit } from '../../lib/limits.js';
 import { b64uDecode } from '../../lib/b64u.js';
-import { MEDIA_ID_RE, MEDIA_KINDS, ackDevice } from '../../lib/media.js';
+import { MEDIA_ID_RE, MEDIA_KINDS, ackDevice, asBytes } from '../../lib/media.js';
 
 // base64url of a blob, with the DECODED size capped before anything big is
 // allocated — a hostile body must not make us buffer 100 MB of junk.
@@ -41,16 +41,6 @@ const decodeCapped = (b64, maxBytes) => {
   return buf;
 };
 
-// Mongo returns a stored Buffer as a Binary wrapper {buffer, sub_type,
-// position} whose `buffer` can be OVER-allocated — value() is the exact byte
-// range (same normalisation the ID-doc route needs, made explicit).
-const asBuffer = (v) => {
-  if (!v) return null;
-  if (Buffer.isBuffer(v)) return v;
-  if (typeof v?.value === 'function') return Buffer.from(v.value());
-  if (v.buffer instanceof Uint8Array) return Buffer.from(v.buffer.subarray(0, v.position ?? v.buffer.length));
-  return null;
-};
 
 export default async function mediaRoutes(app, { redis, config, settings, media }) {
   // POST /api/media — the sender uploads ciphertext (+ optional encrypted
@@ -156,7 +146,7 @@ export default async function mediaRoutes(app, { redis, config, settings, media 
       || (doc.devices ?? []).some((d) => d.ul === request.auth.sub && d.dv === request.auth.d)
     );
     if (!doc || !mine) return fail(reply, 'unknown_media', 'No such attachment', 404);
-    const buf = asBuffer(wantThumb ? doc.thumb : doc.blob);
+    const buf = asBytes(wantThumb ? doc.thumb : doc.blob);
     if (!buf) return fail(reply, 'unknown_media', 'No such attachment', 404);
     reply.header('x-cocono-kind', doc.kind);
     reply.header('etag', `"${doc.sha256}"`);

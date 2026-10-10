@@ -17,6 +17,21 @@ const THUMB = new Uint8Array(Array.from({ length: 120 }, (_, i) => (i * 11) % 25
 
 const mediaCollection = (srv) => srv.mongo.db.collection('media');
 
+// Settle helper: WAIT until the server has listed a device on the blob.
+// `handleSend` registers before it persists and publishes, so this normally
+// resolves on the first poll — but a loaded machine (the whole suite running
+// sequentially in CI-like conditions) delays the ws seam by seconds, and a
+// download issued before the listing legitimately 404s. Tests that assert the
+// LIFECYCLE must therefore wait for the bookkeeping, not for a coincidence.
+async function waitForDevice(srv, id, ul, { tries = 60 } = {}) {
+  for (let i = 0; i < tries; i++) {
+    const doc = await mediaCollection(srv).findOne({ _id: id });
+    if (doc && (doc.devices ?? []).some((d) => d.ul === ul.toLowerCase())) return doc;
+    await sleep(50);
+  }
+  throw new Error(`device @${ul} never listed on blob ${id}`);
+}
+
 // A client that stays connected (because an assertion threw before the
 // disconnect lines) keeps the suite's process alive — so every test registers
 // its clients for teardown instead of relying on the happy path.
@@ -98,7 +113,8 @@ test('media: image send → receive → download → ack → server blob deleted
   // Bob receives a message first: the server registers the addressed device on
   // the blob BEFORE it publishes the envelope, so reading the doc only becomes
   // meaningful once his copy is on its way (otherwise this races the ws seam).
-  const msg = await waitFor(bob, 'message', (m) => m.text.startsWith('{"media":'));
+  const msg = await waitFor(bob, 'message', (m) => m.text.startsWith('{"media":'), 20000);
+  await waitForDevice(srv, sent.media.id, bobName);
   const media = JSON.parse(msg.text).media;
   assert.equal(media.id, sent.media.id);
   assert.equal(media.name, 'holiday.jpg');
@@ -157,7 +173,9 @@ test('media: decline-before-download marks it received and deletes the blob', as
   await Promise.all([waitOpen((alice.connect(), alice)), waitOpen((bob.connect(), bob))]);
 
   const sent = await alice.sendMedia(bobName, { kind: 'file', bytes: PNG, name: 'spec.pdf', mime: 'application/pdf' });
-  await waitFor(bob, 'message', (m) => m.text.startsWith('{"media":'));
+  // same discipline: the ack is only meaningful once the device is listed
+  await waitFor(bob, 'message', (m) => m.text.startsWith('{"media":'), 20000);
+  await waitForDevice(srv, sent.media.id, bobName);
   const res = await bob.ackMedia(sent.media.id, false);
   assert.deepEqual(res, { ok: true, deleted: true });
   assert.equal(await mediaCollection(srv).findOne({ _id: sent.media.id }), null,
@@ -183,6 +201,12 @@ test('media: a digest mismatch is surfaced, never silently accepted', async (t) 
   await Promise.all([waitOpen((alice.connect(), alice)), waitOpen((bob.connect(), bob))]);
 
   const sent = await alice.sendMedia(bobName, { kind: 'image', bytes: PNG, name: 'x.png', mime: 'image/png' });
+  // WAIT for the send to be stored: `devices` is written by handleSend, so a
+  // download fired the instant sendMedia resolves can race the ws seam and
+  // legitimately 404 (this test passed alone and failed under full-suite
+  // timing for exactly that reason — settle first, then assert).
+  await waitFor(bob, 'message', (m) => m.text.startsWith('{"media":'), 20000);
+  await waitForDevice(srv, sent.media.id, bobName);
   // a lying server (here: a stubbed fetch) must not be able to hand back
   // different bytes without the client noticing
   const real = bob.api.downloadMediaRaw.bind(bob.api);
@@ -235,9 +259,10 @@ test('media: outgoing sync — the sender own other device owes a download too',
 
   // the sync copy arrives as a 'sync' event carrying the SAME media object
   const [syncEv, bobMsg] = await Promise.all([
-    waitFor(a2, 'sync', (m) => m.media?.id === sent.media.id),
-    waitFor(bob, 'message', (m) => m.text.startsWith('{"media":')),
+    waitFor(a2, 'sync', (m) => m.media?.id === sent.media.id, 20000),
+    waitFor(bob, 'message', (m) => m.text.startsWith('{"media":'), 20000),
   ]);
+  await waitForDevice(srv, sent.media.id, bobName);
   assert.equal(syncEv.id, sent.localId, 'same record id on every device');
   assert.equal(syncEv.peer, bobName);
   assert.equal(syncEv.media.key, sent.media.key, 'one file key, every device');
@@ -328,11 +353,10 @@ test('media: a recipient with two devices must ack on BOTH before deletion', asy
   await Promise.all([waitOpen(alice), waitOpen(bob1), waitOpen(bob2)]);
 
   const sent = await alice.sendMedia(bobName, { kind: 'video', bytes: PNG, thumb: THUMB, name: 'clip.mp4', mime: 'video/mp4', dur: 3.2 });
-  const onBob = [
-    waitFor(bob1, 'message', (m) => m.text.startsWith('{"media":')),
-    waitFor(bob2, 'message', (m) => m.text.startsWith('{"media":')),
-  ];
-  await Promise.all(onBob);
+  await Promise.all([
+    waitFor(bob1, 'message', (m) => m.text.startsWith('{"media":'), 20000),
+    waitFor(bob2, 'message', (m) => m.text.startsWith('{"media":'), 20000),
+  ]);
   let doc = await mediaCollection(srv).findOne({ _id: sent.media.id });
   assert.equal(doc.pending.length, 2, 'one entry per addressed device');
 

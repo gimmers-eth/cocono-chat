@@ -1,6 +1,11 @@
 # Feature plan — Send images, videos & files (M4 media)
 
-Status: **PLAN ONLY — not started.** Written for the agent that will build it.
+Status: **BUILT** (branch `media-m4`, 2026-10) — backend, SDK, app and reports,
+with `be/test/media.test.js`, `client/test/{media,appmedia,appmediaflow,mediaui}.test.js`.
+Deviations from this plan are marked **DEVIATION** below and in the commit
+notes; everything else follows the sections as written.
+
+Written for the agent that will build it.
 Read `docs/MESSAGES.md`, `docs/CLIENT_SDK.md`, `docs/BE_TECH.md` and the
 "Security posture" + "Test-maintenance lessons" sections of
 `docs/PROJECT_STATUS.md` first; this plan assumes that machinery and extends it
@@ -53,6 +58,10 @@ Outgoing multi-device sync of media IS in scope and rides the mechanism from
    (precedent: avatars in `profiles`, ID docs in `id_docs`). A 10 MB blob fits
    the 16 MB doc limit with headroom. If the size cap is ever raised, move to
    GridFS behind the same route module — do not do that now.
+   **DEVIATION (reports):** a report's DECRYPTED attachments cannot live on the
+   report doc — three 10 MB items blow through Mongo's 16 MB document limit —
+   so they are one doc each in `report_media`, keyed `{report, index}`, served
+   by the admin and deleted with the report.
 5. **Thumbnails.** The server cannot render ciphertext, so the CLIENT generates
    a small thumbnail (images: 256 px JPEG; videos: poster frame from a
    `<video>` + canvas capture) and encrypts it under the SAME file key with its
@@ -247,6 +256,12 @@ gating and resync all keep working because a media message IS a message.
   `ts` older than `MEDIA_RETENTION_DAYS` (default 7) and not `reported`.
   Also delete orphan uploads: docs whose `devices` is still empty after
   24 h (uploaded, never sent — crashed client).
+**Implemented:** `sweepMedia()` runs hourly from `server.js`
+(`startMediaSweeper`, `MEDIA_SWEEP_SEC`), and — as the plan requires — the
+account-purge path (`deleteAccountFully`) deletes the account's owned blobs.
+`ops/wipe-data.sh` auto-discovers `media` and `report_media` (verified: neither
+is on the KEEP list, so a dev reset drops both).
+
 - **Resync/replay consequence:** once a blob is deleted, a device that later
   replays the envelope (resync, or a second device pulling late — impossible
   today since pending covers all devices, but keep the code honest) gets 404
@@ -271,6 +286,17 @@ Everything this feature stores gets a time bound; nothing lives forever:
 | Text transcripts on a device | client IDB `messages` | none (local user history) | deliberately NOT pruned locally — the server's copies are; the device transcript is the user's own data (clear-chat remains manual) |
 
 ### 4.4 Config (`be/src/config.js` + `.env.example`)
+
+**DEVIATION (minor, deliberate):** uploads also verify the claimed `sha256`
+against the bytes server-side (`400 bad_sha256`). The plan stored "the claimed
+sha256"; a stored digest that lies would poison the ETag and every later
+integrity check, and verifying costs one hash pass over a ≤10 MB buffer.
+
+**DEVIATION (client IDB):** an OUTGOING media row is keyed by the sender's own
+record id with the server blob id in a separate `blobId` field, because the row
+is written BEFORE the upload returns an id (req 4). Every wire call goes through
+`blobOf(row)` and refuses politely when it is null; incoming rows keep the
+plan's keyPath (the blob id itself).
 
 ```
 MEDIA_MAX_BYTES            (default 10 * 1024 * 1024)   — ciphertext cap, all kinds
@@ -570,7 +596,9 @@ hands the server plaintext transcript. Extend it:
       size (HMAC + doc comparison).
 - [ ] Account purge and `ops/wipe-data.sh` handle `media` (auto-discovery
       should cover it — verify, don't assume).
-- [ ] Push payloads remain blind (no kind/name leaks into FCM/APNs).
+- [x] Push payloads remain blind (no kind/name leaks into FCM/APNs) — the send
+      seam pushes `('msg', sender)` exactly as for text; the page and the worker
+      label media locally from the decrypted descriptor.
 - [ ] CSP untouched; no new remote origins; Blob URLs only.
 
 ---

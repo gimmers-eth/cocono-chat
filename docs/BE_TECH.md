@@ -27,6 +27,8 @@ src/
                    POST /api/devices/pending, POST /api/devices/approve,
                    GET /api/devices
       userKeys.js  GET /api/users/:username/keys (device public keys)
+      media.js     POST /api/media, GET /api/media/:id[?part=thumb],
+                   POST /api/media/:id/ack (milestone 4 blob transfer)
     ws-routes/     WebSocket layer, registered by app.js
       index.js     /ws endpoint: JWT-at-upgrade auth, heartbeats, dispatch,
                    pub/sub wiring, one-live-connection-per-device
@@ -38,6 +40,11 @@ src/
       index.js     registers users + rateLimits
       users.js     GET/DELETE /api/admin/users[...]
       rateLimits.js GET/POST /api/admin/rate-limits[...]
+      reports.js   GET/DELETE /api/admin/reports[...] + the decrypted
+                   attachment bytes: GET /api/admin/reports/:id/media/:index
+    lib/media.js   THE blob lifecycle (att validation, device registration,
+                   ack → delete-on-empty-pending, retention/orphan sweeper,
+                   moderation decryption for reports)
   lib/
     b64u.js        base64url encode/decode
     canon.js       canonical JSON (sorted keys) used for signatures
@@ -107,6 +114,52 @@ Store-and-forward queue: one doc per recipient device, deleted once that device 
 Indexes: `{ to.ul, to.dv, ts }` (pending fetch) and unique `{ from.ul, from.fd, cid }`
 (idempotent retries).
 
+### MongoDB — `media` collection (milestone 4)
+
+One doc per SEND (not per recipient), holding CIPHERTEXT only. The message that
+references it rides the normal queue; this is the blob locker.
+
+```javascript
+{
+  _id: '<blob id, server uuid>',
+  owner: { ul, fd },           // uploading device (the sender) — quota + auth
+  kind: 'image'|'video'|'file',
+  ctSize, thumbCtSize,         // byte lengths of what is stored
+  sha256,                      // digest of the ciphertext, VERIFIED on upload
+  blob: Binary,                // iv(12) ‖ ct ‖ tag(16) — unreadable server-side
+  thumb: Binary | null,        // client-made 256 px preview, same key, own IV
+  devices: [ { ul, dv } ],     // authorised recipients (handleSend adds)
+  pending: [ { ul, dv } ],     // …of those, the ones that have not acked
+  reported: false,              // pinned by a report — excluded from deletion
+  ts: Date,                     // upload time (retention/orphan sweep)
+}
+```
+
+Indexes: `{ 'owner.ul': 1 }` (quota) and `{ ts: 1 }` (sweep). Deliberately **no
+unique index on `sha256`** — cross-send de-dup would turn a hash match into an
+upload oracle ("someone already holds this exact ciphertext").
+
+Lifecycle: `handleSend` adds each addressed device to `devices`+`pending`
+(including the sender's own sync-copy devices); `POST /api/media/:id/ack`
+removes the acker and deletes the doc when `pending` empties and nothing is
+`reported`. A `setInterval` sweeper in `server.js` (hourly, `lib/media.js`) is
+the safety net: un-acked blobs past `MEDIA_RETENTION_DAYS`, orphan uploads
+(empty `devices`) past `MEDIA_ORPHAN_MAX_SEC`, never `reported` docs.
+
+### MongoDB — `report_media` collection (req 9)
+
+A report's DECRYPTED attachments, one doc per item — a report carrying three
+10 MB images could never fit a single 16 MB Mongo document, and the report list
+must stay a list.
+
+```javascript
+{ report: <reports _id>, index: <n>, blobId, kind, name, mime, bytes,
+  source: 'server'|'reporter', plain: Binary, ts }
+```
+
+Unique index `{ report, index }`. Served by
+`GET /api/admin/reports/:id/media/:index` and deleted with the report.
+
 ### MongoDB — `shares` / `contacts` (share-link attribution + graph edges)
 
 Metadata only — no content, no envelope. Model, trust level and the admin
@@ -157,6 +210,8 @@ reload shows the same picture without re-simulating.
 | `rl:msg:<ul>` | message sends per account |
 | `rl:msgip:<ip>` | message sends per IP |
 | `rl:userkeys:<ip>` | peer-key lookups per IP |
+| `rl:mediaup:<ip>` / `rl:mediaupacct:<ul>` | media blob uploads (M4) |
+| `rl:mediadl:<ip>` / `rl:mediadlacct:<ul>` | media downloads and acks (M4) |
 | `dm:<ul>:<dv>` | live-delivery pub/sub channel for one device |
 
 Counters are created atomically with their TTL (`SET NX EX` then `INCR`), so a crash can
@@ -243,6 +298,39 @@ Every response from both servers carries a strict same-origin CSP (`default-src 
 no inline scripts/styles), `X-Content-Type-Options: nosniff`, and
 `Referrer-Policy: no-referrer`.
 
+## Media / files (milestone 4)
+
+Blobs never ride the WebSocket (64 KB frame cap). Three REST endpoints move
+bytes; the *message* that points at them rides the normal E2EE queue, so
+delivery, ordering, idempotency, receipts, push gating and resync are unchanged.
+
+| Method | Path | Purpose |
+| ------ | ---- | ------- |
+| POST | `/api/media` | `{ kind, blob, thumb?, sha256 }` (base64url ciphertext) → `{ id }`. Caps: `MEDIA_MAX_BYTES`, `MEDIA_THUMB_MAX_BYTES`, per-account `MEDIA_QUOTA_MB`; the claimed sha256 must match the bytes (a stored digest never lies) |
+| GET | `/api/media/:id` | the ciphertext, as `application/octet-stream` + `nosniff` (never a browser-renderable mime from our origin) with `x-cocono-kind` and `ETag = sha256`. `?part=thumb` returns just the encrypted poster (video previews without a 10 MB pull) and does NOT ack |
+| POST | `/api/media/:id/ack` | `{ downloaded: true\|false }` — the second is "delete it before I download it". Idempotent; authorisation is exactly `(account, device) ∈ devices` |
+
+The envelope gains one optional plaintext field `m.att = { id, kind, size }`
+(HMAC-covered). `handleSend` requires the blob to be the sender's own upload of
+exactly the claimed kind/size (`unknown_attachment` / `invalid_envelope`) and
+`$addToSet`s the addressed device into `devices` + `pending` — sync copies of
+the sender's own devices included, so a blob cannot vanish before every device
+that was promised it has answered.
+
+Config (see `.env.example`): `MEDIA_MAX_BYTES` (10 MiB),
+`MEDIA_THUMB_MAX_BYTES` (64 KiB), `MEDIA_QUOTA_MB` (100),
+`MEDIA_RETENTION_DAYS` (7), `MEDIA_ORPHAN_MAX_SEC` (86400),
+`MEDIA_SWEEP_SEC` (3600), `MEDIA_UP_IP_LIMIT`/`MEDIA_UP_ACCOUNT_LIMIT`,
+`MEDIA_DL_IP_LIMIT`/`MEDIA_DL_ACCOUNT_LIMIT`, `REPORT_MEDIA_MAX_BYTES` (30 MiB).
+All four media limiters are catalog entries (`lib/limits.js`), so admin
+per-user/per-IP overrides and "clear limits for IP" cover them like everything
+else. Account deletion purges owned blobs; `ops/wipe-data.sh` needs no edit
+(`media` and `report_media` are auto-discovered user data).
+
+Because the server holds ciphertext, it cannot check mime or magic bytes — that
+is by design, and it makes SIZE the abuse lever: caps + quota + sweeps ship in
+the same change as the upload route (`docs/features/images-and-files.md` §8).
+
 ## Messaging (milestone 3)
 
 WebSocket endpoint `GET /ws?token=<jwt>` (same port as REST). The JWT is in the query
@@ -282,6 +370,7 @@ exposes internal-only endpoints:
 | Method | Path | Purpose |
 | ------ | ---- | ------- |
 | GET | `/api/admin/users` | users + devices (public keys omitted) |
+| GET | `/api/admin/reports/:id/media/:index` | a reported attachment's PLAINTEXT bytes (M4) — content type SNIFFED from the bytes against an image/video allowlist, forced `attachment` for anything else, so a reported `.html`/`.svg` cannot execute on this origin |
 | PATCH | `/api/admin/users/:username/max-devices` | set the account's device cap (1–1000) |
 | GET | `/api/admin/users/:username/shares` | share-link story: created / seen / clicked / parent |
 | GET | `/api/admin/rate-limits` | live `rl:*` counters via Redis SCAN |

@@ -106,20 +106,22 @@ export function createHandlers({ users, redis, pub, config, messages, settings, 
       }
       if (blob.kind !== m.att.kind || blob.ctSize !== m.att.size) return ack(false, 'invalid_envelope');
     }
+    // Register BEFORE persisting (plan §4.2 order): $addToSet is idempotent
+    // under cid retries and multi-copy fan-out, and doing it first means a
+    // retry that lands on the duplicate-key path below can never skip the
+    // bookkeeping — a device missing from `devices` could not download, would
+    // never ack, and the blob would rot as an "orphan" instead.
+    if (m.att) await registerDevice(media, { id: m.att.id, ul: rul, dv: m.dv });
     try {
       await messages.insertOne(doc);
     } catch (err) {
       // Unique (from, cid) index hit: idempotent retry of a queued message.
       if (err?.code === 11000) return ack(true);
+      // A genuine insert failure: the registration above is now a device that
+      // owes nothing. Harmless — the retention sweep ages the blob out — and
+      // strictly better than the reverse (a promised device left out).
       throw err;
     }
-    // The addressed device may now download the blob AND owes an ack for it
-    // (req 8 counts this device in `pending` — sync copies of the sender's
-    // own other devices land here exactly like a peer's does, so a blob
-    // cannot vanish before every device that was promised it has said
-    // 'downloaded' or 'declined'). $addToSet: idempotent under cid retries
-    // and under multi-copy fan-out.
-    if (m.att) await registerDevice(media, { id: m.att.id, ul: rul, dv: m.dv });
     // SENT-message counter (username-keyed, survives account deletion by
     // design): feeds the 'You've got mail' badge. Idempotent retries landed
     // in the catch above, so this increments exactly once per accepted send.

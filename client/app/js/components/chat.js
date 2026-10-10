@@ -2225,6 +2225,7 @@ export function createChat({ client, onHomeRefresh }) {
     $('btn-attach-file')?.replaceChildren(iconEl('attachFile'), document.createTextNode(' File'));
     attachBtn?.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (!attachMenu || attachBtn.disabled) return;
       const open = attachMenu.hidden;
       attachMenu.hidden = !open;
       attachBtn.setAttribute('aria-expanded', String(open));

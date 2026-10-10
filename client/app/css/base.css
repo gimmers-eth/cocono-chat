@@ -873,9 +873,11 @@ span.avatar.chat-avatar { display: inline-grid; place-items: center; font-size: 
 }
 .peer-list.floating button:hover { background: var(--panel); }
 
+/* The tab strip under the composer owns the bottom safe area now; keeping the
+   inset here too would open a gap between the input row and its own tabs. */
 .composer {
   flex: none; display: flex; gap: .6rem; align-items: center;
-  padding: .6rem 1rem calc(.6rem + var(--sa-b));
+  padding: .6rem 1rem;
   background: var(--panel);
 }
 .composer input { flex: 1; }
@@ -1361,21 +1363,22 @@ body[data-view="blocked"] .page-footer { display: none; }
 .attach-item i { color: var(--accent); width: 1.1rem; text-align: center; }
 
 /* ---- bottom tab strip (chat · images · videos · files · links) ----
-   Reusable icon strip: a future sidebar filter (M7 tags) can share these
-   class names — the active treatment is the same accent logic as
-   .drawer-tab, only vertical instead of underlined. */
+   THE SAME icon strip the sidebar footer already uses (.convo-filter /
+   .filter-btn): identical box, identical quiet-grey hover, and the active
+   state is COLOUR only (never weight, never a filled chip) — the plan asked
+   for one reusable pattern and M7 got here first, so this matches it. */
 .chat-tabs {
-  flex: none; display: flex; justify-content: center; gap: .2rem;
-  padding: .3rem 1rem calc(.3rem + var(--sa-b));
-  background: var(--panel); border-top: 1px solid var(--border);
+  flex: none; display: flex; justify-content: space-around; align-items: center;
+  gap: .3rem; padding: .5rem .6rem calc(.5rem + var(--sa-b));
+  border-top: 1px solid var(--border); background: var(--panel);
 }
 .chat-tab {
-  background: none; border: 0; border-radius: 8px; color: var(--muted);
-  width: 2.6rem; height: 2rem; display: inline-flex; align-items: center;
-  justify-content: center; font-size: 1rem; cursor: pointer;
+  display: grid; place-items: center; width: 2.4rem; height: 2.4rem;
+  border: 0; border-radius: 10px; background: none; cursor: pointer;
+  color: var(--muted); font-size: 1.05rem; transition: color .12s, background .12s;
 }
-.chat-tab:hover { color: var(--text); background: var(--panel-raised); }
-.chat-tab.active { color: var(--accent); background: var(--panel-raised); }
+.chat-tab:hover { background: var(--panel-raised); }
+.chat-tab.active { color: var(--accent); }
 
 /* ---- the tab panel: replaces the transcript, never both at once ---- */
 .chat-tabpanel {
@@ -1383,9 +1386,6 @@ body[data-view="blocked"] .page-footer { display: none; }
   display: flex; flex-direction: column; gap: .6rem;
 }
 .media-empty { color: var(--muted); font-size: .85rem; text-align: center; padding: 1rem 0; }
-/* sent vs received: border colour only, visible in every theme */
-.media-sent { border-color: var(--accent) !important; }
-.media-recv { border-color: var(--border); }
 .media-wall {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
   gap: .5rem;
@@ -1424,9 +1424,17 @@ body[data-view="blocked"] .page-footer { display: none; }
 }
 .media-search { display: flex; align-items: center; gap: .5rem; color: var(--muted); }
 .media-search input { flex: 1; }
+/* SENT vs RECEIVED (req 4): border colour on every tile and row. Accent for
+   what this account sent, the neutral border token for what arrived — both
+   tokens exist in every theme, so the distinction survives a theme switch.
+   Declared last: these recolour the surfaces above, and specificity alone
+   decides it (no !important to fight later). */
+.media-sent { border-color: var(--accent); }
+.media-recv { border-color: var(--border); }
 
 /* ---- bubbles ---- */
 .msg.msg-media { padding: .35rem; max-width: min(78%, 560px); }
+.media-body { display: block; }
 .media-shot { position: relative; display: block; line-height: 0; }
 .media-thumb {
   display: block; max-width: 100%; max-height: 260px; border-radius: 6px;

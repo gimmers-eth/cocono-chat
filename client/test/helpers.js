@@ -94,8 +94,14 @@ export async function startServer() {
   };
 }
 
-/** Resolves with the first matching payload emitted for `type`. */
-export function waitFor(emitter, type, pred = () => true, timeoutMs = 6000) {
+/** Resolves with the first matching payload emitted for `type`.
+
+    The 15 s budget (was 6 s) is not sloppiness: the suite now runs real
+    AES-GCM media round trips against in-process MongoDB, and a loaded box
+    made a live-delivery wait exceed 6 s and fail an UNRELATED test's pairing
+    login. An event that arrives at second 8 is still a pass; a hang is still
+    a failure, just a slower one. */
+export function waitFor(emitter, type, pred = () => true, timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
     const off = emitter.on(type, (payload) => {
       if (!pred(payload)) return;
@@ -110,5 +116,5 @@ export function waitFor(emitter, type, pred = () => true, timeoutMs = 6000) {
   });
 }
 
-export const waitOpen = (client, timeoutMs = 6000) =>
+export const waitOpen = (client, timeoutMs = 15000) =>
   waitFor(client, 'state', (p) => p.state === 'open', timeoutMs);

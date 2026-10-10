@@ -52,6 +52,7 @@ servers:
     description: Local development server (pnpm dev)
 
 tags:
+  - name: media
   - name: accounts
     description: Account creation
   - name: auth
@@ -489,6 +490,79 @@ paths:
         '200': { description: Stored. }
         '400': { description: 'Bad type, bad payload, or already verified.' }
         '413': { description: 'Photo exceeds the size cap.' }
+
+  /api/media:
+    post:
+      tags: [media]
+      operationId: uploadMedia
+      summary: Upload a media blob (ciphertext only) — milestone 4
+      description: >
+        The BYTES half of a media message; the message that references the blob
+        rides the WebSocket queue with a plaintext `att` descriptor. The server
+        stores `iv‖ct‖tag` and cannot read it (the per-file key travels inside
+        each recipient's encrypted envelope), so the abuse surface is SIZE:
+        MEDIA_MAX_BYTES per blob, MEDIA_THUMB_MAX_BYTES per thumbnail,
+        MEDIA_QUOTA_MB per account, plus retention/orphan sweeps. The claimed
+        sha256 must match the uploaded bytes. Blobs are deleted once every
+        authorised device has acked (downloaded or declined).
+      security:
+        - bearerAuth: []
+      responses:
+        '201': { description: 'Stored — returns the blob id.' }
+        '400': { description: 'Bad kind, bad payload, or sha256 mismatch.' }
+        '413': { description: 'Over the blob, thumb or account-quota caps.' }
+        '429': { description: 'mediaup / mediaupacct budget exhausted.' }
+
+  /api/media/{id}:
+    get:
+      tags: [media]
+      operationId: downloadMedia
+      summary: Fetch a blob's ciphertext (or just its thumbnail)
+      description: >
+        Allowed only for the uploader or a device listed on the blob's
+        `devices` — never username-only. Answers `404 unknown_media` for
+        missing, swept and not-yours alike (no enumeration). Always
+        `application/octet-stream` + `nosniff`: user content is never served
+        as a browser-renderable type from our origin. `?part=thumb` returns
+        the encrypted poster (video previews without a full pull) and
+        deliberately does NOT ack.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: part
+          in: query
+          required: false
+          schema: { type: string, enum: [thumb] }
+      responses:
+        '200': { description: 'Raw ciphertext bytes (ETag = sha256).' }
+        '404': { description: 'unknown_media.' }
+        '429': { description: 'mediadl / mediadlacct budget exhausted.' }
+
+  /api/media/{id}/ack:
+    post:
+      tags: [media]
+      operationId: ackMedia
+      summary: Settle a device's debt on a blob (downloaded or declined)
+      description: >
+        `downloaded:false` is the "delete before downloading" path (it counts
+        as received). Idempotent; removes the caller's {ul,dv} from `pending`
+        and, when nothing is owed and nothing is report-pinned, deletes the
+        blob.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: '{ ok, deleted }.' }
+        '400': { description: 'downloaded must be a boolean.' }
+        '404': { description: 'unknown_media (not a listed device, or gone).' }
 
   /api/admin/users/{username}/verified:
     put:

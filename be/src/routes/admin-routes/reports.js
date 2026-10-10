@@ -1,6 +1,7 @@
 import { ObjectId } from 'mongodb';
 import { rateLimit } from '../../lib/rateLimit.js';
 import { fail, limited } from '../shared.js';
+import { asBytes } from '../../lib/media.js';
 
 const LIST_LIMIT = 50;
 const MAX_TRANSCRIPT = 500; // matches the app route's cap (reports.js)
@@ -83,7 +84,7 @@ export default async function adminReportsRoutes(app, { redis, reports, reportMe
     if (!Number.isInteger(index) || index < 0) return fail(reply, 'invalid_index', 'Malformed media index', 400);
     const item = await reportMedia.findOne({ report: oid, index });
     if (!item?.plain) return fail(reply, 'unknown_media', 'No such attachment in this report', 404);
-    const buf = asBuffer(item.plain);
+    const buf = asBytes(item.plain);
     if (!buf) return fail(reply, 'unknown_media', 'No such attachment in this report', 404);
     reply.header('x-content-type-options', 'nosniff');
     // inline for the formats a browser can only PREVIEW, download for the rest
@@ -134,12 +135,4 @@ function sniffContentType(buf, claimedMime) {
   const claimed = String(claimedMime ?? '').toLowerCase();
   if (/^image\/(png|jpe?g|gif|webp)$/.test(claimed) || /^video\/(mp4|webm|quicktime)$/.test(claimed)) return claimed;
   return 'application/octet-stream';
-}
-
-function asBuffer(v) {
-  if (!v) return null;
-  if (Buffer.isBuffer(v)) return v;
-  if (typeof v?.value === 'function') return Buffer.from(v.value());
-  if (v.buffer instanceof Uint8Array) return Buffer.from(v.buffer.subarray(0, v.position ?? v.buffer.length));
-  return null;
 }

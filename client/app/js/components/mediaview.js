@@ -249,7 +249,6 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
     host.append(emptyNote('This attachment is not on this device.'));
     return () => { host.replaceChildren(); };
   }
-  const cleanup = [];
   const status = (text, isError) => onStatus?.(text, isError);
 
   const pane = mk('div', `viewer-pane viewer-${row.kind}`);
@@ -272,7 +271,6 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
       const img = mk('img', `viewer-image${blur ? ' is-blurred' : ''}`);
       img.alt = '';
       img.src = url;
-      cleanup.push(() => host.contains(img) && null);
       pane.append(img);
       if (row.animated) {
         // native GIF playback cannot be paused in an <img>; pausing SHOWS the
@@ -387,6 +385,9 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
   }
   if (controls.children.length) host.append(controls);
 
+  // the ONE teardown: the full-size Blob URLs go when the modal closes (they
+  // are the megabytes, and 'bubbles' is a different scope — a re-render must
+  // never blank an open viewer, and vice versa)
   return () => {
     releaseScope('viewer');
     host.replaceChildren();
@@ -403,7 +404,3 @@ function previewStill(row) {
 /** The row a viewer was opened from may be re-read after a download; chat.js
  *  repaints the transcript and re-opens the pane with the fresh record. */
 export const reloadMediaRow = (id) => (id ? getMedia(id) : Promise.resolve(null));
-
-/** The blob a row points at (the viewer never cares that an outgoing row is
- *  keyed locally until the upload lands). */
-export { blobOf };
