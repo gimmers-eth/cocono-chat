@@ -577,29 +577,31 @@ hands the server plaintext transcript. Extend it:
 
 ## 8. Security & abuse checklist (review before merge)
 
-- [ ] Blob bytes only ever served as `application/octet-stream` + `nosniff`
+- [x] Blob bytes only ever served as `application/octet-stream` + `nosniff`
       from our origin; NO user-controlled content-type; SVG refused at pick
       time AND rejected by the viewer if it ever appears.
-- [ ] GET/ack authorisation is exactly `(ul,dv) ∈ devices` — no username-only
+- [x] GET/ack authorisation is exactly `(ul,dv) ∈ devices` — no username-only
       access (a second device of the recipient must have received its own
       envelope copy to be in `devices`).
-- [ ] sha256 verified client-side after download; mismatch → treat as failed,
+- [x] sha256 verified client-side after download; mismatch → treat as failed,
       do not store, do not ack `true` (but DO surface an error — a lying
       server should be visible).
-- [ ] Quota + retention + orphan sweep all shipped in the same PR as upload
+- [x] Quota + retention + orphan sweep all shipped in the same PR as upload
       (unbounded blob storage is a P0-class DoS).
-- [ ] New limiters registered in the limits catalog (admin overrides + clear-
-      by-IP sweep cover them); kill-switch (`traffic`) behaviour unchanged.
-- [ ] Filename/mime from the envelope are untrusted input at render time
+- [x] New limiters registered in the limits catalog (`mediaup`,
+      `mediaupacct`, `mediadl`, `mediadlacct` — labels, per-account overrides
+      and the 'clear limits for IP' sweep all cover them, asserted in
+      `be/test/media.test.js`); kill-switch (`traffic`) behaviour unchanged.
+- [x] Filename/mime from the envelope are untrusted input at render time
       (textContent only — the no-innerHTML rule already forces this).
-- [ ] `att` cannot reference someone else's blob (owner check) or forge kind/
+- [x] `att` cannot reference someone else's blob (owner check) or forge kind/
       size (HMAC + doc comparison).
-- [ ] Account purge and `ops/wipe-data.sh` handle `media` (auto-discovery
+- [x] Account purge and `ops/wipe-data.sh` handle `media` (auto-discovery
       should cover it — verify, don't assume).
 - [x] Push payloads remain blind (no kind/name leaks into FCM/APNs) — the send
       seam pushes `('msg', sender)` exactly as for text; the page and the worker
       label media locally from the decrypted descriptor.
-- [ ] CSP untouched; no new remote origins; Blob URLs only.
+- [x] CSP untouched; no new remote origins; Blob URLs only.
 
 ---
 

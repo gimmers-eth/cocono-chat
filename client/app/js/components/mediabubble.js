@@ -13,7 +13,7 @@
 //    scope, so a re-render can never blank an open viewer.
 
 import { iconEl } from '../icons.js';
-import { formatSize, objectUrl, isBlurred, durationText } from '../media.js';
+import { formatSize, objectUrl, isBlurred, durationText, renderableAsImage } from '../media.js';
 
 const KIND_ICON = { image: 'tabImages', video: 'tabVideos', file: 'attachFile' };
 
@@ -95,7 +95,9 @@ export function bubbleNodes(msg, row, { verified = false } = {}) {
   }
 
   const nodes = [];
-  if (row.kind === 'file') {
+  // a file, or an 'image' that refuses to be a picture (see renderableAsImage);
+  // a video still gets its poster + play badge below
+  if (row.kind === 'file' || (row.kind === 'image' && !renderableAsImage(row))) {
     const wrap = mk('span', 'media-file');
     const ic = mk('span', 'media-file-icon');
     ic.append(iconEl(KIND_ICON.file));
@@ -105,7 +107,7 @@ export function bubbleNodes(msg, row, { verified = false } = {}) {
     wrap.append(ic, meta);
     nodes.push(wrap);   // name + size are the whole content of a file bubble
   } else {
-    const box = shot(row, row.kind === 'image' && isBlurred(row, verified));
+    const box = shot(row, renderableAsImage(row) && isBlurred(row, verified));
     if (box) nodes.push(box);
     else nodes.push(iconEl(KIND_ICON[row.kind] ?? 'attachFile', 'media-gone-ic'));
     if (row.name) nodes.push(mk('span', 'media-name', row.name));

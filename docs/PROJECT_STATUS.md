@@ -458,6 +458,16 @@ replay dedup · envelope HMAC/sender-mismatch/unknown-recipient · auth flow hap
   under `node --test` — see `client/test/appmediaflow.test.js` (auto-download,
   poster-only, decline, retry queue, retention prune). Use it for storage/policy
   logic; reach for a real browser only for layout and canvas/video plumbing.
+- **The media UI RUNS headlessly** (`client/test/domshim.js`, ~200 lines): the
+  bubble/tab/viewer modules are plain DOM builders, so a shim with class/id
+  lookup, click dispatch and Blob-URL accounting lets `appmediavu.test.js`
+  assert behaviour (blur default, both file buttons, tile borders, the file
+  search keeping its caret, Keep/Blur persisting into the record, animated-image
+  pause swapping to the still, per-scope URL release). It paid for itself
+  immediately: the viewer's pane modifier `viewer-<kind>` collided with the
+  `.viewer-image` / `.viewer-video` element inside it, so every
+  `querySelector('.viewer-image')` in the control row hit the CONTAINER — no
+  parse check, id check or import check could have found that.
 - **Wiring guards beat untestable UI**: `client/test/mediaui.test.js` asserts
   every `$('id')` the media code touches exists in `index.html` (a typo'd id is
   a silent no-op), the new modules are actually served, `DB_VERSION` ≥ the

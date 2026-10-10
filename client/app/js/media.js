@@ -93,6 +93,18 @@ export function detectKind(mime) {
   return 'file';
 }
 
+/**
+ * Is it safe to hand these bytes to an <img>? The SENDER's picker refuses SVG
+ * (detectKind), but a descriptor is untrusted input: a modified client can
+ * claim kind 'image' with SVG bytes, and SVG is a script-bearing format. The
+ * rule is therefore enforced at RENDER time too, on both ends — an image that
+ * claims to be SVG paints as a file row (a name and a download), never as a
+ * picture. (An <img> cannot run script from an SVG today; that is a browser
+ * guarantee we refuse to rely on for a same-origin Blob URL.)
+ */
+export const renderableAsImage = (row) => !!row
+  && row.kind === 'image' && !/svg/i.test(String(row.mime ?? ''));
+
 export const isAnimatedMime = (mime) => {
   const m = String(mime ?? '').toLowerCase();
   return m === 'image/gif' || m === 'image/webp' || m === 'image/avif';

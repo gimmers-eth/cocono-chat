@@ -13,6 +13,7 @@ import { canonical } from '../src/lib/canon.js';
 import { b64uDecode, b64uEncode } from '../src/lib/b64u.js';
 import { config } from '../src/config.js';
 import { sweepMedia } from '../src/lib/media.js';
+import { LIMIT_CATALOG, effectiveLimit } from '../src/lib/limits.js';
 
 const LIMITS = {
   signupIpLimit: 1000,
@@ -859,3 +860,52 @@ function e2eeDecryptFor(key, d) {
   decipher.setAuthTag(buf.subarray(buf.length - 16));
   return Buffer.concat([decipher.update(buf.subarray(12, buf.length - 16)), decipher.final()]).toString('utf8');
 }
+
+test('media: the new limiters join the catalog (admin labels, overrides, clear-by-IP)', async () => {
+  const ctx = await setupAdmin();
+  try {
+    const IP = '192.0.2.77';
+    // four buckets, two shapes: IP-scoped (the 'clear limits for IP' sweep
+    // must reach them) and account-scoped (they belong to the account, not to
+    // whatever network it happens to be on)
+    await ctx.redis.incr(`rl:mediaup:${IP}`);
+    await ctx.redis.incr(`rl:mediadl:${IP}`);
+    await ctx.redis.incr('rl:mediaupacct:alice');
+
+    const listed = (await ctx.admin.inject({ method: 'GET', url: '/api/admin/rate-limits' })).json();
+    for (const name of ['mediaup', 'mediadl', 'mediaupacct', 'mediadlacct']) {
+      assert.ok(LIMIT_CATALOG[name], `${name} is in the catalog (the ONE source of limit truth)`);
+      assert.match(LIMIT_CATALOG[name].label, /Media/, `${name} carries a human label`);
+    }
+    const seen = (key) => listed.find((e) => e.key === key);
+    assert.ok(seen(`rl:mediaup:${IP}`), 'the admin Traffic page lists the upload guard');
+    assert.equal(seen(`rl:mediaup:${IP}`).scope, 'ip');
+    assert.equal(seen('rl:mediaupacct:alice')?.scope, 'account');
+
+    const cleared = await ctx.admin.inject({
+      method: 'POST', url: '/api/admin/rate-limits/clear', payload: { ip: IP },
+    });
+    assert.equal(cleared.statusCode, 200);
+    assert.equal(await ctx.redis.exists(`rl:mediaup:${IP}`, `rl:mediadl:${IP}`), 0, 'IP buckets swept');
+    assert.equal(await ctx.redis.exists('rl:mediaupacct:alice'), 1, 'the account budget survives an IP clear');
+
+    // an admin override on the catalog name moves the effective limit
+    const put = await ctx.admin.inject({
+      method: 'PATCH', url: '/api/admin/limits',
+      payload: { name: 'mediaupacct', user: 'alice', value: { limit: 3 } },
+    });
+    assert.equal(put.statusCode, 200, put.body);
+    assert.equal(put.json().effective.limit, 3, 'per-account media override lands');
+    // (setupAdmin has no merged-config shortcut like setupLive's `conf`, so
+    // this asserts against the real defaults the route itself would use)
+    assert.deepEqual(await effectiveLimit(ctx.mongo.db.collection('settings'), config, 'mediaupacct', 'alice'),
+      { limit: 3, windowSec: config.mediaUpWindowSec });
+    // and an IP-scoped name refuses a per-subject override (there is no
+    // meaningful 'this IP' knob — that would be a ban, not a limit)
+    const nope = await ctx.admin.inject({
+      method: 'PATCH', url: '/api/admin/limits',
+      payload: { name: 'mediaup', user: 'alice', value: { limit: 3 } },
+    });
+    assert.equal(nope.statusCode, 400);
+  } finally { await ctx.teardown(); }
+});

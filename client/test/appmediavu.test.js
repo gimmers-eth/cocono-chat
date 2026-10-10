@@ -126,6 +126,29 @@ test('bubble: expired, pruned and in-flight states say what they mean', async ()
   assert.match(bubbleNodes({ dir: 'out', kind: 'image', state: 'sent' }, null, {}).map((x) => x.textContent).join(' '), /Not on this device/);
 });
 
+test('bubble: an "image" that turns out to be SVG is never painted as a picture', async () => {
+  await fresh();
+  // a MODIFIED sender can claim kind image with svg bytes; the picker refuses
+  // SVG on OUR side, so this is the receive-side rule (security checklist)
+  const svg = row({ id: 'svg1', kind: 'image', mime: 'image/svg+xml', name: 'card.svg' });
+  svg.state = 'stored';
+  svg.data = new Blob(['<svg onload="alert(1)"><circle /></svg>']);
+  svg.thumb = svg.data;
+  await store.saveMedia(svg);
+  const nodes = bubbleNodes({ dir: 'in', kind: 'image', state: 'delivered' }, svg, { verified: true });
+  assert.ok(!has(nodes, /media-thumb/), 'no <img> for a Blob URL that could carry script');
+  assert.ok(has(nodes, /media-file-name/), 'it degrades to a file row: a name, a size, a download');
+
+  // and the viewer agrees with the bubble
+  const host = dom.byId('msg-media');
+  view.openViewer(host, {
+    client: fakeClient(), msg: { dir: 'in', kind: 'image' }, row: svg,
+    verified: true, onChange: () => {}, onStatus: () => {},
+  });
+  assert.equal(host.querySelector('.viewer-image'), null, 'the viewer never mounts an SVG image element');
+  assert.ok(host.querySelector('.viewer-file'), 'the viewer shows the file card instead');
+});
+
 // ---------------- tabs ----------------
 
 test('tabs: the strip is five icons and switching is a callback, not a location', async () => {

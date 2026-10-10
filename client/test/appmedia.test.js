@@ -12,6 +12,16 @@ import {
   extractLinks, tabBuckets, filterMedia, MEDIA_MAX_BYTES, LOCAL_RETENTION_DAYS_DEFAULT,
 } from '../app/js/media.js';
 
+const M = await import('../app/js/media.js');
+
+test('media: the RENDER guard backs the picker guard (an svg never becomes an <img>)', () => {
+  assert.equal(M.renderableAsImage({ kind: 'image', mime: 'image/jpeg' }), true);
+  assert.equal(M.renderableAsImage({ kind: 'image', mime: 'image/svg+xml' }), false);
+  assert.equal(M.renderableAsImage({ kind: 'image', mime: 'IMAGE/SVG' }), false, 'case is not a way through');
+  assert.equal(M.renderableAsImage({ kind: 'video', mime: 'video/mp4' }), false, 'a video is not an image');
+  assert.equal(M.renderableAsImage(null), false);
+});
+
 test('media: kind detection — svg is refused outright, everything else maps', () => {
   assert.equal(detectKind('image/jpeg'), 'image');
   assert.equal(detectKind('IMAGE/PNG'), 'image');

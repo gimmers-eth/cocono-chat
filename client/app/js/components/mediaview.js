@@ -15,7 +15,7 @@ import { iconEl } from '../icons.js';
 import { mediaWith, messagesWith, getMedia, updateMedia } from '../store.js';
 import {
   formatSize, durationText, isBlurred, objectUrl, releaseScope, filterMedia,
-  tabBuckets, downloadMedia, declineMedia, blobOf,
+  tabBuckets, downloadMedia, declineMedia, renderableAsImage,
 } from '../media.js';
 
 // exported so chat.js and the tests agree on the vocabulary
@@ -255,11 +255,13 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
   // .viewer-image / .viewer-video element inside the pane, so every
   // host.querySelector('.viewer-image') hit the CONTAINER (found by running
   // this UI under the DOM shim — a real bug no static check could see)
-  const pane = mk('div', `viewer-pane viewer-kind-${row.kind}`);
-  const blur = row.kind === 'image' && isBlurred(row, verified);
+  const isImage = renderableAsImage(row);
+  const shape = row.kind === 'video' ? 'video' : (isImage ? 'image' : 'file');
+  const pane = mk('div', `viewer-pane viewer-kind-${shape}`);
+  const blur = isImage && isBlurred(row, verified);
 
   const full = row.data ?? row.thumb ?? null;
-  if (row.kind === 'file') {
+  if (shape === 'file') {
     const card = mk('div', 'viewer-file');
     const ic = mk('span', 'viewer-file-icon');
     ic.append(iconEl('attachFile'));
@@ -270,7 +272,7 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
     if (row.state === 'pruned') card.append(mk('p', 'media-status', 'Removed from this device — it cannot be downloaded again.'));
     pane.append(card);
   } else if (full && full.size) {
-    if (row.kind === 'image') {
+    if (isImage) {
       const url = objectUrl(full, 'viewer');
       const img = mk('img', `viewer-image${blur ? ' is-blurred' : ''}`);
       img.alt = '';
@@ -337,7 +339,7 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
 
   // ---- control row ----
   const controls = mk('div', 'viewer-controls');
-  if (row.kind === 'image') {
+  if (isImage) {
     const b = btn('viewer-toggle', blur ? 'mediaUnblur' : 'mediaBlur', blur ? 'Unblur' : 'Blur',
       'Show or hide this image');
     b.addEventListener('click', async () => {
