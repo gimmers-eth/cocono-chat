@@ -20,7 +20,7 @@ export async function start() {
     throw new Error('TLS_KEY_PATH and TLS_CERT_PATH must both be set (or both unset).');
   }
 
-  const mongo = await connectMongo(config.mongoUrl);
+  const mongo = await connectMongo(config.mongoUrl, { msgQueueMaxSec: config.msgQueueMaxSec });
   const redis = await connectRedis(config.redisUrl);
   const app = await buildApp({ mongo, redis, config, feRoot: defaultFeRoot, sdkRoot: defaultSdkRoot });
 

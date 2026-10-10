@@ -424,3 +424,91 @@ test('sdk: share-link attribution — referrer at signup, hit report afterwards'
   assert.equal(mine.created, 1);
   assert.equal(mine.clicked, 1);
 });
+
+test('sdk: outgoing sync — own other devices mirror outgoing messages quietly', async (t) => {
+  const srv = await startServer();
+  const aliceName = randUser('alice');
+  const bobName = randUser('bob');
+  t.after(async () => {
+    await srv.deleteUser(aliceName);
+    await srv.deleteUser(bobName);
+    await srv.stop();
+  });
+
+  // Alice on two devices (real pairing flow), Bob on one.
+  const a1 = srv.client();
+  await a1.register(aliceName);
+  const a2 = srv.client();
+  const { code } = await a2.beginPairing(aliceName);
+  await a1.approvePairing(code);
+  await a2.completePairing({ pollIntervalMs: 100 });
+  const bob = srv.client();
+  await bob.register(bobName);
+
+  const opened = Promise.all([waitOpen(a1), waitOpen(a2), waitOpen(bob)]);
+  a1.connect();
+  a2.connect();
+  bob.connect();
+  await opened;
+
+  const a2Syncs = [];
+  const a2Msgs = [];
+  const a1Acks = [];
+  const a1Receipts = [];
+  const bobMsgs = [];
+  a2.on('sync', (m) => a2Syncs.push(m));
+  a2.on('message', (m) => a2Msgs.push(m));
+  a1.on('ack', (a) => a1Acks.push(a));
+  a1.on('delivered', (d) => a1Receipts.push(d));
+  bob.on('message', (m) => bobMsgs.push(m));
+
+  const sent = await a1.sendMessage(bobName, 'mirror me');
+
+  // Bob gets the real message; Alice's second device gets a SYNC event
+  // (never 'message' — that is what keeps every notification emitter off it).
+  const [bobMsg, syncEv] = await Promise.all([
+    waitFor(bob, 'message', (m) => m.text === 'mirror me'),
+    waitFor(a2, 'sync', (m) => m.text === 'mirror me'),
+  ]);
+  assert.equal(bobMsg.text, 'mirror me');
+  assert.equal(syncEv.id, sent.localId, 'sync carries the original localId (same record id on every device)');
+  assert.equal(syncEv.peer, bobName);
+  assert.ok(syncEv.fromDeviceId && syncEv.fromDeviceId === a1.deviceId);
+  assert.ok(typeof syncEv.ts === 'number');
+  await sleep(400); // quiet period
+  assert.equal(a2Msgs.length, 0, 'sync copies must never surface as messages');
+
+  // Sync acks/receipts are swallowed by the SDK: the visible state on the
+  // originating device belongs to the PEER copies only — one ack, and one
+  // delivered receipt when Bob pulls (a2 pulling its sync copy is silent).
+  assert.equal(a1Acks.length, 1, 'only the peer copy acks surface');
+  assert.equal(a1Acks[0].localId, sent.localId);
+  assert.equal(a1Acks[0].ok, true);
+  assert.equal(a1Receipts.length, 1, "own-device pulls are not 'delivered'");
+  assert.equal(a1Receipts[0].localId, sent.localId);
+  assert.equal(a1Receipts[0].to, bobName);
+
+  // Server bookkeeping: bob's copy + a2's sync copy, both pulled; no push
+  // coalesce key for the sync copy (alice→alice), one for the peer send.
+  const kept = await srv.mongo.db.collection('messages').find({ 'from.ul': aliceName.toLowerCase() }).toArray();
+  assert.equal(kept.length, 2, 'peer copy + sync copy');
+  assert.ok(kept.every((d) => d.pulledAt instanceof Date), 'both pulled');
+  assert.ok(kept.every((d) => d.expireAt instanceof Date), 'queue cap stamped on every copy');
+  const syncPush = await srv.redis.keys(`pushsent:${aliceName.toLowerCase()}:${a2.deviceId}:*`);
+  assert.equal(syncPush.length, 0, 'sync copies never push');
+
+  // Self-chat is untouched: it already reaches every own device as a normal
+  // copy — no second sync fan-out, no sync events.
+  a2Syncs.length = 0;
+  const selfSent = await a1.sendMessage(aliceName, 'note to self');
+  const selfMsg = await waitFor(a2, 'message', (m) => m.text === 'note to self');
+  assert.equal(selfMsg.self, true);
+  await sleep(400);
+  assert.equal(a2Syncs.length, 0, 'self-chat must not double-fan-out as sync');
+  assert.equal(a2Msgs.length, 1, 'self-chat copy surfaces as a message, once');
+  assert.equal(selfSent.cids.length, 2, 'self-chat fans out to both own devices as usual');
+
+  a1.disconnect();
+  a2.disconnect();
+  bob.disconnect();
+});

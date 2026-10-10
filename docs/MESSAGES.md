@@ -25,9 +25,11 @@ acting as an encrypted post office:
 - Every message is **addressed to one device**, not to a user. Multi-device
   means the sender's client fetches the recipient's device list and encrypts
   **one copy per device**, each under that device's own pairwise key.
-- A message copy lives on the server only until the destination device
-  explicitly confirms it with a `pulled` frame; then it is deleted and the
-  sender is notified (`delivered`).
+- A message copy lives on the server until the destination device explicitly
+  confirms it with a `pulled` frame; the sender is then notified (`delivered`).
+  Pulled copies are kept for a bounded **resync window** (`MSG_RETENTION_SEC`,
+  30 d default) and never-pulled copies are pruned after **`MSG_QUEUE_MAX_DAYS`**
+  (30 d default) — the server queue is time-bounded in both directions.
 
 Delivery modes at a glance:
 
@@ -52,7 +54,7 @@ Delivery modes at a glance:
                                         Bob decrypts, saves to IndexedDB
                                         Bob confirms ──►
                                 WS {type:'pulled', ids:[id]}
-                                delete copy; publish to Alice's channel
+                                copy marked pulled (resync TTL); publish to Alice's channel
  ◄── {type:'delivered', cid, to:'bobby'}
  UI: ✓ → ✓✓
 ```
@@ -70,7 +72,7 @@ Delivery modes at a glance:
                          ◄──── WS /ws?token=<jwt>
                          deliverPending: {type:'msg', id, ...} ×N
  Bob confirms ──────────►  {type:'pulled', ids:[...]}
-                         copies deleted; Alice (online or offline —
+                         copies marked pulled (resync TTL); Alice (online or offline —
                          receipt goes to her device channel) gets {type:'delivered'}
 ```
 
@@ -152,7 +154,8 @@ Wire protocol (all frames are JSON):
 | Direction | Frame | Meaning |
 | --------- | ----- | ------- |
 | c → s | `{ "type": "msg", "msg": <envelope> }` | send a message copy |
-| c → s | `{ "type": "pulled", "ids": [<mid>, ...] }` | confirm receipt → server deletes |
+| c → s | `{ "type": "pulled", "ids": [<mid>, ...] }` | confirm receipt → copy marked pulled (kept for the resync window) |
+| c → s | `{ "type": "resync" }` | re-deliver this device's already-pulled copies still inside the retention window |
 | s → c | `{ "type": "hello" }` | connection accepted |
 | s → c | `{ "type": "msg", "id", "ts", "env" }` | incoming message (`id` = server message id, `ts` = server receive time in ms) |
 | s → c | `{ "type": "ack", "cid", "ok", "error?" }` | envelope accepted/rejected |
@@ -175,6 +178,9 @@ never trusted for ordering.
     cid, // client message id, 8–64 chars [a-zA-Z0-9_-] (crypto.randomUUID) — idempotency key
     t,   // client epoch seconds (freshness only; ordering uses server ts)
     h,   // HMAC-SHA256 over canonical(m minus h), keyed with the sender's transport AES key
+    sync, // optional 1: outgoing multi-device sync copy (§2.7) — only legal
+          // when u == f (the sender's own account); never pushed, never
+          // counted as a sent message. Inside the HMAC'd block.
   },
   s,     // optional: Ed25519 signature over canonical(m) by the sender device key
 }
@@ -254,17 +260,21 @@ and sends each as the same `{type:'msg', id, ts, env}` frame — the client code
 path is identical whether the frame arrived live or on reconnect. (Batch cap
 `PENDING_BATCH = 500`; the next connection delivers the remainder.)
 
-**Confirmation & deletion.** `handlePulled` deletes the listed `mid`s **scoped
+**Confirmation & retention.** `handlePulled` marks the listed `mid`s **scoped
 to the pulling device only** (`{ mid: {$in: ids}, 'to.ul': auth.sub, 'to.dv':
-auth.d }`) — a device can only ever confirm its own mail. Every deleted doc
-triggers a receipt published to the sender's device channel:
+auth.d }`) — a device can only ever confirm its own mail. Copies are NOT
+deleted on pull: they get `pulledAt` + `expireAt = pulledAt +
+MSG_RETENTION_SEC` so a device that later loses its local store can recover
+them via `resync` (same device identity only — ciphertext is per-device).
+Every newly-pulled doc triggers a receipt published to the sender's device
+channel:
 
 ```javascript
 { "type": "delivered", "cid": "<cid>", "to": "bobby" }
 ```
 
-**Read semantics.** "Delivered == read by that device": once a copy is gone from
-the server, the device has it. There is no separate read receipt layer yet.
+**Read semantics.** "Delivered == read by that device": once a copy is pulled,
+the device has it. There is no separate read receipt layer yet.
 
 **Self-chat.** Sending to your own username routes a copy to your own specified
 device like any other message; the FE recognizes the echo (sender == self),
@@ -297,21 +307,39 @@ Resulting guarantees (asserted in `be/test/multidev-repro.test.js`):
   `cid → local message`, so the first receipt flips the bubble to `✓✓`
   ("delivered to at least one of Bob's devices"); per-device delivery status is
   a future refinement.
-- Alice's **other** devices (say `A2`) do **not** currently receive a copy of
-  what she sent — outgoing messages are stored only on the sending device.
-  Outgoing multi-device sync / history transfer to newly enrolled devices is
-  planned but not part of milestone 3.
+- **Outgoing multi-device sync:** Alice's other devices (say `A2`) DO receive
+  a copy of what she sent from `A1`, as a **sync copy**: alongside the peer
+  fan-out, `A1` sends one extra envelope per own other device with the
+  plaintext flag `m.sync = 1` (legal only toward the sender's own account)
+  and an E2EE payload `{"sync":1, "id":<localId>, "peer":<recipient>,
+  "text":..., "ts":...}`. `A2`'s SDK surfaces it as a **`sync` event** (never
+  `message`), and the app stores it under the SAME record id
+  (`out:<localId>`, `state:'synced'`) so every device shows the same outgoing
+  history. Sync copies are never pushed (your own send must not ring your
+  other phone), never counted in the sent-message counter, and their
+  acks/`delivered` receipts are swallowed by the SDK — delivery ticks stay
+  owned by the originating device's peer copies. Self-chat is unchanged (it
+  already reaches every own device as a normal copy; no double fan-out).
+  **Not synced:** history sent before a device paired (new devices start
+  empty — backfill needs device-to-device transfer, future work), delivery
+  state, read markers and clear/delete actions (all device-local).
 - Offline applies per device: if `B1` is online and `B2` has been off for a
   week, `B1` gets the message live, `B2` gets it replayed on its next connect,
   and the server holds `B2`'s copy until then.
 
 ### 2.8 Retention & cleanup
 
-- Copies are deleted on confirmed pull (see §2.6).
+- **Queue cap (never-pulled copies):** every copy is stamped
+  `expireAt = ts + MSG_QUEUE_MAX_DAYS` (default 30) at insert; MongoDB's TTL
+  index prunes it if the destination device never shows up. A device offline
+  past the cap loses its queued copies (the sender's bubble simply never
+  reaches ✓✓).
+- **Resync window (pulled copies):** `expireAt = pulledAt +
+  MSG_RETENTION_SEC` (default 30 d) — re-deliverable via `resync` to the SAME
+  device identity until the TTL sweeps it.
 - **Planned, not yet implemented** (tracked in `docs/BE_TECH.md` roadmap):
-  undelivered-message sweep (delete copies older than X days), and removal of
-  non-main devices inactive ≥14 days together with their pending messages
-  (DESIGN.md rule).
+  per-recipient queue COUNT caps, and removal of non-main devices inactive
+  ≥14 days together with their pending messages (DESIGN.md rule).
 - Plaintext, conversation keys and full history exist only in each device's
   IndexedDB; there is no server-side history.
 

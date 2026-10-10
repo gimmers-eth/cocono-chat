@@ -158,10 +158,11 @@ past the deadline.
 | `connect()` | Open the WebSocket (idempotent; auto-reconnect with backoff + jitter). |
 | `disconnect()` | Close it. |
 | `connectionState` | `'connecting' \| 'open' \| 'closing' \| 'closed'`. |
-| `sendMessage(username, text)` | E2EE text message. Fans out **one envelope per recipient device** (pairwise keys, DESIGN.md) sharing one `localId`. → `{localId, peer, cids: string[]}` |
+| `sendMessage(username, text, opts?)` | E2EE text message. Fans out **one envelope per recipient device** (pairwise keys, DESIGN.md) sharing one `localId`. Unless the target is your own account (self-chat), the message is ALSO mirrored to your other devices as an outgoing **sync copy** — those surface as `sync` events there, never as `message`, and their acks/receipts never reach you (`{ sync: false }` opts out; the mirror is best-effort). → `{localId, peer, cids: string[]}` (`cids` = peer copies only) |
 
 Messages are pulled-and-confirmed: when you receive a `'message'` event the
-SDK has already told the server it can delete its copy. If decryption fails
+SDK has already told the server the copy was pulled (it is kept only for the
+bounded resync window). If decryption fails
 the copy stays queued and an `'error'` (`decrypt_failed`) is emitted — a
 tampered or key-mismatched message is never silently dropped.
 
@@ -175,6 +176,7 @@ All on the client itself (`client.on(type, fn)` → returns an `off()` function;
 | `ready` | `{username, deviceId}` | After register/login/pairing completes. |
 | `state` | `{state}` | WebSocket: `'connecting'`, `'open'`, `'closed'`. |
 | `message` | `{mid, peer, from, fromDeviceId, text, ts, self}` | Decrypted incoming message. `ts` is the **server-assigned** receive time (ms epoch) — use it for ordering, never client clocks. `self: true` for a message from another device of your own account (e.g. the other half of a self-chat). |
+| `sync` | `{id, peer, text, ts, fromDeviceId}` | An OUTGOING message mirrored from another of your own devices (multi-device sync). Store it as an outgoing record under `id` (the originating device's `localId` — same id on every device, so replays dedupe naturally). Never raise notifications, read markers or delivery ticks for it — status lives on the device that sent it. |
 | `ack` | `{cid, localId, ok, error?}` | Server accepted/rejected one envelope. A fan-out send to a 2-device peer yields 2 acks with the same `localId`. |
 | `delivered` | `{cid, localId, to}` | A recipient device pulled that copy. Expect one per recipient device. |
 | `notice` | `{what}` | Content-free server nudge: a slice of server-authoritative state this account caches moved because of **someone else** (`what`: `friends`, `gone`, `profile`, `identity` — taxonomy in `be/src/lib/notify.js`). Re-pull that data yourself; never trust the frame for content. Offline = missed; reconcile-on-entry covers it. |
@@ -196,8 +198,9 @@ Errors thrown by the SDK:
 ## Displaying messages (the sender's side)
 
 A sent message produces: 1 optimistic local record (your app's own store) +
-N acks + up to N delivered receipts (N = recipient device count). Dedupe by
-**`localId`**, never by `cid`/`mid`:
+N acks + up to N delivered receipts (N = recipient device count — sync copies
+ to your own devices are invisible here, the SDK swallows their acks and
+receipts). Dedupe by **`localId`**, never by `cid`/`mid`:
 
 ```js
 const store = new Map();                       // or IndexedDB, see client/src/storage.js

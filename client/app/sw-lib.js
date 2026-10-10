@@ -201,6 +201,12 @@ self.SwLib = (function () {
           const text = new TextDecoder().decode(await crypto.subtle.decrypt(
             { name: 'AES-GCM', iv: buf.subarray(0, 12) }, convKey, buf.subarray(12),
           ));
+          // Intra-account copies are never banner-worthy: outgoing SYNC
+          // mirrors of our own sends and {"sys":...} broadcasts (friend
+          // flags, notices). Skipping them also keeps their raw JSON out of
+          // notification snippets, and an all-sync queue makes peek return
+          // null → the worker stays silent (existing empty-queue contract).
+          if (/^\{"(?:sync|sys)":/.test(text)) return;
           seen.push({ peer: m.f, text, ts: f.ts || Date.now() });
         } catch { /* one undecryptable frame must not kill the peek */ }
       };

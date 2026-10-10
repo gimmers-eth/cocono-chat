@@ -44,6 +44,9 @@ export class CoconoClient extends Emitter {
   #peerCache = new Map(); // ul -> { u, devices: [{d,p,x}] }
   #convKeyCache = new Map(); // `${ul}:${dv}` -> CryptoKey
   #cidToLocal = new Map(); // outgoing cid -> localId
+  #syncCids = new Set();   // cids of outgoing SYNC copies (own other devices) —
+                           // their acks/delivered receipts never surface: the
+                           // peer copies own the visible message state
   #pendingPairing = null; // { username, deviceId, keyPair, xPair, aesRaw, pubRaw, xPubRaw, enrollId, expiresAt }
 
   /**
@@ -314,6 +317,7 @@ export class CoconoClient extends Emitter {
     this.#identity = null;
     this.#convKeyCache.clear();
     this.#cidToLocal.clear();
+    this.#syncCids.clear();
   }
 
   /**
@@ -394,6 +398,10 @@ export class CoconoClient extends Emitter {
       this.logout();
       await this.storage.clearIdentity();
       this.#identity = null;
+    } else if (identity) {
+      // our own device list moved — the sync fan-out addresses devices from
+      // this cache, so drop it (a stale entry would just ack unknown_recipient)
+      this.#peerCache.delete(identity.username.toLowerCase());
     }
     return res;
   }
@@ -733,7 +741,11 @@ export class CoconoClient extends Emitter {
    *  An optional human name is stored on the joining device right away
  *  ('iPhone', 'Work laptop'); omit it and the device self-labels later. */
   async approvePairing(code, name) {
-    return this.api.approveDevice(this.#requireToken(), code, typeof name === 'string' && name.trim() ? name.trim() : null);
+    const res = await this.api.approveDevice(this.#requireToken(), code, typeof name === 'string' && name.trim() ? name.trim() : null);
+    // The new device must appear in our own key material immediately — the
+    // outgoing-sync fan-out (and self-chat) address devices from this cache.
+    if (this.#identity) this.#peerCache.delete(this.#identity.username.toLowerCase());
+    return res;
   }
 
   /** Label one of this account's devices (Settings → Devices rename). */
@@ -812,9 +824,17 @@ export class CoconoClient extends Emitter {
    * per recipient device, all sharing one localId. Acks arrive as 'ack'
    * events (one per envelope); 'delivered' fires when a recipient device
    * pulls its copy.
+   * Unless this is a self-chat (which already reaches every own device), the
+   * message is ALSO mirrored to the sender's other devices as an outgoing
+   * SYNC copy ({"sync":1,...} payload, envelope flag sync:1) so every device
+   * of the account shows the same outgoing history. Sync copies surface as
+   * 'sync' events on the receiving device — never as 'message' — and their
+   * acks/receipts are swallowed here so they cannot flip the bubble state or
+   * ring a notification. Sync fan-out is best-effort ({ sync: false } opts
+   * out entirely).
    * @returns {Promise<{localId: string, peer: string, cids: string[]}>}
    */
-  async sendMessage(username, text) {
+  async sendMessage(username, text, { sync = true } = {}) {
     const identity = await this.#requireIdentity();
     this.#requireToken();
     if (!this.#transport || this.#transport.state !== 'open') {
@@ -839,7 +859,39 @@ export class CoconoClient extends Emitter {
       cids.push(cid);
     }
     if (!cids.length) throw new CoconoError(`No encryptable devices for @${peer.u}`, 'no_peer_devices');
+    // Outgoing multi-device sync — fire-and-forget AFTER the peer fan-out is
+    // on the wire: a sync failure must never fail the visible send.
+    if (sync && peer.u.toLowerCase() !== identity.username.toLowerCase()) {
+      this.#fanOutSync(identity, localId, peer.u, text);
+    }
     return { localId, peer: peer.u, cids };
+  }
+
+  // Mirror an outgoing message to the sender's OTHER devices (same account).
+  // Reuses the sys-message pattern: envelopes our own devices decrypt with
+  // their existing per-device-pair conversation keys; the server stores and
+  // forwards them like mail (offline devices catch up on next connect) but
+  // never pushes for them (plaintext sync:1 flag). Best-effort throughout.
+  async #fanOutSync(identity, localId, peerUl, text) {
+    try {
+      if (!this.#transport || this.#transport.state !== 'open') return;
+      const mine = await this.peerKeys(identity.username);
+      const myUl = identity.username.toLowerCase();
+      for (const dev of mine.devices) {
+        if (dev.d === identity.deviceId || !dev.x) continue;
+        if (!this.#transport || this.#transport.state !== 'open') return;
+        const cid = crypto.randomUUID();
+        this.#syncCids.add(cid);
+        const payload = JSON.stringify({ sync: 1, id: localId, peer: peerUl, text, ts: Date.now() });
+        const key = await this.#getConvKey(identity, myUl, dev.d, dev.x);
+        const d = await c.encryptForConversation(key, payload);
+        const m = { d, u: identity.username, dv: dev.d, f: identity.username, fd: identity.deviceId, cid, t: nowEpoch(), sync: 1 };
+        const h = await c.hmac(identity.aesMac, canonical(m));
+        this.#transport.send({ type: 'msg', msg: { m: { ...m, h } } });
+      }
+    } catch (err) {
+      this.logger.debug(`sync fan-out skipped: ${err?.message ?? err}`);
+    }
   }
 
   // --- internals ---
@@ -859,12 +911,20 @@ export class CoconoClient extends Emitter {
         this.#onIncoming(frame).catch((err) => this.emit('error', { error: err }));
         break;
       case 'ack': {
+        // Sync copies: swallow the ack (the peer copies own the UI state); a
+        // failed sync is log-only — the mirror is best-effort by design.
+        if (this.#syncCids.has(frame.cid)) {
+          this.#syncCids.delete(frame.cid);
+          if (!frame.ok) this.logger.debug(`sync copy rejected: ${frame.error ?? 'unknown'}`);
+          break;
+        }
         const localId = this.#cidToLocal.get(frame.cid);
         this.emit('ack', { cid: frame.cid, localId, ok: frame.ok, error: frame.error });
         if (localId !== undefined && !frame.ok) this.#cidToLocal.delete(frame.cid);
         break;
       }
       case 'delivered': {
+        if (this.#syncCids.has(frame.cid)) break; // own-device pull: not a receipt
         const localId = this.#cidToLocal.get(frame.cid);
         if (!localId) break;
         this.emit('delivered', { cid: frame.cid, localId, to: frame.to });
@@ -958,6 +1018,31 @@ export class CoconoClient extends Emitter {
     // Confirm the pull: server marks its copy (kept for the retention
     // window) and notifies the sender.
     this.#transport.send({ type: 'pulled', ids: [frame.id] });
+
+    // Outgoing SYNC copy from one of our OWN other devices: surface as a
+    // 'sync' event (the app stores it as an outgoing record) — NEVER as a
+    // 'message', which is what keeps every notification emitter off it.
+    // The envelope's sync flag is HMAC-covered and the server only accepts
+    // it toward the sender's own account, so a foreign sender cannot fake
+    // this path; parse defensively anyway.
+    if (m.sync === 1 && senderUl === myUl && m.fd !== identity.deviceId) {
+      try {
+        const p = JSON.parse(text);
+        if (p && p.sync && typeof p.id === 'string' && typeof p.text === 'string') {
+          this.emit('sync', {
+            id: p.id,
+            peer: String(p.peer ?? ''),
+            text: p.text,
+            ts: typeof p.ts === 'number' ? p.ts : frame.ts,
+            fromDeviceId: m.fd,
+          });
+          return;
+        }
+      } catch { /* fall through — unparsable sync payload */ }
+      this.logger.warn(`unparsable sync payload from own device ${m.fd}; dropped`);
+      return;
+    }
+
     this.emit('message', {
       mid: frame.id,
       peer: m.f,

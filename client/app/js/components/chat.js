@@ -289,6 +289,21 @@ export function createChat({ client, onHomeRefresh }) {
       }
     });
 
+    // Outgoing SYNC copies from our OWN other devices (SDK 'sync' event —
+    // never 'message', so no pill/OS notice ever fires for them): store as
+    // the outgoing record under the ORIGINAL id (dedupes replays and the
+    // originating-device record), then repaint quietly. No read-marking and
+    // no delivery ticks — status lives on the device that sent it.
+    client.on('sync', async (m) => {
+      const id = `out:${m.id}`;
+      if (await getMessage(id)) return;
+      const peer = String(m.peer ?? '').toLowerCase();
+      if (!peer) return;
+      await saveMessage({ id, peer, dir: 'out', text: m.text, ts: m.ts || Date.now(), state: 'synced' });
+      if (currentPeer && currentPeer.toLowerCase() === peer) await render();
+      onHomeRefresh?.();
+    });
+
     client.on('peerIdentityChanged', ({ peer }) => {
       showBanner(`${peer}: key material refreshed (account re-created or device re-paired)`, peer);
     });
@@ -416,7 +431,9 @@ export function createChat({ client, onHomeRefresh }) {
       const meta = document.createElement('span');
       meta.className = 'meta';
       meta.textContent = fmtTime(m.ts);
-      if (m.dir === 'out') {
+      if (m.dir === 'out' && m.state !== 'synced') {
+        // 'synced' records came from another of our own devices — delivery
+        // status belongs to the originating device, so they render quiet.
         meta.appendChild(iconEl(STATE_MARK[m.state] ?? 'stateSending', m.state === 'failed' ? 'icon-danger' : ''));
       }
       li.append(body, meta);

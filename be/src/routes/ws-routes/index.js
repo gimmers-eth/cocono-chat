@@ -20,7 +20,7 @@
 //                          free by design — the taxonomy and the whole
 //                          pattern live in lib/notify.js)
 //
-// Envelope: { m: { d, u, dv, f, fd, cid, t, h }, s? }
+// Envelope: { m: { d, u, dv, f, fd, cid, t, h, sync? }, s? }
 //   d   E2EE ciphertext (AES-GCM, b64u iv||ct) for the destination device
 //   u   recipient username        dv  recipient device id
 //   f   sender username           fd  sender device id
@@ -29,6 +29,8 @@
 //   h   HMAC-SHA256 over canonical(m minus h), keyed with the sender's
 //       transport AES key (server-verifiable integrity + sender auth)
 //   s   optional Ed25519 signature over canonical(m)
+//   sync  optional 1: outgoing multi-device sync copy — only legal when
+//       u == f (own account); never pushed, never counted as a sent message
 //
 // Split across this folder:
 //   protocol.js  wire constants + sendJson/devKey helpers

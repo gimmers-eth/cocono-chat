@@ -31,6 +31,10 @@ export function verifyEnvelope(env, senderDevice, config) {
     return 'stale_payload';
   }
   if (typeof h !== 'string') return 'invalid_envelope';
+  // Outgoing multi-device sync flag (optional): inside the HMAC'd block, so
+  // it is sender-authenticated. The self-only rule lives in handleSend
+  // (it needs the connection identity); this is the structural gate.
+  if (m.sync !== undefined && m.sync !== 1) return 'invalid_envelope';
 
   const { h: _omit, ...rest } = m;
   const keyBytes = b64uDecode(senderDevice.aes);

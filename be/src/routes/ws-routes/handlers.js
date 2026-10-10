@@ -39,6 +39,12 @@ export function createHandlers({ users, redis, pub, config, messages, settings, 
 
     // Recipient account + device must exist.
     const rul = m.u.toLowerCase();
+    // Outgoing multi-device SYNC copy: a device mirroring an outgoing message
+    // to the sender's OTHER devices. Legal only toward the sender's own
+    // account (it is not a delivery channel to other users), and it gets no
+    // push and no sent-counter below.
+    const isSync = m.sync === 1;
+    if (isSync && rul !== auth.sub) return ack(false, 'invalid_envelope');
     const recipient = await users.findOne({ ul: rul }, { projection: { devices: 1, friends: 1, blocked: 1, muted: 1 } });
     const recipientDevice = recipient?.devices.find((dev) => dev.id === m.dv);
     if (!recipient || !recipientDevice) {
@@ -74,6 +80,10 @@ export function createHandlers({ users, redis, pub, config, messages, settings, 
       cid: m.cid,
       env,
       ts: new Date(),
+      // Queue cap: never-pulled copies are pruned after MSG_QUEUE_MAX_DAYS by
+      // the expireAt TTL index (bounded storage even for offline-forever
+      // devices). handlePulled overwrites this with the resync window.
+      expireAt: new Date(Date.now() + config.msgQueueMaxSec * 1000),
     };
     try {
       await messages.insertOne(doc);
@@ -85,14 +95,15 @@ export function createHandlers({ users, redis, pub, config, messages, settings, 
     // SENT-message counter (username-keyed, survives account deletion by
     // design): feeds the 'You've got mail' badge. Idempotent retries landed
     // in the catch above, so this increments exactly once per accepted send.
-    // Self-sends count too — the badge counts messages SENT, period.
+    // Self-sends count too — the badge counts messages SENT, period. Sync
+    // copies do NOT: they are intra-account mirrors, not messages.
     // Durable "who talks to whom" edge for the admin God View graph, written
     // CONCURRENTLY (same latency, one round trip each). The queued copy
     // expires once pulled, so this is the only lasting record that the
     // conversation happened — metadata (pair, count, timestamps), never
     // content, and a failure here can never fail a delivery.
     await Promise.all([
-      counters ? counters.updateOne({ _id: `sent:${auth.sub}` }, { $inc: { n: 1 } }, { upsert: true }) : null,
+      counters && !isSync ? counters.updateOne({ _id: `sent:${auth.sub}` }, { $inc: { n: 1 } }, { upsert: true }) : null,
       contacts && rul !== auth.sub
         ? recordContactEdge(contacts, { from: auth.sub, to: rul }).catch((err) => {
           request.log.warn(`[graph] contact edge ${auth.sub}->${rul} not recorded: ${err.message}`);
@@ -108,13 +119,16 @@ export function createHandlers({ users, redis, pub, config, messages, settings, 
     // was the ack jitter behind the idempotent-retry test's flake).
     // Phase 1 notifications: push ONLY when the recipient device is offline
     // (no live WS). Blind payload — event type, nothing else. Never push to
-    // the sender's own device (self-chat echo arrives via its live WS anyway).
+    // the sender's own device (self-chat echo arrives via its live WS anyway)
+    // and NEVER for sync copies — your own outgoing messages mirrored to your
+    // other devices must not ring (notification emitter #1 of 3; the SDK's
+    // 'sync' event and the worker peek filter gate the other two).
     // MUTE gate (notification layer ONLY): a muted sender's messages still
     // store and deliver exactly as before — but no push ever leaves for
     // them. Enforced on the SERVER list, so it mirrors every device.
     const mutedBy = Array.isArray(recipient.muted) && recipient.muted.includes(auth.sub);
     if (mutedBy) request.log.info(`[push] mute ${rul}/${m.dv.slice(0, 8)}: sender ${auth.sub} muted — push suppressed`);
-    if (!mutedBy && recipientDevice.push && m.d !== auth.d) {
+    if (!isSync && !mutedBy && recipientDevice.push && m.d !== auth.d) {
       try {
         const online = await redis.exists(presenceKey(rul, m.dv));
         if (online) request.log.info(`[push] skip ${rul}/${m.dv.slice(0, 8)}: device online (live WS)`);
@@ -124,11 +138,11 @@ export function createHandlers({ users, redis, pub, config, messages, settings, 
           // already shown (the worker's peek counts '+N more'). Other chats
           // and the device's next connect (which clears the gates) still
           // notify — this keeps every genuine new event one push away.
-          const fresh = await redis.set(pushSentKey(rul, m.dv, auth.ul), '1', { NX: true, EX: config.pushCoalesceSec });
+          const fresh = await redis.set(pushSentKey(rul, m.dv, auth.sub), '1', { NX: true, EX: config.pushCoalesceSec });
           if (!fresh) {
-            request.log.info(`[push] coalesce ${rul}/${m.dv.slice(0, 8)} from ${auth.ul} (within ${config.pushCoalesceSec}s)`);
+            request.log.info(`[push] coalesce ${rul}/${m.dv.slice(0, 8)} from ${auth.sub} (within ${config.pushCoalesceSec}s)`);
           } else {
-            const outcome = await sendBlindPush(config, recipientDevice.push, 'msg', auth.ul);
+            const outcome = await sendBlindPush(config, recipientDevice.push, 'msg', auth.sub);
             request.log.info(`[push] ${rul}/${m.dv.slice(0, 8)} -> ${outcome}`);
             if (outcome === 'gone') {
               // Push service says subscription is dead: clear it, nothing else.
@@ -143,7 +157,7 @@ export function createHandlers({ users, redis, pub, config, messages, settings, 
         // Push is best-effort: never let it break the send/ack path.
         request.log.warn(`[push] ${rul}/${m.dv.slice(0, 8)} failed: ${err?.message ?? err}`);
       }
-    } else if (m.d !== auth.d) {
+    } else if (!isSync && m.d !== auth.d) {
       request.log.info(`[push] skip ${rul}/${m.dv.slice(0, 8)}: no push subscription on this device`);
     }
     return acked;

@@ -1,7 +1,7 @@
 import { MongoClient } from 'mongodb';
 import { createClient } from 'redis';
 
-export async function connectMongo(url) {
+export async function connectMongo(url, { msgQueueMaxSec = 30 * 24 * 3600 } = {}) {
   const client = new MongoClient(url);
   await client.connect();
   const db = client.db();
@@ -39,8 +39,14 @@ export async function connectMongo(url) {
   await messages.createIndex({ 'from.ul': 1, 'from.fd': 1, cid: 1 }, { unique: true });
   // Retention sweep: copies get expireAt = pulledAt + MSG_RETENTION_SEC when
   // confirmed pulled; MongoDB's TTL monitor removes them once past it.
-  // Never-pulled copies have no expireAt and stay queued for delivery.
   await messages.createIndex({ expireAt: 1 }, { expireAfterSeconds: 0 });
+  // Queue cap backfill: copies inserted BEFORE the queue-max policy have no
+  // expireAt and would stay queued forever — stamp them so legacy rows age
+  // out under the same TTL (old ones expire promptly; that is the policy).
+  await messages.updateMany(
+    { expireAt: { $exists: false } },
+    [{ $set: { expireAt: { $add: ['$ts', msgQueueMaxSec * 1000] } } }],
+  );
   // Share-link attribution (lib/shares.js): one doc per (link owner -> the
   // account that followed it). The pair IS the identity, and the admin
   // Shares tab reads both directions.

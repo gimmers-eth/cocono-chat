@@ -216,6 +216,27 @@ is the only FE (audits mentioning `fe/` are historical).
 - **Storage scoping**: per-account IndexedDB (identity records keyed
   `identity:<ul>` + `current` pointer; `cocono-app:<ul>` message DB), no
   cross-account bleed; 'remove account' wipes local data.
+- **Outgoing multi-device sync**: every sent message is mirrored to the
+  sender's OTHER devices as an E2EE **sync copy** (plaintext `m.sync:1`
+  envelope flag, self-only server rule; payload
+  `{"sync":1,id,peer,text,ts}` — the sys-message pattern). The SDK surfaces
+  it as a `sync` event (never `message`), the app stores it under the
+  original record id (`out:<localId>`, `state:'synced'`, no delivery ticks —
+  status stays on the originating device). All three notification emitters
+  are gated: server push skipped for sync copies, page pills/OS notices hang
+  off `message` only, and the worker peek now filters `{"sync":` AND
+  `{"sys":` payloads (also fixes raw sys JSON leaking into snippets).
+  Self-chat unchanged (no double fan-out). NOT covered: history backfill to
+  newly paired devices. Plan: `docs/features/outgoing-multidevice-sync.md`.
+  Side-fix: push coalescing/Topic used `auth.ul`, which the JWT never
+  carried (undefined) — now `auth.sub`, so per-conversation coalescing and
+  RFC 8030 topics actually key on the sender.
+- **Message queue pruning (P0 #2, first instalment)**: never-pulled copies
+  are stamped `expireAt = ts + MSG_QUEUE_MAX_DAYS` (30 d default) at insert
+  and swept by the existing TTL index — offline-forever devices can no
+  longer pin unbounded storage (sync fan-out made this urgent). Pulled
+  copies keep their `MSG_RETENTION_SEC` resync window. Legacy queued docs
+  are backfilled at boot. Per-recipient COUNT caps remain open.
 
 ## Public launch
 
@@ -273,9 +294,10 @@ launch, P1 = strongly before/soon after, P2 = roadmap.
 1. **Registration abuse gate.** 10 signups/h/IP only stops naive scripts; a public
    app needs invite codes / CAPTCHA / proof-of-work — else: botnet squatting, storage
    squatting, push spam.
-2. **Queue DoS (unbounded storage).** Never-pulled message copies are retained
-   **forever** (by design for store-and-forward): mass-register garbage accounts +
-   spam = unbounded Mongo growth. Fix: per-recipient queue caps + queue-age policy.
+2. **Queue DoS (unbounded storage).** ~~Never-pulled message copies are retained
+   **forever**~~ TIME-bounded since the outgoing-sync work (`MSG_QUEUE_MAX_DAYS`,
+   30 d default, TTL-stamped at insert + legacy backfill). Still open:
+   per-recipient queue COUNT caps.
 3. **`TRUST_PROXY` before any CDN/proxy.** Without it every rate limiter and ban
    collapses onto the CDN\'s single IP (the .env comment warns; now it bites). Decide
    direct-expose vs Cloudflare and set hops accordingly.

@@ -123,8 +123,13 @@ export const config = {
   msgAccountWindowSec: numOf(env.MSG_ACCOUNT_WINDOW_SEC, 300),
   msgIpLimit: numOf(env.MSG_IP_LIMIT, 480),
   // Retention: how long PULLED copies stay server-side (expireAt = pulledAt +
-  // this) for re-delivery via 'resync'. Never-pulled copies stay queued.
+  // this) for re-delivery via 'resync'.
   msgRetentionSec: numOf(env.MSG_RETENTION_SEC, 30 * 24 * 3600),
+  // Queue cap: NEVER-pulled copies get expireAt = ts + this at insert, so an
+  // offline-forever device can no longer pin unbounded storage (P0 #2 first
+  // instalment; outgoing multi-device sync multiplies copies per send). The
+  // TTL index on messages.expireAt does the sweeping.
+  msgQueueMaxSec: numOf(env.MSG_QUEUE_MAX_DAYS, 30) * 24 * 3600,
   msgIpWindowSec: numOf(env.MSG_IP_WINDOW_SEC, IP_TIME_WINDOW),
   userKeysIpLimit: numOf(env.USER_KEYS_IP_LIMIT, 120),
   userKeysIpWindowSec: numOf(env.USER_KEYS_IP_WINDOW_SEC, IP_TIME_WINDOW),
