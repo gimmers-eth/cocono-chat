@@ -251,7 +251,11 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
   }
   const status = (text, isError) => onStatus?.(text, isError);
 
-  const pane = mk('div', `viewer-pane viewer-${row.kind}`);
+  // viewer-kind-<kind>, NOT viewer-<kind>: the latter collided with the
+  // .viewer-image / .viewer-video element inside the pane, so every
+  // host.querySelector('.viewer-image') hit the CONTAINER (found by running
+  // this UI under the DOM shim — a real bug no static check could see)
+  const pane = mk('div', `viewer-pane viewer-kind-${row.kind}`);
   const blur = row.kind === 'image' && isBlurred(row, verified);
 
   const full = row.data ?? row.thumb ?? null;
@@ -313,13 +317,21 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
       pane.append(video, play, sound);
     }
   } else {
-    // no bytes yet: the poster (or an icon) plus the honest way to get them
+    // no bytes here yet: the poster (when one was fetched) plus the honest
+    // explanation of WHY there is nothing to look at — 'expired' (the server
+    // deleted it), 'pruned' (this device aged it out) and 'pending' (never
+    // downloaded) are three different sentences and three different futures
     const pic = row.thumb && row.thumb.size ? previewStill(row) : null;
     if (pic) pane.append(pic);
-    const ic = mk('span', 'viewer-waiting');
-    ic.append(iconEl(row.kind === 'video' ? 'tabVideos' : 'attachFile'));
-    ic.append(document.createTextNode(' Not downloaded on this device yet.'));
-    pane.append(ic);
+    const note = mk('span', 'viewer-waiting');
+    note.append(iconEl(row.kind === 'video' ? 'tabVideos' : 'attachFile'));
+    note.append(document.createTextNode(
+      row.state === 'expired' ? ' No longer available on the server.'
+        : row.state === 'pruned' ? ' Removed from this device — it cannot be downloaded again.'
+          : row.state === 'declined' ? ' Deleted here without downloading.'
+            : ' Not downloaded on this device yet.',
+    ));
+    pane.append(note);
   }
   host.append(pane);
 

@@ -103,7 +103,7 @@ export function bubbleNodes(msg, row, { verified = false } = {}) {
     meta.append(mk('span', 'media-file-name', row.name || 'attachment'));
     meta.append(mk('span', 'media-file-size', formatSize(row.size)));
     wrap.append(ic, meta);
-    nodes.push(wrap);
+    nodes.push(wrap);   // name + size are the whole content of a file bubble
   } else {
     const box = shot(row, row.kind === 'image' && isBlurred(row, verified));
     if (box) nodes.push(box);
