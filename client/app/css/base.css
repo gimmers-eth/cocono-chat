@@ -300,11 +300,19 @@ img.own-avatar { border-radius: 50%; }
 .filter-btn.filter-on { color: var(--accent); }
 .filter-btn.filter-on i { transform: none; } /* colour, not size — stays quiet */
 
-/* Chat TAG row (under the head): tap to add/remove. Same purple/grey
-   language as the sidebar filter so the two read as one system. */
+/* Chat TAG row (under the head): same purple/grey language as the sidebar
+   filter so the two read as one system; the mute button rides the strip's
+   RIGHT edge (margin-left:auto absorbs every px of leftover space). */
 .chat-tagbar {
   display: flex; gap: .2rem; align-items: center; padding: .2rem .8rem .5rem;
   border-bottom: 1px solid var(--border); flex: none;
+}
+.tagbar-icons { display: inline-flex; gap: .2rem; align-items: center; }
+.chat-tagbar .tagbar-mute { margin-left: auto; }
+/* the row announces itself — quiet 'Tag:' lead-in; its right margin joins
+   the gap rhythm so the first icon never sits glued to the colon */
+.chat-tagbar .tagbar-label {
+  font-size: .78rem; color: var(--muted); white-space: nowrap; margin-right: .15rem;
 }
 .tag-btn {
   display: grid; place-items: center; width: 2.1rem; height: 2.1rem;
@@ -984,7 +992,12 @@ body[data-view="blocked"] .page-footer { display: none; }
 }
 
 /* trust-modal evidence table + consequence box */
-.trust-facts { width: 100%; border-collapse: collapse; margin: .5rem 0 .5rem; }
+.trust-facts {
+  /* thin grey rules cap the evidence table top & bottom so it reads as a
+     distinct block between the body copy and the CoCo note */
+  width: 100%; border-collapse: collapse; margin: .5rem 0 .5rem;
+  border-top: 1px solid var(--divider); border-bottom: 1px solid var(--divider);
+}
 .coco-note { margin-top: 0; text-align: center; }
 .trust-facts th {
   text-align: left; font-weight: 600; color: var(--muted);

@@ -539,19 +539,28 @@ export function createChat({ client, onHomeRefresh }) {
   //     the user's OWN labels (server-stored, invisible to the peer), so
   //     they paint for ANY peer — blocked and gone ones too (they are still
   //     family; the wall changes messaging, not your address book).
+  //     The row ONLY rebuilds its #chat-tag-icons span: the mute button is a
+  //     static sibling of the strip (paintMuteBtn owns it) and destroying it
+  //     here would silently kill its wired click handler.
   async function paintTagBar(peer) {
     const bar = $('chat-tagbar');
-    if (!bar) return;
+    const iconsHost = $('chat-tag-icons');
+    if (!bar || !iconsHost) return;
     const selfUl = String(client.username ?? '').toLowerCase();
     if (!peer || String(peer).toLowerCase() === selfUl) {
       bar.hidden = true;
-      bar.replaceChildren();
+      iconsHost.replaceChildren();
       return;
     }
     bar.hidden = false;
+    // the row announces itself — a quiet 'Tag:' lead-in so the four glyphs
+    // read as labels to apply, not as random header chrome
+    const label = document.createElement('span');
+    label.className = 'tagbar-label';
+    label.textContent = 'Tag:';
     let mine = [];
     try { mine = (await loadPeerTags()).get(String(peer).toLowerCase()) ?? []; } catch { /* offline: none shown, server still true */ }
-    bar.replaceChildren(...TAG_IDS.map((id) => {
+    iconsHost.replaceChildren(label, ...TAG_IDS.map((id) => {
       const on = mine.includes(id);
       const b = document.createElement('button');
       b.type = 'button';
@@ -638,7 +647,7 @@ export function createChat({ client, onHomeRefresh }) {
         : `${currentPeer} doesn’t exist — no account with this name was found.`],
       [PS.STRANGER]: ['danger', 'notFriend', `You haven’t added ${currentPeer} yet. Messages are private, but anyone can sign up with a name. Trust only people you know.`],
       [PS.UNVERIFIED]: ['warn', 'friend', `You’ve added ${currentPeer}, but haven’t verified them. Read the safety number aloud together (a call works) — when both screens match, nobody is in between. Open ⋮ and tap “Verify user”.`],
-      [PS.VERIFIED]: ['warn', 'friendVerified', `You’ve verified ${currentPeer}’s key, but haven’t trusted them yet. Only trust accounts you actually know in person — open ⋮ and tap “Trust user” when you’re sure.`],
+      [PS.VERIFIED]: ['warn', 'friendVerified', `You’ve verified ${currentPeer}, but haven’t trusted them yet.`],
     };
     // one-sided add: verification is a MUTUAL relation, so the plain ladder
     // copy would promise a step that cannot happen — say what actually

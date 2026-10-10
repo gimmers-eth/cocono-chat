@@ -162,14 +162,17 @@
               <span id="chat-sub" class="muted small sub-preview"></span>
             </span>
           </button>
-          <!-- per-chat notification mute: lives in the HEADER (always
-               visible while the chat is), not buried in the menu -->
-          <button id="btn-chat-mute" class="icon-btn" title="Mute notifications" data-icon="volume" hidden></button>
           <button id="btn-chat-menu" class="icon-btn chat-menu-btn" title="Chat options" aria-haspopup="true" data-icon="menu"></button>
         </header>
-        <!-- chat TAG row: tap an icon to add/remove the tag on this peer
-             (toast feedback); active icons turn purple. Hidden for self-chat. -->
-        <div id="chat-tagbar" class="chat-tagbar" role="group" aria-label="Tag this contact" hidden></div>
+        <!-- chat TAG row: tap a tag to add/remove it on this peer (grey vs
+             purple, toast feedback, hidden for self-chat). The per-chat
+             NOTIFICATION MUTE lives on the RIGHT of this strip (moved out of
+             the head — the tag row is the peer-options line), pushed flush
+             with margin-left:auto. -->
+        <div id="chat-tagbar" class="chat-tagbar" role="group" aria-label="Contact tags and notifications" hidden>
+          <span id="chat-tag-icons" class="tagbar-icons"></span>
+          <button id="btn-chat-mute" class="icon-btn tagbar-mute" title="Mute notifications" data-icon="volume" hidden></button>
+        </div>
         <p id="chat-warn" class="chat-warn" hidden></p>
         <ul id="chat-messages" class="messages"></ul>
         <footer class="composer">
