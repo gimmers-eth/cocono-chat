@@ -443,8 +443,26 @@ sweep until the admin deletes the report (which deletes its media docs with it).
 | Orphan uploads (uploaded, never sent) | `media` | 24 h | same sweeper |
 | Media blobs acked by all devices | `media` | immediate | delete-on-empty-`pending` |
 | Report-pinned media | `media` | until the report is deleted | `reported: true` excludes every delete path |
-| Decrypted media bytes on a device | client IDB `media` | settings drawer, 7 d default | boot + daily prune; `keep:true` exempt |
+| Decrypted media bytes on a device | client IDB `media` | settings drawer, 7 d default | boot + daily prune, measured **from when the bytes landed on that device** (`storedAt`), not from the message's age; `keep: true` ("Keep on this device") exempt |
 | Text transcripts on a device | client IDB `messages` | none — the user's own history | clear-chat stays manual |
+
+### 2.13a What "Keep on this device" does (and what it does not)
+
+The pin is **local and per-device**: it exempts one device's decrypted bytes
+from the row above. It is not a server statement (the acks decide when a blob
+dies), it does not sync to your other devices, and it does not survive clearing
+the chat or the device's app data.
+
+Without it, once the window passes the sweep drops the file's bytes and the
+record becomes `pruned`. What stays: the message in the transcript, its
+name/size/date, and for a photo or video the 256 px thumbnail — so the wall
+keeps its picture and only the payload goes. What goes: the full-resolution
+image, the video, the file, and with them the ability to **Save to device**.
+The viewer then offers **Download again**, because only the server knows whether
+a copy survives (a blob lives until EVERY listed device has acked) — and it
+takes the answer, `404 unknown_media` → `expired`, as the verdict. `pruned` is
+therefore not `expired`: one is this device choosing to let bytes go, the other
+is the network confirming there is nothing left to fetch.
 
 ### 2.14 Scaling & implementation notes
 
