@@ -1500,6 +1500,16 @@ body[data-view="blocked"] .page-footer { display: none; }
 .media-dl:hover, .media-save:hover { border-color: var(--accent); color: var(--accent); }
 .media-decline:hover { border-color: var(--danger); color: var(--danger); }
 .media-dl i, .media-decline i, .media-save i { margin-right: .4em; }
+/* a video/file with no preview: a labelled tile, not a lonely glyph */
+.media-plain {
+  display: flex; align-items: center; gap: .6rem; padding: .35rem .4rem;
+  min-width: 12rem;
+}
+.media-plain > i { font-size: 1.6rem; color: var(--muted); flex: none; }
+.media-plain-meta { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
+.media-plain-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-plain-sub { color: var(--muted); font-size: .74rem; }
+
 .media-progress {
   display: block; height: 3px; margin: .45rem .35rem 0; border-radius: 2px;
   background: var(--divider); overflow: hidden;

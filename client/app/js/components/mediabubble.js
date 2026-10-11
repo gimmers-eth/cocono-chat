@@ -129,12 +129,26 @@ export function bubbleNodes(msg, row, { verified = false } = {}) {
     nodes.push(wrap);   // name + size are the whole content of a file bubble
   } else {
     const box = shot(row, renderableAsImage(row) && isBlurred(row, verified));
-    if (box) nodes.push(box);
-    // nothing to preview (never fetched, declined, aged out, or gone from the
-    // server): the KIND glyph for a file we still own, the question mark for
-    // bytes nobody can bring back
-    else nodes.push(iconEl(row.state === 'expired' ? 'mediaExpired' : (KIND_ICON[row.kind] ?? 'attachFile'), 'media-gone-ic'));
-    if (row.name) nodes.push(mk('span', 'media-name', row.name));
+    if (box) {
+      nodes.push(box);
+      if (row.name) nodes.push(mk('span', 'media-name', row.name));
+    } else {
+      // Nothing to preview — the sender's browser could not capture a frame, or
+      // the poster aged out. Say WHAT it is rather than dropping a lone glyph in
+      // the thread: a labelled tile with a size and (for a clip) a duration reads
+      // as 'a video, not fetched yet', while a bare icon reads as 'broken'.
+      const tile = mk('span', 'media-plain');
+      tile.append(iconEl(row.state === 'expired' ? 'mediaExpired' : (KIND_ICON[row.kind] ?? 'attachFile')));
+      const meta = mk('span', 'media-plain-meta');
+      meta.append(mk('span', 'media-plain-name', row.name || (row.kind === 'video' ? 'Video' : 'Attachment')));
+      const sub = [
+        row.size ? formatSize(row.size) : null,
+        row.kind === 'video' && row.dur ? durationText(row.dur) : null,
+      ].filter(Boolean).join(' · ');
+      if (sub) meta.append(mk('span', 'media-plain-sub', sub));
+      tile.append(meta);
+      nodes.push(tile);
+    }
   }
 
   const status = statusLine(row);

@@ -241,3 +241,37 @@ test('media: a saved FILE gets a name an OS can open (and bytes to open)', () =>
   assert.equal(M.hasLocalBytes({ data: null }), false);
   assert.equal(M.hasLocalBytes({ data: new Blob([]) }), false, 'an empty file is not a thing to save');
 });
+
+test('video preview: where to look for a frame, and when a frame is nothing', () => {
+  // a clip that opens on black must not yield a black poster, so the ladder
+  // walks INTO the clip: ascending, inside the clip, no repeats
+  assert.deepEqual(M.posterSeekTimes(12), [0.1, 0.5, 6, 11.5]);
+  assert.deepEqual(M.posterSeekTimes(30), [0.1, 0.5, 15, 29.5]);
+  // a half-second clip: every probe lands inside it, ordered and without repeats
+  assert.deepEqual(M.posterSeekTimes(0.3), [0, 0.08, 0.1, 0.15]);
+  const rising = M.posterSeekTimes(30);
+  assert.ok(rising.every((v, i) => i === 0 || v > rising[i - 1]), 'strictly increasing');
+  assert.ok(rising.at(-1) <= 30, 'never seeks past the end (that seek never completes on some engines)');
+  // a duration some MP4s do not actually carry must not break the plan
+  assert.deepEqual(M.posterSeekTimes(Infinity), [0.1, 1]);
+  assert.deepEqual(M.posterSeekTimes(NaN), [0.1, 1]);
+  assert.deepEqual(M.posterSeekTimes(0), [0.1, 1]);
+
+  const px = (n, val) => Uint8Array.from({ length: n * 4 }, (_, i) => (i % 4 === 3 ? 255 : val));
+  assert.equal(M.looksBlank(px(64, 0)), true, 'solid black is not a preview');
+  assert.equal(M.looksBlank(px(8, 5)), true, 'near-black either');
+  assert.equal(M.looksBlank(px(64, 250)), false, 'solid white is a real frame (faded-in title card)');
+  assert.equal(M.looksBlank(null), true);
+  const mixed = new Uint8Array(4 * 64);
+  mixed.set([255, 0, 0, 255], 28);            // one sampled position with colour
+  assert.equal(M.looksBlank(mixed), false);
+
+  // a phone clip is a few hundred KB, and a preview needs the bytes: small
+  // videos are fetched on arrival, big ones stay behind the tap
+  assert.equal(M.autoFetchVideo({ kind: 'video', size: 400_000 }), true);
+  assert.equal(M.autoFetchVideo({ kind: 'video', size: 3 * 1024 * 1024 }), true);
+  assert.equal(M.autoFetchVideo({ kind: 'video', size: 90 * 1024 * 1024 }), false);
+  assert.equal(M.autoFetchVideo({ kind: 'video', size: 0 }), false, 'an unknown size is not auto-fetched');
+  assert.equal(M.autoFetchVideo({ kind: 'image', size: 100 }), false, 'images have their own rule');
+});
+

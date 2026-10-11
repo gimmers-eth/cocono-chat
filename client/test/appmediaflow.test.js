@@ -124,10 +124,13 @@ test('pipeline: an incoming IMAGE auto-downloads, is verified, then acks', async
   assert.equal(cli.calls.at(-1).downloaded, true);
 });
 
-test('pipeline: a VIDEO pulls its poster only and never acks', async () => {
+test('pipeline: a BIG video pulls its poster only and never acks', async () => {
   await freshAccount();
   const cipher = await makeCipher();
-  const row = rowFor({ kind: 'video', name: 'clip.mp4', mime: 'video/mp4' }, cipher);
+  // size is what the policy reads, so the claim is what decides: over the
+  // courtesy threshold nothing is fetched without asking (see the small-video
+  // test below for the other half)
+  const row = { ...rowFor({ kind: 'video', name: 'clip.mp4', mime: 'video/mp4' }, cipher), size: M.VIDEO_AUTO_MAX_BYTES + 1 };
   await store.saveMedia(row);
   const cli = pipelineClient(cipher);
   const res = await M.applyArrivalPolicy(cli, row);
@@ -141,7 +144,7 @@ test('pipeline: a poster-less video cannot delete itself — req 8 is sacred', a
   await freshAccount();
   const cipher = await makeCipher();
   // the sender's browser could not capture a frame: the descriptor says so
-  const noPoster = { ...rowFor({ kind: 'video', name: 'clip.mp4', mime: 'video/mp4' }, cipher), thumbIv: null };
+  const noPoster = { ...rowFor({ kind: 'video', name: 'clip.mp4', mime: 'video/mp4' }, cipher), thumbIv: null, size: M.VIDEO_AUTO_MAX_BYTES + 1 };
   await store.saveMedia(noPoster);
   const cli = pipelineClient(cipher);
   const res = await M.applyArrivalPolicy(cli, noPoster);
@@ -349,7 +352,7 @@ test('pipeline against the real server: a poster-less video survives, then downl
   const msg = await waitFor(bob, 'message', (m) => m.text.startsWith('{"media":'), 20000);
   const media = JSON.parse(msg.text).media;
 
-  const row = M.mediaRow({ key: media.id, peer: bobName, dir: 'in', kind: 'video', media, msgId: 'in:1', ts: msg.ts });
+  const row = { ...M.mediaRow({ key: media.id, peer: bobName, dir: 'in', kind: 'video', media, msgId: 'in:1', ts: msg.ts }), size: M.VIDEO_AUTO_MAX_BYTES + 1 };
   await store.saveMedia(row);
   const res = await M.applyArrivalPolicy(bob, row);
   assert.equal(res.state, 'pending', 'the poster half did nothing');
@@ -418,4 +421,22 @@ test('pipeline against the real server: an IMAGE arrives, downloads, verifies an
   assert.equal(after.data.type, 'image/jpeg', 'typed, so the bubble can paint it');
   assert.equal(await srv.mongo.db.collection('media').countDocuments({ _id: media.id }), 0,
     'and the ack released the server copy (req 8)');
+});
+
+test('pipeline: a SMALL video is fetched on arrival so a preview can exist', async () => {
+  // the other half of the preview fix: a sender whose browser could not capture
+  // a frame used to leave the recipient at a grey icon until they tapped
+  // Download — on a phone clip of a few hundred KB. Under the threshold the
+  // payload comes over, the poster is built from it, and it is THIS fetch that
+  // acks (req 8 is still satisfied by a payload download, never a preview).
+  await freshAccount();
+  const cipher = await makeCipher();
+  const row = { ...rowFor({ kind: 'video', name: 'clip.mp4', mime: 'video/mp4' }, cipher), thumbIv: null };
+  await store.saveMedia(row);
+  const cli = pipelineClient(cipher);
+  const res = await M.applyArrivalPolicy(cli, row);
+  assert.equal(res.state, 'stored');
+  const after = await store.getMedia('blob-1');
+  assert.deepEqual(new Uint8Array(await after.data.arrayBuffer()), PAYLOAD, 'the clip is on the device');
+  assert.ok(cli.calls.some((x) => x.what === 'ack'), 'the payload fetch, and only it, settled the ack');
 });

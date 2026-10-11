@@ -662,7 +662,9 @@ test('bubble: a video is never painted as an <img> over its own video bytes', as
   const classes = classesOf(nodes);
   assert.ok(!classes.some((c) => /media-thumb/.test(c)),
     'no <img> pointed at video bytes (that is the looping mess in the chat)');
-  assert.ok(classes.some((c) => /media-gone-ic/.test(c)), 'an icon says video until a poster exists');
+  assert.ok(classes.some((c) => /media-plain/.test(c)), 'a tile says video until a poster exists');
+  const text = nodes.map((x) => x.textContent).join(' ');
+  assert.match(text, /a\.mp4/, 'and the tile names the file it stands for');
 });
 
 test('poster: the recipient draws its own frame once the bytes land, typed correctly', async () => {
@@ -701,4 +703,17 @@ test('poster: the recipient draws its own frame once the bytes land, typed corre
   assert.equal(await M.buildPoster(await store.getMedia('vPoster2')), null,
     'no poster, no crash, no harm to the download');
   assert.equal((await store.getMedia('vPoster2')).thumb, null);
+});
+test('bubble: a video with no poster is a labelled tile, not a lone glyph', async () => {
+  const row = {
+    id: 'v1', blobId: 'v1', kind: 'video', dir: 'in', name: 'IMG_0432.MOV', mime: 'video/quicktime',
+    size: 2_400_000, dur: 8.4, state: 'pending', thumb: null, data: null, blurred: null,
+  };
+  const nodes = bubbleNodes({ dir: 'in', kind: 'video', state: 'delivered' }, row, {});
+  const text = nodes.map((n) => n.textContent ?? '').join(' ');
+  assert.match(text, /IMG_0432\.MOV/, 'the name is there');
+  assert.match(text, /2\.3 MB/, 'the size is there');
+  assert.match(text, /0:08/, 'and the clip length, so it reads as a video');
+  const cls = nodes.flatMap((n) => [n.className, ...(n.childNodes ?? []).map((c) => c.className)]).join(' ');
+  assert.match(cls, /media-plain/, 'as a tile, not a bare icon');
 });

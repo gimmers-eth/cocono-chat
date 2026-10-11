@@ -177,41 +177,179 @@ async function makeThumb(source, maxEdge = THUMB_MAX_EDGE) {
   }
 }
 
-/** Poster frame for a video: seek to 0 (or a hair in, some encoders deliver a
- *  black frame at exactly 0) and paint it to a canvas. Best effort — a video
- *  that will not decode locally simply sends without a poster. */
-async function videoPoster(blob) {
-  const url = URL.createObjectURL(blob);
+/**
+ * WHERE to take a frame from, in order (pure, so the reasoning is testable
+ * without a phone in the loop).
+ *
+ * A clip routinely OPENS on black — fades, and iOS handing back an empty buffer
+ * at t≈0 for HEVC — so one timestamp is not a strategy: the ladder walks into
+ * the clip. `duration` is Infinity for some MP4s whose moov carries none (older
+ * WebKit) and NaN while metadata is pending, so the guard matters as much as
+ * the order.
+ */
+export function posterSeekTimes(duration) {
+  const d = Number(duration);
+  if (!Number.isFinite(d) || d <= 0) return [0.1, 1];          // unknown length: blind probes
+  // ascending, de-duplicated, and always inside the clip: a seek past the last
+  // frame never fires `seeked` on some engines, which stalls the whole ladder on
+  // one dead promise
+  return [...new Set([
+    Math.min(0.1, d / 2),
+    Math.min(0.5, d / 4),
+    d / 2,
+    Math.max(0, d - 0.5),
+  ].map((v) => Math.min(d, Math.max(0, Math.round(v * 100) / 100))))]
+    .sort((a, b) => a - b);
+}
+
+/**
+ * Is this frame blank? (pure over raw pixels). A poster of solid black reads as
+ * a broken attachment, so a blank candidate is discarded and the ladder moves
+ * on; if every candidate is blank there is no poster, and the film icon is the
+ * honest answer. Every 7th pixel is enough to tell, cheaply.
+ */
+export function looksBlank(pixels) {
+  if (!pixels || !pixels.length) return true;
+  let first = null;
+  let lit = 0;
+  for (let i = 0; i + 3 < pixels.length; i += 4 * 7) {
+    const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
+    if ((r + g + b) / 3 > 12) lit += 1;
+    const bucket = `${r >> 4},${g >> 4},${b >> 4}`;
+    if (first === null) first = bucket;
+    else if (bucket !== first) return false;    // any structure at all: a real frame
+  }
+  return lit === 0;
+}
+
+/** The first of several events, or a deadline — a stalled decoder must never
+ *  hang a send the user is waiting on. */
+function waitOnce(target, events, ms) {
+  return new Promise((resolve) => {
+    const handlers = {};
+    const off = () => { for (const e of events) target.removeEventListener?.(e, handlers[e]); };
+    const done = (what) => { off(); resolve(what); };
+    for (const e of events) {
+      handlers[e] = () => done(e);
+      target.addEventListener?.(e, handlers[e]);
+    }
+    setTimeout(() => done('timeout'), ms);
+  });
+}
+
+const canvasBlob = (canvas, quality) => new Promise((resolve) => {
+  try { canvas.toBlob((blob) => resolve(blob ?? null), 'image/jpeg', quality); }
+  catch { resolve(null); }
+});
+
+/**
+ * Grab a decodable frame out of a video and return a JPEG poster.
+ *
+ * This exists because the previous version failed SILENTLY and permanently: it
+ * used `preload: 'metadata'`, waited 4 s for metadata iOS does not deliver that
+ * way, found `videoWidth === 0`, returned null — and every video in the dev
+ * database proves a poster has NEVER been captured from that phone
+ * (`thumbCtSize: null` on all 14). A video with no poster is invisible in the
+ * thread, so this is worth a ladder of attempts rather than one hope.
+ *
+ * Per candidate timestamp, in order of reliability:
+ *   1. `requestVideoFrameCallback` (Safari 15.4+, Chrome) — the only API that
+ *      promises a frame that was actually PRESENTED;
+ *   2. `createImageBitmap(video)` — engines that refuse to draw a paused element;
+ *   3. `drawImage(video)` after `seeked`.
+ * A frame is accepted only when it is not blank, so a clip that opens on black
+ * still gets a real preview from a second in. `why` comes back on failure and is
+ * logged: three rounds of phone testing were guesswork precisely because the
+ * failure had no voice.
+ */
+export async function grabVideoFrame(blob, { maxEdge = THUMB_MAX_EDGE, quality = THUMB_QUALITY, log = null } = {}) {
+  const note = (m) => { try { (log ?? ((x) => console.warn(x)))(m); } catch { /* never fatal */ } };
+  // no DOM, no decoder: this function IS a browser capability, and the pipeline
+  // tests run the arrival policy headlessly
+  if (typeof document === 'undefined') return { thumb: null, why: 'no-dom' };
+  let url = '';
+  const video = document.createElement('video');
   try {
-    const video = document.createElement('video');
+    url = URL.createObjectURL(blob);
     video.muted = true;
     video.playsInline = true;
-    video.preload = 'metadata';
+    video.preload = 'auto';                 // 'metadata' is the bug: iOS withholds dimensions
     video.src = url;
-    await new Promise((resolve, reject) => {
-      video.onloadedmetadata = resolve;
-      video.onerror = () => reject(new Error('video decode failed'));
-      setTimeout(resolve, 4000); // a silent/odd codec still gets a shot at a frame
-    });
-    if (!video.videoWidth) return null;
-    if (video.duration > 0.1) { try { video.currentTime = Math.min(0.1, video.duration / 2); } catch { /* seek unsupported */ } }
-    await new Promise((resolve) => {
-      if (video.readyState >= 2) return resolve();
-      video.onseeked = resolve;
-      setTimeout(resolve, 3000);
-    });
+    video.load?.();                         // some engines only begin on an explicit load()
+    const meta = await waitOnce(video, ['loadedmetadata', 'loadeddata', 'canplay', 'error'], 12000);
+    if (meta === 'error') return { thumb: null, why: 'decode-error' };
+    if (!video.videoWidth) {
+      try { video.currentTime = 0.1; } catch { /* unseekable */ }
+      await waitOnce(video, ['seeked', 'loadeddata', 'canplay'], 3000);
+      if (!video.videoWidth) return { thumb: null, why: 'no-dimensions' };
+    }
+    const w = video.videoWidth, h = video.videoHeight;
+    const dur = Number.isFinite(video.duration) ? video.duration : null;
     const canvas = document.createElement('canvas');
-    const scale = Math.min(1, THUMB_MAX_EDGE / Math.max(video.videoWidth, video.videoHeight));
-    canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
-    canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
-    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-    const out = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', THUMB_QUALITY));
-    const dims = { w: video.videoWidth, h: video.videoHeight, dur: Number.isFinite(video.duration) ? video.duration : null };
-    return out ? { thumb: out, ...dims } : null;
-  } catch {
-    return null;
+    const scale = Math.min(1, maxEdge / Math.max(w, h));
+    canvas.width = Math.max(1, Math.round(w * scale));
+    canvas.height = Math.max(1, Math.round(h * scale));
+    const g = canvas.getContext?.('2d');
+    if (!g) return { thumb: null, why: 'no-2d-context' };
+
+    let fallback = null;
+    for (const t of posterSeekTimes(dur)) {
+      try { video.currentTime = t; } catch { break; }
+      const how = await frameArrived(video, t);
+      const painted = await paintFrame(video, canvas, g);
+      if (!painted) continue;
+      fallback = fallback ?? painted;
+      if (!painted.blank) {
+        const out = await canvasBlob(canvas, quality);
+        if (out) { note(`[media] video poster captured at ${t}s via ${painted.via}/${how}`); return { thumb: out, w, h, dur }; }
+      }
+    }
+    // every frame we could read was blank: no poster beats a black lie
+    return { thumb: null, why: fallback ? 'blank-frames' : 'undrawable' };
+  } catch (err) {
+    note(`[media] video poster threw: ${err?.message ?? err}`);
+    return { thumb: null, why: 'threw' };
   } finally {
-    URL.revokeObjectURL(url);
+    // release the decoder promptly: a stranded <video> on a phone holds the
+    // codec and the memory of the clip it just decoded
+    try { video.removeAttribute('src'); video.load?.(); } catch { /* gone */ }
+    if (url) setTimeout(() => { try { URL.revokeObjectURL(url); } catch { /* gone */ } }, 1000);
+  }
+}
+
+/** How the frame became available (for the log): rvfc | bitmap | seeked | … */
+async function frameArrived(video, wantTime) {
+  if (typeof video.requestVideoFrameCallback === 'function') {
+    const raced = await Promise.race([
+      new Promise((resolve) => { try { video.requestVideoFrameCallback(() => resolve('rvfc')); } catch { resolve(null); } }),
+      new Promise((resolve) => setTimeout(() => resolve(null), 2500)),
+    ]);
+    if (raced) return raced;
+  }
+  if ((video.readyState ?? 0) >= 2 && Math.abs((video.currentTime ?? 0) - wantTime) < 0.6) return 'ready';
+  const ev = await waitOnce(video, ['seeked', 'timeupdate', 'canplay'], 2500);
+  return ev === 'timeout' ? 'seek-timeout' : ev;
+}
+
+async function paintFrame(video, canvas, g) {
+  try {
+    if (typeof createImageBitmap === 'function') {
+      try {
+        const frame = await Promise.race([
+          createImageBitmap(video),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 2500)),
+        ]);
+        g.drawImage(frame, 0, 0, canvas.width, canvas.height);
+        frame.close?.();
+        const px = g.getImageData?.(0, 0, canvas.width, canvas.height).data ?? null;
+        return { blank: px ? looksBlank(px) : false, via: 'bitmap' };
+      } catch { /* this engine will not bitmap a paused element: fall through */ }
+    }
+    g.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const px = g.getImageData?.(0, 0, canvas.width, canvas.height).data ?? null;
+    return { blank: px ? looksBlank(px) : false, via: 'drawImage' };
+  } catch {
+    return null;                          // decoder refused; the next timestamp may not
   }
 }
 
@@ -269,11 +407,16 @@ export async function prepareMedia(file) {
   if (kind === 'video') {
     const bytes = await readBytes(file);
     assertWithinLimits('video', bytes.length);
-    const poster = await videoPoster(file);
+    // Worth a ladder: a video with no poster is invisible in the thread, and a
+    // failed preview must never fail the SEND. If capture gives up, the payload
+    // still goes and the recipient builds the poster from the bytes they now
+    // have (buildPoster) — a film icon meanwhile.
+    const poster = await grabVideoFrame(file);
     return {
       kind, mime, name, bytes,
-      thumb: poster?.thumb ?? null,
-      w: poster?.w ?? null, h: poster?.h ?? null, dur: poster?.dur ?? null, animated: false,
+      thumb: poster.thumb ?? null,
+      w: poster.w ?? null, h: poster.h ?? null, dur: poster.dur ?? null, animated: false,
+      posterWhy: poster.thumb ? null : poster.why,
     };
   }
 
@@ -289,6 +432,19 @@ export async function prepareMedia(file) {
  *  waits entirely. */
 export const autoDownload = (kind) => kind === 'image';
 export const autoDownloadThumb = (kind) => kind === 'image' || kind === 'video';
+
+/**
+ * A VIDEO whose payload is small enough to fetch without asking.
+ *
+ * The poster is built from BYTES this device holds, and a sender whose browser
+ * could not decode the clip sends no poster at all — so 'wait for the tap' used
+ * to mean 'the thread shows a grey icon for a phone clip that costs 300 KB'.
+ * Under this size the payload comes on arrival and the preview appears; over it,
+ * fetching someone's 100 MB clip unprompted would be rude of us.
+ */
+export const VIDEO_AUTO_MAX_BYTES = 8 * 1024 * 1024;
+export const autoFetchVideo = (row) => !!row && row.kind === 'video'
+  && Number(row.size) > 0 && Number(row.size) <= VIDEO_AUTO_MAX_BYTES;
 
 /**
  * Blur decision for an already-DECRYPTED image (req 7 is a DISPLAY rule, not
@@ -478,52 +634,16 @@ export async function shareToDevice(row) {
  */
 export async function buildPoster(row) {
   if (!row || row.kind !== 'video' || !hasLocalBytes(row)) return null;
-  if (row.thumb && row.thumb.size) return row.thumb;      // sender made one
-  // typed on purpose: a typeless Blob URL is what made <video> refuse to play
-  const url = URL.createObjectURL(new Blob([row.data], { type: String(row.mime ?? '').trim() || 'video/mp4' }));
-  try {
-    const video = document.createElement('video');
-    video.muted = true;
-    video.playsInline = true;
-    video.preload = 'metadata';
-    const ok = await new Promise((resolve) => {
-      let settled = false;
-      const done = (v) => { if (!settled) { settled = true; resolve(v); } };
-      video.onloadedmetadata = () => {
-        // a hair IN, not 0: the first frame of many phone recordings is black
-        if (video.duration > 0.2) { try { video.currentTime = Math.min(0.2, video.duration / 2); } catch { /* no seek */ } }
-        else done(true);
-        if (video.readyState >= 2) done(true);
-        else video.onseeked = () => done(true);
-        setTimeout(() => done(true), 3000);
-      };
-      video.onerror = () => done(false);
-      setTimeout(() => done(false), 6000);
-      // LOADED LAST, and deliberately: a Blob source can answer with its
-      // metadata before a listener attached after the assignment ever sees it,
-      // which is how this function silently returned no poster for a video that
-      // decodes perfectly well.
-      video.src = url;
-    });
-    if (!ok || !video.videoWidth) return null;
-    const canvas = document.createElement('canvas');
-    const scale = Math.min(1, THUMB_MAX_EDGE / Math.max(video.videoWidth, video.videoHeight));
-    canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
-    canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
-    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-    const out = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', THUMB_QUALITY));
-    if (!out) return null;
-    await updateMedia(row.id, {
-      thumb: out,
-      w: video.videoWidth, h: video.videoHeight,
-      ...(Number.isFinite(video.duration) ? { dur: video.duration } : {}),
-    });
-    return out;
-  } catch {
-    return null;
-  } finally {
-    try { URL.revokeObjectURL(url); } catch { /* gone */ }
-  }
+  if (row.thumb && row.thumb.size) return row.thumb;      // the sender did manage one
+  const src = new Blob([row.data], { type: String(row.mime ?? '').trim() || 'video/mp4' });
+  const got = await grabVideoFrame(src);
+  if (!got.thumb) return null;
+  await updateMedia(row.id, {
+    thumb: got.thumb,
+    ...(got.w ? { w: got.w, h: got.h } : {}),
+    ...(got.dur ? { dur: got.dur } : {}),
+  });
+  return got.thumb;
 }
 
 // ---------------- the conversation tabs (req 1/4) ----------------
@@ -797,6 +917,9 @@ async function fetchResumable(client, blobId, row, { onProgress } = {}) {
 /** Apply the receive policy to one fresh record. */
 export async function applyArrivalPolicy(client, row) {
   if (autoDownload(row.kind)) return downloadMedia(client, row);
+  // a small video comes right over: that is what makes a preview exist at all
+  // when the sender's browser could not capture a frame (see autoFetchVideo)
+  if (row.kind === 'video' && autoFetchVideo(row)) return downloadMedia(client, row);
   if (autoDownloadThumb(row.kind)) {
     // video poster: a thumb-only fetch never acks — the full bytes still
     // wait behind the Download button, and the blob must survive until then

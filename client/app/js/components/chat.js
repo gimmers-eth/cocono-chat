@@ -476,6 +476,10 @@ export function createChat({ client, onHomeRefresh }) {
     row.blurred = false;           // req 7: a sent image is never blurred
     row.data = prepared.bytes instanceof Blob ? prepared.bytes : new Blob([prepared.bytes], { type: prepared.mime || 'application/octet-stream' });
     row.thumb = prepared.thumb ?? null;
+    // recorded, not thrown away: 'why is there no preview' is the question this
+    // feature keeps being asked, and the answer is now on the record
+    row.posterWhy = prepared.posterWhy ?? null;
+    if (prepared.posterWhy) console.warn(`[media] no preview image for this ${prepared.kind}: ${prepared.posterWhy}`);
     await saveMessage({ id, peer, dir: 'out', text: mediaLabel(prepared.kind, prepared.name), ts, state: 'sending', kind: prepared.kind, mediaId: id });
     await saveMedia(row);
     markRead(peer, ts);
