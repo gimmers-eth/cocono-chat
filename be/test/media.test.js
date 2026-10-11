@@ -1233,3 +1233,59 @@ test('media: the sweeper reclaims a stored file whose document is gone', async (
     assert.equal((await ctx.mongo.db.collection('media.chunks').countDocuments({})), 0, 'no chunks left behind');
   } finally { await ctx.teardown(); }
 });
+
+test('media: every delete path takes the GridFS file AND its chunks with it', async () => {
+  const ctx = await setupLive({ mediaInlineMaxBytes: 0 });   // force GridFS storage
+  try {
+    const alice = await createUser(ctx, makeClient(), 'alice');
+    const bob = await createUser(ctx, makeClient(), 'bobby');
+    const ws = await connectWs(ctx.port, alice.token);
+    const putBlob = async (bytes) => {
+      const meta = await ctx.app.inject({
+        method: 'POST', url: '/api/media', headers: auth(alice.token),
+        payload: { kind: 'file', size: bytes.length, sha256: sha(bytes) },
+      });
+      const id = meta.json().id;
+      const put = await ctx.app.inject({
+        method: 'PUT', url: `/api/media/${id}/blob`,
+        headers: { ...auth(alice.token), 'content-type': 'application/octet-stream' }, payload: bytes,
+      });
+      assert.equal(put.statusCode, 200, put.body);
+      return id;
+    };
+    const sendTo = async (id, bytes, cid) => {
+      ws.send({ type: 'msg', msg: buildEnvelope(alice, bob, bob.d, cid, { att: { id, kind: 'file', size: bytes.length } }).env });
+      assert.equal((await ws.waitFor((m) => m.type === 'ack' && m.cid === cid)).ok, true);
+    };
+    const gridCount = async () => [
+      await ctx.mongo.db.collection('media.files').countDocuments({}),
+      await ctx.mongo.db.collection('media.chunks').countDocuments({}),
+    ];
+
+    // path 1: the last ack deletes the blob
+    const a = randomBytes(4000);
+    const idA = await putBlob(a);
+    await sendTo(idA, a, 'grid-ack-1');
+    assert.deepEqual(await gridCount(), [1, 1], 'one file, its chunks present');
+    assert.equal((await ctx.app.inject({
+      method: 'POST', url: `/api/media/${idA}/ack`, payload: { downloaded: true }, headers: auth(bob.token),
+    })).json().deleted, true);
+    assert.deepEqual(await gridCount(), [0, 0], 'ACK deletion must remove the stored bytes, not just the doc');
+
+    // path 2: deleting the account (the owner) does the same
+    const b = randomBytes(4000);
+    const idB = await putBlob(b);
+    assert.deepEqual(await gridCount(), [1, 1]);
+    const { deleteAccountFully } = await import('../src/lib/accountState.js');
+    const db = ctx.mongo.db;
+    await deleteAccountFully({
+      users: db.collection('users'), profiles: db.collection('profiles'), idDocs: db.collection('id_docs'),
+      messages: db.collection('messages'), diagnostics: db.collection('diagnostics'),
+      settings: db.collection('settings'), redis: ctx.redis, shares: db.collection('shares'),
+      contacts: db.collection('contacts'), media: ctx.media, mediaStore: ctx.mediaStore,
+    }, 'alice');
+    assert.deepEqual(await gridCount(), [0, 0], 'an account deletion that leaves 12 MB of chunks behind is a lie about deleting data');
+
+    ws.ws.close();
+  } finally { await ctx.teardown(); }
+});
