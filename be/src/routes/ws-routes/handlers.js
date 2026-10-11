@@ -105,12 +105,17 @@ export function createHandlers({ users, redis, pub, config, messages, settings, 
     if (m.att) {
       const blob = await media.findOne(
         { _id: m.att.id },
-        { projection: { owner: 1, kind: 1, ctSize: 1 } },
+        { projection: { owner: 1, kind: 1, ctSize: 1, upload: 1 } },
       );
       if (!blob || blob.owner.ul !== auth.sub || blob.owner.fd !== auth.d) {
         return ack(false, 'unknown_attachment');
       }
       if (blob.kind !== m.att.kind || blob.ctSize !== m.att.size) return ack(false, 'invalid_envelope');
+      // the bytes must actually be there. A deferred upload that the client
+      // abandoned would otherwise become a message pointing at nothing — and
+      // every recipient's 409/404 would be read as 'gone', acked, and the
+      // sender would silently lose the attachment
+      if (blob.upload === 'pending') return ack(false, 'attachment_incomplete');
     }
     // Register BEFORE persisting (plan §4.2 order): $addToSet is idempotent
     // under cid retries and multi-copy fan-out, and doing it first means a

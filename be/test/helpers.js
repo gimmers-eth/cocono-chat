@@ -7,6 +7,7 @@ import { b64uEncode } from '../src/lib/b64u.js';
 import { canonical } from '../src/lib/canon.js';
 import { connectMongo, connectRedis } from '../src/db.js';
 import adminRoutes from '../src/routes/admin-routes/index.js';
+import { createMediaStore } from '../src/lib/mediaStore.js';
 
 export const TEST_REDIS_URL = process.env.TEST_REDIS_URL ?? 'redis://127.0.0.1:6379/15';
 
@@ -78,6 +79,7 @@ export async function setupAdmin(overrides = {}) {
     reports: db.collection('reports'),
     reportMedia: db.collection('report_media'),
     media: db.collection('media'),
+    mediaStore: createMediaStore({ db, config: { ...config, coldSendRequiresVerification: false, ...overrides } }),
     settings: db.collection('settings'),
     messages: db.collection('messages'),
     idDocs: db.collection('id_docs'),

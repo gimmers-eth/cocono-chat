@@ -17,11 +17,29 @@
 
 import { getMedia, updateMedia, allMedia } from './store.js';
 
-// Mirrors be/.env defaults; the SERVER is the authority and answers 413 when
-// these are exceeded — the point of checking here is to say so in one tap's
-// time and in human words, not to enforce anything.
-export const MEDIA_MAX_BYTES = 10 * 1024 * 1024;
+// STARTING values only. The server advertises the real ones in
+// `/api/app-info.media` (setMediaLimits below) — a limit duplicated in two
+// places is two places to be wrong, and at 100 MB the difference between "we
+// refuse it politely" and "the request died" is visible to the user.
+export const MEDIA_MAX_BYTES = 100 * 1024 * 1024;
 export const MEDIA_THUMB_MAX_BYTES = 64 * 1024;
+// (declared after the constants it copies: a `const` above them reads them in
+// the temporal dead zone and takes the whole module down at import time)
+const limits = { maxBytes: MEDIA_MAX_BYTES, jsonMaxBytes: 8 * 1024 * 1024, thumbMaxBytes: MEDIA_THUMB_MAX_BYTES, quotaMb: 500, retentionDays: null };
+
+/** Adopt the server's media limits (main.js calls this on boot; a stale or
+ *  missing answer simply keeps the defaults above). */
+export function setMediaLimits(info) {
+  if (!info || typeof info !== 'object') return limits;
+  if (Number(info.maxBytes) > 0) limits.maxBytes = Number(info.maxBytes);
+  if (Number(info.jsonMaxBytes) > 0) limits.jsonMaxBytes = Number(info.jsonMaxBytes);
+  if (Number(info.thumbMaxBytes) > 0) limits.thumbMaxBytes = Number(info.thumbMaxBytes);
+  if (Number(info.quotaMb) > 0) limits.quotaMb = Number(info.quotaMb);
+  if (Number(info.retentionDays) > 0) limits.retentionDays = Number(info.retentionDays);
+  return limits;
+}
+export const mediaLimits = () => ({ ...limits });
+export const limitText = () => formatSize(limits.maxBytes);
 export const IMAGE_MAX_EDGE = 1600;   // longest edge after resize
 export const THUMB_MAX_EDGE = 256;    // bubble/wall preview
 export const NAME_MAX_LEN = 120;
@@ -117,11 +135,11 @@ export function sanitizeName(name) {
 
 /** The one gate every kind passes before any crypto or upload happens. */
 export function assertWithinLimits(kind, byteLength) {
-  if (kind === 'file' && byteLength > MEDIA_MAX_BYTES) {
-    throw new MediaReject(`That file is ${formatSize(byteLength)} — attachments are limited to ${formatSize(MEDIA_MAX_BYTES)}.`);
-  }
-  if (byteLength > MEDIA_MAX_BYTES) {
-    throw new MediaReject(`That is ${formatSize(byteLength)} — the limit is ${formatSize(MEDIA_MAX_BYTES)}.`);
+  const cap = limits.maxBytes;
+  if (byteLength > cap) {
+    throw new MediaReject(kind === 'file'
+      ? `That file is ${formatSize(byteLength)} — attachments are limited to ${formatSize(cap)}.`
+      : `That is ${formatSize(byteLength)} — the limit is ${formatSize(cap)}.`);
   }
   if (byteLength === 0) throw new MediaReject('That file is empty.');
 }
@@ -646,44 +664,60 @@ export function mediaRow({ key, blobId = key, peer, dir, kind, media, msgId, ts 
 // reference forever and break req 8.
 const RETRY_BATCH = 4;
 
-export async function downloadMedia(client, row, { thumbOnly = false } = {}) {
+/**
+ * Fetch a payload and put it on this device — resumably, with progress.
+ *
+ * A 100 MB file on mobile data is not a request, it is a project. So:
+ *   * every chunk received is appended to `parts` and the running total is
+ *     written to the record (`partial`, `partialBytes`) — if the app dies mid
+ *     fetch, the bytes it paid for are still there;
+ *   * a dropped connection retries from that offset (HTTP Range) instead of
+ *     starting over, with a short backoff, and only the errors that CANNOT be
+ *     fixed by retrying (404 gone, tampered) end the attempt;
+ *   * `progress` (0…1) rides on the record so the bubble and the viewer can
+ *     show a real bar rather than a spinner that might be wrong.
+ *
+ * Verification is deliberately at the END, over the whole ciphertext: the
+ * digest is of the ciphertext, so a resumed download that stitched a bad
+ * offset together fails here and is never acked.
+ */
+const RESUME_ATTEMPTS = 4;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+export async function downloadMedia(client, row, { thumbOnly = false, onProgress = null } = {}) {
   const blob = blobOf(row);
   if (!blob || !row?.key) return { ok: false, state: row?.state ?? 'failed' };
-  // every write below is a PATCH, never a re-spread of a row read earlier:
-  // updateMedia merges onto the CURRENT record, so a download that finishes
-  // after the user pinned/blur-toggled the row keeps their choice
   try {
     if (thumbOnly) {
       // A POSTER is decoration. It must never touch `state` and above all must
       // never ACK: the fetch that writes the lifecycle is the full download
-      // (req 8). Earlier code ran the poster through the same failure path as
-      // a real download, so a video sent without a preview (the sender's
-      // browser failed to capture a frame — normal on iOS) got a 404 on
+      // (req 8). Earlier code ran the poster through the same failure path as a
+      // real download, so a video sent without a preview got a 404 on
       // ?part=thumb, was read as "the blob is gone", and the recipient's own
       // ack DELETED the video for everyone.
       if (!row.thumbIv) return { ok: false, skipped: 'no-thumb', state: row.state, thumbOnly: true };
-      await updateMedia(row.id, { state: 'downloading' });
       try {
         const thumb = await client.downloadThumb(blob, row);
-        await updateMedia(row.id, { thumb, state: row.state });
+        await updateMedia(row.id, { thumb });
         return { ok: true, state: row.state, thumbOnly: true };
       } catch (err) {
-        // back to exactly the state it was in: pending (or synced) and waiting
-        // for the user's Download button, with the bytes still on the server
-        await updateMedia(row.id, { state: row.state });
         return { ok: false, state: row.state, thumbOnly: true, error: err };
       }
     }
     await updateMedia(row.id, { state: 'downloading' });
-    const { data, thumb } = await client.downloadMedia(blob, row);
-    await updateMedia(row.id, { data, ...(thumb ? { thumb } : {}), state: 'stored', storedAt: Date.now() });
-    // A video with no poster from the sender gets one made HERE, from the
-    // bytes that just landed: otherwise the chat shows a film icon and the
-    // person cannot tell whether anything arrived at all. Fire-and-forget —
-    // a poster we cannot draw must never undo a finished download.
-    if (row.kind === 'video' && !thumb) {
-      buildPoster({ ...row, data, state: 'stored' }).catch(() => null);
+    const ct = await fetchResumable(client, blob, row, { onProgress });
+    const media = { key: row.key, sha256: row.sha256, mime: row.mime };
+    const data = await client.decryptMediaBytes(ct, media);
+    let thumb = row.thumb ?? null;
+    if (row.thumbIv && !thumb) {
+      try { thumb = await client.downloadThumb(blob, row); } catch { thumb = null; }
     }
+    await updateMedia(row.id, {
+      data, ...(thumb ? { thumb } : {}),
+      state: 'stored', storedAt: Date.now(),
+      progress: 0, partial: null, partialBytes: 0,      // the resume scrap is done with
+    });
+    if (row.kind === 'video' && !thumb) buildPoster({ ...row, data, state: 'stored' }).catch(() => null);
     // ack AFTER the bytes are safely on the device: that is what lets the
     // server delete the blob (req 8)
     await client.ackMedia(blob, true).catch(() => {});
@@ -692,12 +726,66 @@ export async function downloadMedia(client, row, { thumbOnly = false } = {}) {
     // 'no_thumb' is deliberately NOT 'gone': a missing preview says nothing
     // about the payload, and the code below would ack it away
     const gone = err?.code === 'unknown_media' || (err?.status === 404 && err?.code !== 'no_thumb');
-    await updateMedia(row.id, { state: gone ? 'expired' : 'failed' });
+    await updateMedia(row.id, {
+      state: gone ? 'expired' : 'failed',
+      progress: 0,
+      ...(gone ? { partial: null, partialBytes: 0 } : {}),
+    });
     // a gone blob is settled: ack it so the server-side pending set can empty
     // (the copy is unrecoverable, holding it pending helps nobody)
     if (gone) await client.ackMedia(blob, true).catch(() => {});
     return { ok: false, state: gone ? 'expired' : 'failed', error: err };
   }
+}
+
+/**
+ * The resume loop. `row.partial` is where a previous attempt stopped (it may
+ * be minutes or days old, and a different session); each retried request starts
+ * at that byte, so nothing already paid for is fetched twice.
+ */
+function noop() {}
+
+async function fetchResumable(client, blobId, row, { onProgress = noop } = {}) {
+  const parts = [];
+  let cursor = 0;
+  if (row.partial && Number(row.partialBytes) > 0) {
+    parts.push(row.partial);
+    cursor = Number(row.partialBytes);
+  }
+  let lastError = null;
+  for (let attempt = 0; attempt < RESUME_ATTEMPTS; attempt++) {
+    try {
+      await client.fetchMediaBytes(blobId, {
+        start: cursor,
+        onChunk: (bytes) => {
+          parts.push(new Blob([bytes]));
+          cursor += bytes.length;
+        },
+        onProgress: (got, total) => {
+          onProgress(got, total);              // the viewer's bar, live
+          const p = total ? Math.min(1, got / total) : 0;
+          // throttled to ~2 % steps: an IDB write per 64 KB chunk would be a
+          // thousand writes for one file, and the bar cannot show the difference
+          if (Math.abs((row.progress ?? 0) - p) >= 0.02 || p >= 1) {
+            row.progress = p;
+            updateMedia(row.id, { progress: p }).catch(() => {});
+          }
+        },
+      });
+      const buf = await new Blob(parts).arrayBuffer();
+      return new Uint8Array(buf);
+    } catch (err) {
+      lastError = err;
+      // unrecoverable by definition: retrying a fetch of bytes that no longer
+      // exist, or of bytes that fail the digest, only wastes the user's data
+      if (err?.code === 'unknown_media' || err?.code === 'no_thumb' || err?.code === 'media_tampered'
+        || err?.code === 'upload_incomplete' || err?.status === 404) throw err;
+      // keep what arrived, then back off and continue from the new offset
+      await updateMedia(row.id, { partial: new Blob(parts), partialBytes: cursor, progress: row.progress ?? 0 }).catch(() => {});
+      if (attempt < RESUME_ATTEMPTS - 1) await sleep(1000 * (attempt + 1));
+    }
+  }
+  throw lastError ?? new Error('download failed');
 }
 
 /** Apply the receive policy to one fresh record. */

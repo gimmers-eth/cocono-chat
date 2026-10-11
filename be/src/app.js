@@ -10,6 +10,7 @@ import appRoutes from './routes/app-routes/index.js';
 import { resolveAppName, resolveBuild } from './routes/app-routes/appInfo.js';
 import { resetLimitsCache } from './lib/limits.js';
 import wsRoutes from './routes/ws-routes/index.js';
+import { createMediaStore } from './lib/mediaStore.js';
 
 // M5 fix: the enroll-status URL carries an unguessable capability and the
 // /ws upgrade URL carries the JWT — keep both out of the logs.
@@ -141,6 +142,9 @@ app.addHook('onSend', async (request, reply, payload) => {
     // SEND; the ws layer registers recipients on it and the ack route
     // deletes it once every device has download-or-declined (lib/media.js)
     media: mongo.db.collection('media'),
+    // the BYTES of those docs live here: inline under a size threshold, GridFS
+    // above it (a Mongo document cannot hold 100 MB) — see lib/mediaStore.js
+    mediaStore: createMediaStore({ db: mongo.db, config }),
     // share-link attribution (created/seen edges) + the durable
     // "has messaged" edges the God View graph draws — see lib/shares.js
     shares: mongo.db.collection('shares'),

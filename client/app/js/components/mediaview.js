@@ -325,8 +325,18 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
       if (row.thumb && row.thumb.size) video.poster = objectUrl(row.thumb, 'viewer');
       const play = btn('viewer-toggle', 'mediaPlay', 'Play', 'Play this video');
       play.addEventListener('click', () => {
-        if (video.paused) video.play().catch(() => status('This video could not be played here.'));
-        else video.pause();
+        if (video.paused) {
+          video.play().catch(() => {
+            // Named, because 'could not be played here' is a dead end and this
+            // one has a way out: a phone recording is very often HEVC/.mov,
+            // which Safari plays and Chromium on the same machine may not. The
+            // file is intact — it is this element that cannot decode it, so
+            // Save-to-device and open it in a video app is the honest answer
+            // until we transcode on the way up (WebCodecs + an mp4 muxer: a
+            // dependency decision, not a bug fix).
+            status('This browser cannot decode that video (phone cameras often record HEVC/.mov). It is downloaded intact — Save to device and open it in your video app.', true);
+          });
+        } else video.pause();
       });
       video.addEventListener('play', () => play.replaceChildren(iconEl('mediaPause'), document.createTextNode(' Pause')));
       video.addEventListener('pause', () => play.replaceChildren(iconEl('mediaPlay'), document.createTextNode(' Play')));
@@ -405,7 +415,19 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
     dl.addEventListener('click', async () => {
       dl.disabled = true;
       status('Downloading…');
-      const res = await downloadMedia(client, row);
+      // Percentages, not a spinner: at 100 MB on mobile data 'downloading' for
+      // four minutes with no number is indistinguishable from a hang. Throttled
+      // to whole percents because status() is a text node, not a bar.
+      let lastPct = -1;
+      const res = await downloadMedia(client, row, {
+        onProgress: (got, total) => {
+          const pct = total ? Math.floor((got / total) * 100) : 0;
+          if (pct !== lastPct) {
+            lastPct = pct;
+            status(total ? `Downloading ${pct}% (${formatSize(got)} of ${formatSize(total)})` : `Downloading ${formatSize(got)}…`);
+          }
+        },
+      });
       status(res.ok ? 'Downloaded ✓' : res.state === 'expired' ? 'No longer available on the server.' : 'Download failed — try again later.', !res.ok);
       onChange?.(res.ok ? { ...row, state: 'stored' } : { ...row, state: res.state });
     });

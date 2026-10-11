@@ -125,10 +125,17 @@ test('media: image send → receive → download → ack → server blob deleted
   assert.ok(doc, 'the blob exists');
   assert.equal(doc.kind, 'image');
   assert.equal(doc.ctSize, PNG.length + 28);
-  const stored = bytesOf(doc.blob);
-  assert.notDeepEqual([...stored.subarray(0, 8)], [...PNG], 'no plaintext on the server');
   assert.equal(doc.sha256, sent.media.sha256);
-  assert.equal(await sha(stored), doc.sha256, 'the stored digest is of the CIPHERTEXT');
+  if (typeof doc.blob === 'string') {
+    // the streamed upload path always lands in GridFS (inlining it would mean
+    // buffering the very thing we stream to avoid)
+    assert.match(doc.blob, /^fs:/, 'stored by reference');
+    assert.ok((await srv.mongo.db.collection('media.chunks').countDocuments({})) > 0);
+  } else {
+    const stored = bytesOf(doc.blob);
+    assert.notDeepEqual([...stored.subarray(0, 8)], [...PNG], 'no plaintext on the server');
+    assert.equal(await sha(stored), doc.sha256, 'the stored digest is of the CIPHERTEXT');
+  }
   assert.deepEqual(doc.pending, [{ ul: bobName.toLowerCase(), dv: bob.deviceId }],
     'the addressed device owes an ack');
   // download: verified against the sender's digest, then decrypted
@@ -209,9 +216,11 @@ test('media: a digest mismatch is surfaced, never silently accepted', async (t) 
   await waitForDevice(srv, sent.media.id, bobName);
   // a lying server (here: a stubbed fetch) must not be able to hand back
   // different bytes without the client noticing
-  const real = bob.api.downloadMediaRaw.bind(bob.api);
-  bob.api.downloadMediaRaw = async (token, id) => {
-    const bytes = await real(token, id);
+  // the lying-server case: tamper with the CIPHERTEXT as it arrives (the SDK's
+  // raw-range call is the seam)
+  const real = bob.api.downloadMediaRange.bind(bob.api);
+  bob.api.downloadMediaRange = async (token, id, opts) => {
+    const bytes = await real(token, id, opts);
     bytes[40] ^= 0xff;
     return bytes;
   };
@@ -312,8 +321,10 @@ test('media: sendMedia uploads before any envelope — a failed upload sends not
   await bob.register(bobName);
   await Promise.all([waitOpen((alice.connect(), alice)), waitOpen((bob.connect(), bob))]);
 
-  const real = alice.api.uploadMedia.bind(alice.api);
-  alice.api.uploadMedia = async () => { throw new CoconoApiError(413, 'media_quota', 'Storage quota reached'); };
+  // createMedia is the first wire call the SDK makes; refusing it must mean no
+  // envelope was ever sent
+  const real = alice.api.createMedia.bind(alice.api);
+  alice.api.createMedia = async () => { throw new CoconoApiError(413, 'media_quota', 'Storage quota reached'); };
   const sawAck = [];
   alice.on('ack', (a) => sawAck.push(a));
   await assert.rejects(
@@ -323,7 +334,7 @@ test('media: sendMedia uploads before any envelope — a failed upload sends not
   await sleep(300);
   assert.equal(sawAck.length, 0, 'nothing went out when the upload failed');
   assert.equal(await srv.mongo.db.collection('messages').countDocuments({}), 0);
-  alice.api.uploadMedia = real;
+  alice.api.createMedia = real;
   alice.disconnect();
   bob.disconnect();
 });

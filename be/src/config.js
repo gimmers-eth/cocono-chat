@@ -265,10 +265,20 @@ export const config = {
   // it cannot validate mime/magic bytes and must instead be stingy about
   // SIZE: caps + a per-account quota + retention sweeps are all part of the
   // same PR as the upload route (unbounded blob storage is a P0-class DoS).
-  mediaMaxBytes: numOf(env.MEDIA_MAX_BYTES, 10 * 1024 * 1024),
+  // 100 MB blobs, and three consequences of that number:
+  //   * a Mongo document caps at 16 MB, so anything over mediaInlineMaxBytes
+  //     lives in GridFS instead of the doc;
+  //   * base64 inflates by a third, so a 100 MB file would be a 133 MB JSON
+  //     request body — over mediaJsonMaxBytes the client must STREAM the raw
+  //     bytes (PUT /api/media/:id/blob) instead of posting JSON;
+  //   * the shelf has to scale with the item, so the quota default went from
+  //     100 MB (one file!) to 500 MB. All three are env-tunable.
+  mediaMaxBytes: numOf(env.MEDIA_MAX_BYTES, 100 * 1024 * 1024),
+  mediaInlineMaxBytes: numOf(env.MEDIA_INLINE_MAX_BYTES, 8 * 1024 * 1024),
+  mediaJsonMaxBytes: numOf(env.MEDIA_JSON_MAX_BYTES, 8 * 1024 * 1024),
   mediaThumbMaxBytes: numOf(env.MEDIA_THUMB_MAX_BYTES, 64 * 1024),
   // per-account server-held bytes (sum of ciphertext sizes of owned docs)
-  mediaQuotaMb: numOf(env.MEDIA_QUOTA_MB, 100),
+  mediaQuotaMb: numOf(env.MEDIA_QUOTA_MB, 500),
   // un-acked blobs are swept after this many days (and never-sent uploads
   // — orphan docs with an empty `devices` list — after 24 h)
   mediaRetentionDays: numOf(env.MEDIA_RETENTION_DAYS, 7),

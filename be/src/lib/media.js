@@ -40,6 +40,13 @@ export const MEDIA_KINDS = ['image', 'video', 'file'];
 const devKey = (ul, dv) => ({ ul, dv });
 const sameDev = (a, b) => a?.ul === b?.ul && a?.dv === b?.dv;
 
+/** Delete a blob doc AND its stored bytes (inline fields or GridFS chunks). */
+export async function deleteBlob({ media, store }, doc) {
+  if (!doc?._id) return;
+  if (store) await store.removeParts(doc).catch(() => {});
+  await media.deleteOne({ _id: doc._id });
+}
+
 /** Structural gate for the plaintext attachment descriptor in `m.att`. */
 export function attProblem(att, config) {
   if (att === undefined) return null; // optional field
@@ -74,7 +81,14 @@ export async function registerDevice(media, { id, ul, dv }) {
  *   (authorisation is exactly (ul,dv) ∈ devices: never username-only, so a
  *   second device must have received its own envelope copy to count).
  */
-export async function ackDevice(media, { id, ul, dv }) {
+/**
+ * `deps` is `{ media, store }`: the collection, and (optionally) the byte
+ * store. A doc that dies must take its GridFS chunks with it — an acknowledged
+ * 100 MB video whose document is gone but whose chunks remain is worse than no
+ * deletion at all, because nothing will ever look for them again.
+ */
+export async function ackDevice(deps, { id, ul, dv }) {
+  const { media, store } = deps ?? {};
   const doc = await media.findOne({ _id: id }, { projection: { devices: 1, pending: 1, reported: 1 } });
   if (!doc) return { ok: true, deleted: true }; // already swept: the ack is satisfied
   if (!(doc.devices ?? []).some((d) => sameDev(d, { ul, dv }))) return { error: 'no_such_device' };
@@ -82,9 +96,9 @@ export async function ackDevice(media, { id, ul, dv }) {
     return { ok: true, deleted: doc.pending?.length === 0 && doc.reported !== true };
   }
   await media.updateOne({ _id: id }, { $pull: { pending: devKey(ul, dv) } });
-  const after = await media.findOne({ _id: id }, { projection: { pending: 1, reported: 1 } });
+  const after = await media.findOne({ _id: id }, { projection: { pending: 1, reported: 1, blob: 1, thumb: 1 } });
   if (after && (after.pending ?? []).length === 0 && after.reported !== true) {
-    await media.deleteOne({ _id: id });
+    await deleteBlob({ media, store }, after);
     return { ok: true, deleted: true };
   }
   return { ok: true, deleted: false };
@@ -105,24 +119,32 @@ export function mayAccess(doc, { ul, dv, ownerUl, ownerFd }) {
  *    after MEDIA_ORPHAN_MAX_SEC,
  * both excluding report-pinned docs. Returns counts (logged + asserted).
  */
-export async function sweepMedia(media, config, { now = Date.now() } = {}) {
+export async function sweepMedia(deps, config, { now = Date.now() } = {}) {
+  const { media, store } = deps ?? {};
   const stale = new Date(now - config.mediaRetentionDays * 24 * 3600 * 1000);
   const orphaned = new Date(now - config.mediaOrphanMaxSec * 1000);
-  const { deletedCount: expired } = await media.deleteMany({
-    ts: { $lte: stale }, reported: { $ne: true },
-  });
-  const { deletedCount: orphans } = await media.deleteMany({
-    ts: { $lte: orphaned }, devices: { $size: 0 }, reported: { $ne: true },
-  });
-  return { expired, orphans };
+  const gone = { $ne: true };
+  const expiredDocs = await media.find(
+    { ts: { $lte: stale }, reported: gone },
+    { projection: { _id: 1, blob: 1, thumb: 1 } }).toArray();
+  const orphanDocs = await media.find(
+    // an upload the client never finished (or never sent a message for): the
+    // doc holds a reservation and, at 100 MB, possibly real chunks
+    { $or: [{ ts: { $lte: orphaned }, devices: { $size: 0 } }, { ts: { $lte: orphaned }, upload: 'pending' }] },
+    { projection: { _id: 1, blob: 1, thumb: 1 } }).toArray();
+  const ids = new Set(expiredDocs.map((d) => String(d._id)));
+  for (const d of expiredDocs) await deleteBlob({ media, store }, d);
+  const orphans = orphanDocs.filter((d) => !ids.has(String(d._id)));
+  for (const d of orphans) await deleteBlob({ media, store }, d);
+  return { expired: expiredDocs.length, orphans: orphans.length };
 }
 
 /** Boot the hourly sweeper (single-process assumption, like the message
  *  TTL's Mongo monitor). Returns a stop() for graceful shutdown. */
-export function startMediaSweeper({ media, config, log, everyMs = 3600_000 }) {
+export function startMediaSweeper({ media, store, config, log, everyMs = 3600_000 }) {
   const run = async () => {
     try {
-      const { expired, orphans } = await sweepMedia(media, config);
+      const { expired, orphans } = await sweepMedia({ media, store }, config);
       if (expired || orphans) log?.info?.(`[media] swept ${expired} expired, ${orphans} orphan uploads`);
     } catch (err) {
       log?.warn?.(`[media] sweep failed: ${err?.message ?? err}`);

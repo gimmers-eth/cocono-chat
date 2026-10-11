@@ -21,7 +21,7 @@ without changing its guarantees.
 | 2 | `+` button left of the message input → context menu above the composer: send image/video or file | §6.2 |
 | 3 | Media renders in bubbles; tapping opens the message modal with extra controls (image: blur/unblur, play/pause for animations; video: blur/unblur, play/pause, mute/unmute; file: download) | §6.3–6.4 |
 | 4 | Sender keeps a local copy; images/files tabs mark sent vs received by border colour; images = wall, files = searchable list | §6.1, §6.5 |
-| 5 | Received media also lands in the files/images sections. Stored ONCE on the server, encrypted by the sender; decryption key travels as a special E2EE message to each recipient device. Images resized client-side to a sensible size; files ≤ 10 MB | §3, §4, §5 |
+| 5 | Received media also lands in the files/images sections. Stored ONCE on the server, encrypted by the sender; decryption key travels as a special E2EE message to each recipient device. Images resized client-side to a sensible size; files ≤ ~~10 MB~~ **100 MB** (raised after the first device test — see §4.1/§4.3: streaming uploads, GridFS above 8 MB, `Range` reads for resume; the caps are advertised by `/api/app-info`) | §3, §4, §5 |
 | 6 | Receiver can download a file, or delete it before downloading (delete = mark received on the device). Images auto-download | §4.4, §6.6 |
 | 7 | Auto-downloaded images from users NOT identity-verified (the admin `verified` flag, not the trust ladder) are blurred by default; others unblurred. Tapping opens the viewer with a Blur/Unblur toggle | §6.4, §6.7 |
 | 8 | When the media has been downloaded (or declined) on ALL recipient devices, delete it from the server | §4.3 |
@@ -282,7 +282,11 @@ Everything this feature stores gets a time bound; nothing lives forever:
 | Pulled message copies | server `messages` | `MSG_RETENTION_SEC` (existing, 30 d) | existing TTL (resync window) |
 | Media blobs not yet acked by all devices | server `media` | `MEDIA_RETENTION_DAYS` (default 7) | sweeper (§4.3); orphans (never-sent uploads) after 24 h |
 | Media blobs acked by all devices | server `media` | immediate | delete-on-empty-pending (§4.3), `reported` docs pinned (§7) |
-| Decrypted media bytes on a device | client IDB `media` | `MEDIA_LOCAL_RETENTION_DAYS` (default 7, settings drawer) | **IMPLEMENTED with one correction:** the window is measured from `storedAt` (when the bytes ARRIVED on this device), not from `ts`. Reading `ts` made manual downloads meaningless — open a three-week-old chat, Download a file, and the next pass drops the bytes the user just waited for, possibly for good. Prune job at app boot + daily interval: for `state:'stored'` records older than the window and `keep !== true`, drop `data` (and `thumb` only for files — images/videos KEEP the thumb), set `state:'pruned'`. Records/transcript rows stay (name, size, date, direction); viewer shows thumb-or-icon + "Removed from this device". `keep` is toggled by a **Keep** button in the media modal (§6.4) — DESIGN.md's "mark to keep long term". **IMPLEMENTED with a second correction:** the plan's "re-download is impossible" is only knowable by the SERVER, so a pruned row must not claim it — it offers **Download again** and takes the 404 as the answer when the copy really is gone (`pruned` ≠ `expired`: one is this device letting bytes go, the other is proof nothing is left). The confirm copy that survives is the true one: the server usually HAS deleted it, because downloading is what acks it. |
+| Decrypted media bytes on a device | client IDB `media` | `MEDIA_LOCAL_RETENTION_DAYS` (default 7, settings drawer) | **IMPLEMENTED with one correction:** the window is measured from `storedAt` (when the bytes ARRIVED on this device), not from `ts`. Reading `ts` made manual downloads meaningless — open a three-week-old chat, Download a file, and the next pass drops the bytes the user just waited for, possibly for good. Prune job at app boot + daily interval: for `state:'stored'` records older than the window and `keep !== true`, drop `data` (and `thumb` only for files — images/videos KEEP the thumb), set `state:'pruned'`. Records/transcript rows stay (name, size, date, direction); viewer shows thumb-or-icon + "Removed from this device". ~~`keep` is toggled by a Keep button~~ **REMOVED**: a pin nobody could see,
+clean or name was worse than a rule. The record is now released when the window
+passes **or** when `savedAt` proves the phone already owns a copy (see
+MESSAGES §2.13a), and `prunedWhy` records which, so "Saved to your phone" and
+"Removed from this device" are never confused. **IMPLEMENTED with a second correction:** the plan's "re-download is impossible" is only knowable by the SERVER, so a pruned row must not claim it — it offers **Download again** and takes the 404 as the answer when the copy really is gone (`pruned` ≠ `expired`: one is this device letting bytes go, the other is proof nothing is left). The confirm copy that survives is the true one: the server usually HAS deleted it, because downloading is what acks it. |
 | Text transcripts on a device | client IDB `messages` | none (local user history) | deliberately NOT pruned locally — the server's copies are; the device transcript is the user's own data (clear-chat remains manual) |
 
 ### 4.4 Config (`be/src/config.js` + `.env.example`)
@@ -625,8 +629,11 @@ hands the server plaintext transcript. Extend it:
   `docs/features/outgoing-multidevice-sync.md` §1).
 - Once all devices ack, the blob is gone: resync/reinstall cannot restore
   media (`expired` placeholder). This mirrors message retention semantics.
-- No streaming/range support — ≤10 MB blobs are downloaded whole. Fine for
-  the cap; revisit with GridFS + Range if the cap ever grows.
+- ~~No streaming/range support~~ **CLOSED with the 100 MB raise**: uploads are
+  raw streamed PUTs (cap and digest enforced in flight, partial torn down on
+  failure), downloads answer `Range`, and the app persists the partial
+  ciphertext so an interrupted fetch resumes at its offset rather than paying
+  twice. A `video`/`file` therefore no longer has to fit in one attempt.
 - Video transcoding/compression is client-out-of-scope; a 10 MB cap on video
   is short — accepted for M4 (DESIGN.md keeps richer media post-MVP).
 

@@ -11,6 +11,7 @@ import { connectMongo, connectRedis } from './db.js';
 import { rateLimit } from './lib/rateLimit.js';
 import { registerSecurityHeaders } from './routes/shared.js';
 import adminRoutes from './routes/admin-routes/index.js';
+import { createMediaStore } from './lib/mediaStore.js';
 
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1']);
 
@@ -81,6 +82,7 @@ await app.register(async function adminScope(instance) {
     graph: mongo.db.collection('graph'),
     // media blobs — account deletion purges owned uploads (lib/accountState)
     media: mongo.db.collection('media'),
+    mediaStore: createMediaStore({ db: mongo.db, config }),
   });
 });
 

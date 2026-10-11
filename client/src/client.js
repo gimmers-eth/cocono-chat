@@ -965,7 +965,7 @@ export class CoconoClient extends Emitter {
    *   the app stores locally (its own copy — the sender keeps it BEFORE the
    *   upload runs, which is what makes a failed send still a local copy).
    */
-  async sendMedia(username, { kind = 'file', bytes, thumb = null, name = '', mime = '', w = null, h = null, dur = null, animated = false } = {}, { sync = true, localId: providedId = null } = {}) {
+  async sendMedia(username, { kind = 'file', bytes, thumb = null, name = '', mime = '', w = null, h = null, dur = null, animated = false } = {}, { sync = true, localId: providedId = null, onProgress = null } = {}) {
     const identity = await this.#requireIdentity();
     this.#requireToken();
     if (!this.#transport || this.#transport.state !== 'open') {
@@ -999,10 +999,20 @@ export class CoconoClient extends Emitter {
     //    exists, so nothing is ever half-sent (a message pointing at a blob
     //    that was never stored). A failure AFTER this point leaves an orphan
     //    upload the server sweeper reclaims.
-    const { id } = await this.api.uploadMedia(this.token, {
-      kind, blob: ct, ...(thumbCt ? { thumb: thumbCt } : {}), sha256,
+    //
+    // STREAMED, never base64 JSON: a 100 MB file would otherwise be a 133 MB
+    // request body buffered in memory (and the server refuses it with
+    // `use_stream_upload`), and a stream is the only shape that can report
+    // upload progress — which at this size is the difference between a working
+    // upload and one the user assumes is hung.
+    const { id } = await this.api.createMedia(this.token, {
+      kind, size: ct.length, sha256, thumbSize: thumbCt?.length ?? 0,
     });
     media.id = id;
+    await this.api.putMediaPart(this.token, id, 'blob', ct, {
+      onProgress: typeof onProgress === 'function' ? (got, total) => onProgress(got, total) : undefined,
+    });
+    if (thumbCt) await this.api.putMediaPart(this.token, id, 'thumb', thumbCt);
     const payload = JSON.stringify({ media });
     const att = { id, kind, size: ct.length }; // server-visible: ciphertext size
 
@@ -1072,38 +1082,62 @@ export class CoconoClient extends Emitter {
   /**
    * Fetch a blob's CIPHERTEXT, verify it against the sender-supplied digest,
    * decrypt, and hand back Blobs. Integrity first: a mismatch is surfaced as
-   * `media_tampered` — a lying server must be VISIBLE, never silently
-   * accepted (and the caller must then NOT ack `true`).
+   * `media_tampered` — a lying server must be VISIBLE, never silently accepted
+   * (and the caller must then NOT ack `true`).
+   *
+   * The convenience path: whole file, no resume. A big download on a phone is
+   * `fetchMediaBytes` + `decryptMediaBytes` driven by the app, which is the
+   * only place the partial bytes can be persisted across a reconnect.
    * @returns {Promise<{data: Blob, thumb: Blob|null}>}
    */
-  async downloadMedia(id, media = {}) {
+  async downloadMedia(id, media = {}, { onProgress } = {}) {
     this.#requireToken();
     const { key, sha256, thumbIv } = media;
-    // Every Blob is built WITH its type. A typeless Blob URL is fine for an
-    // <img> (which sniffs) and is REFUSED by a <video> on WebKit/Blink — the
-    // engine answers NotSupportedError to play(), which surfaced as 'This video
-    // could not be played here' on both ends of a working download.
-    const videoType = String(media.mime ?? '').trim() || 'application/octet-stream';
     if (!key || !sha256) throw new CoconoError('downloadMedia needs the media descriptor (key + sha256)', 'no_media_key');
-    const fileKey = await c.importFileKey(key);
-    const ct = await this.api.downloadMediaRaw(this.token, id);
-    const got = await c.sha256B64u(ct);
-    if (got !== sha256) {
-      throw new CoconoError(`Downloaded blob ${id} does not match its digest`, 'media_tampered');
-    }
-    const plain = await c.decryptBytes(fileKey, ct);
+    const ct = await this.fetchMediaBytes(id, { onProgress: onProgress && ((got, total) => onProgress(got, total)) });
+    const data = await this.decryptMediaBytes(ct, media);
     let thumb = null;
     if (thumbIv) {
       // the thumbnail has no digest of its own (sha256 covers the main blob);
-      // AES-GCM's tag is what authenticates it
-      const t = await this.api.downloadMediaRaw(this.token, id, { part: 'thumb' }).catch(() => null);
-      if (t && t.length) {
-        // a poster is whatever the SENDER encoded it as (media.js always
-        // makes JPEG thumbs), never the video's own mime
-        try { thumb = new Blob([await c.decryptBytes(fileKey, t)], { type: 'image/jpeg' }); } catch { thumb = null; }
-      }
+      // AES-GCM's tag is what authenticates it — and a poster that will not
+      // decode is a missing preview, never a failed download
+      try {
+        const t = await this.api.downloadMediaRange(this.token, id, { part: 'thumb' });
+        thumb = new Blob([await c.decryptBytes(await c.importFileKey(key), t)], { type: 'image/jpeg' });
+      } catch { thumb = null; }
     }
-    return { data: new Blob([plain], { type: videoType }), thumb };
+    return { data, thumb };
+  }
+
+  /**
+   * Raw CIPHERTEXT bytes, optionally from an offset (HTTP Range), with
+   * progress and per-chunk callbacks.
+   *
+   * `onChunk` is what makes a resumable download possible: the app appends
+   * every chunk to a Blob it holds, so when the connection drops mid-100 MB
+   * the bytes it already paid for are not thrown away — it persists them and
+   * comes back with `start`. Only the SDK sees the stream; only the app can
+   * decide where the partial lives.
+   */
+  async fetchMediaBytes(id, { start = 0, part = null, onProgress, onChunk } = {}) {
+    this.#requireToken();
+    return this.api.downloadMediaRange(this.token, id, { part, start, onProgress, onChunk });
+  }
+
+  /** Verify (sha256 of the ciphertext) then decrypt. The two together are the
+   *  whole trust story of a download, so they live in one call. */
+  async decryptMediaBytes(ct, media = {}) {
+    const { key, sha256, mime } = media;
+    if (!key) throw new CoconoError('decryptMediaBytes needs the media descriptor (key)', 'no_media_key');
+    if (sha256) {
+      const got = await c.sha256B64u(ct);
+      if (got !== sha256) throw new CoconoError(`Downloaded blob does not match its digest`, 'media_tampered');
+    }
+    const plain = await c.decryptBytes(await c.importFileKey(key), ct instanceof Uint8Array ? ct : new Uint8Array(ct));
+    // TYPED, deliberately: an <img> sniffs its content and a <video> does not —
+    // a typeless Blob URL is refused by WebKit/Blink, which showed up as
+    // 'this video could not be played here' on a perfectly good download.
+    return new Blob([plain], { type: String(mime ?? '').trim() || 'application/octet-stream' });
   }
 
   /** Poster/preview bytes ONLY — a video thumbnail without pulling the blob. */

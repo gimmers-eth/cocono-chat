@@ -1,7 +1,7 @@
 // Thin REST client over fetch. Every server interaction goes through here so
 // baseUrl, errors and logging are handled in one place.
 
-import { CoconoApiError } from './errors.js';
+import { CoconoApiError, CoconoError } from './errors.js';
 import { b64uEncode } from './encoding.js';
 
 export class Api {
@@ -217,7 +217,7 @@ export class Api {
 
   // --- media blobs (milestone 4) ---
   // Bytes move over REST (WS frames are capped at 64 KB); the message that
-  // references them still rides the WS. All three calls deal in CIPHERTEXT —
+  // references them still rides the WS. All of these deal in CIPHERTEXT —
   // the key never appears here, it travels inside the recipient's envelope.
   uploadMedia(token, { kind, blob, thumb, sha256 }) {
     return this.#request('/api/media', {
@@ -239,6 +239,96 @@ export class Api {
       `/api/media/${encodeURIComponent(id)}${part ? `?part=${encodeURIComponent(part)}` : ''}`,
       { token },
     );
+  }
+
+  // Register a blob WITHOUT its bytes, then stream them in with putMediaPart.
+  // This is how a 100 MB file is uploaded: base64 would make it a 133 MB JSON
+  // body (the server refuses that with `use_stream_upload`), and a raw stream
+  // is also the only shape that can report progress and cut an over-cap upload
+  // off mid-flight instead of buffering it first.
+  createMedia(token, { kind, size, sha256, thumbSize = 0 }) {
+    return this.#request('/api/media', {
+      method: 'POST', token,
+      body: { kind, size, sha256, ...(thumbSize ? { thumbSize } : {}) },
+    });
+  }
+
+  // One part of a deferred upload (blob | thumb) as raw bytes.
+  //
+  // Progress needs `XMLHttpRequest.upload.onprogress`: fetch() cannot report
+  // upload progress in Safari at all, and an upload you cannot show progress
+  // for is an upload a phone user will assume is broken.
+  putMediaPart(token, id, part, bytes, { onProgress, signal } = {}) {
+    const url = `${this.baseUrl}/api/media/${encodeURIComponent(id)}/${part}`;
+    return new Promise((resolve, reject) => {
+      if (typeof XMLHttpRequest === 'undefined') {
+        // non-browser host (Node tests, CLI): fetch has no upload progress,
+        // which is irrelevant there
+        const body = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+        this.fetch(url, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/octet-stream', authorization: `Bearer ${token}` },
+          body,
+          ...(signal ? { signal } : {}),
+        }).then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) { reject(new CoconoApiError(res.status, data?.error, data?.message)); return; }
+          resolve(data);
+        }, reject);
+        return;
+      }
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', url);
+      xhr.setRequestHeader('authorization', `Bearer ${token}`);
+      xhr.setRequestHeader('content-type', 'application/octet-stream');
+      xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded, e.total); };
+      xhr.onload = () => {
+        let data = {};
+        try { data = JSON.parse(xhr.responseText || '{}'); } catch { /* non-JSON error body */ }
+        if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+        else reject(new CoconoApiError(xhr.status, data?.error, data?.message));
+      };
+      xhr.onerror = () => reject(new CoconoError('Upload failed — the connection dropped.', 'upload_failed'));
+      xhr.onabort = () => reject(new Error('aborted'));
+      if (signal) signal.addEventListener('abort', () => xhr.abort(), { once: true });
+      xhr.send(bytes instanceof Uint8Array || bytes instanceof Blob ? bytes : new Uint8Array(bytes));
+    });
+  }
+
+  // A byte-range read (the resume half of a big download) with counted
+  // arrival. `start` is an offset into the CIPHERTEXT.
+  async downloadMediaRange(token, id, { part = null, start = 0, onProgress, onChunk } = {}) {
+    const qs = part ? `?part=${encodeURIComponent(part)}` : '';
+    const headers = { authorization: `Bearer ${token}` };
+    if (start > 0) headers.range = `bytes=${start}-`;
+    const res = await this.fetch(`${this.baseUrl}/api/media/${encodeURIComponent(id)}${qs}`, { headers });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new CoconoApiError(res.status, data?.error, data?.message);
+    }
+    const totalHeader = Number(res.headers.get('content-length') ?? 0) + (start > 0 ? start : 0);
+    if (!res.body || typeof res.body.getReader !== 'function') {
+      const buf = new Uint8Array(await res.arrayBuffer());
+      onProgress?.(start + buf.length, totalHeader);
+      return buf;
+    }
+    // Counted as it arrives, so a 100 MB fetch reports real progress AND can
+    // be abandoned with what it has so far (that's the resume handle).
+    const reader = res.body.getReader();
+    const chunks = [];
+    let got = 0;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      got += value.length;
+      try { onChunk?.(value, start + got, totalHeader); } catch { /* a bad progress hook must not kill a download */ }
+      onProgress?.(start + got, totalHeader);
+    }
+    const out = new Uint8Array(got);
+    let at = 0;
+    for (const c of chunks) { out.set(c, at); at += c.length; }
+    return out;
   }
 
   ackMedia(token, id, downloaded) {

@@ -53,15 +53,23 @@ test('media: names are untrusted display text from the sender', () => {
 
 test('media: the size gate says no in the units the user thinks in', () => {
   assert.equal(assertWithinLimits('file', 10), undefined);
+  // the number in the message is the SERVER's limit (adopted at boot), not a
+  // string we duplicated — so the test reads the same object the code does
+  assert.equal(M.mediaLimits().maxBytes, MEDIA_MAX_BYTES);
   assert.throws(() => assertWithinLimits('file', MEDIA_MAX_BYTES + 1), (err) => {
     assert.ok(err instanceof MediaReject);
-    assert.match(err.message, /10\.0 MB/);
+    assert.match(err.message, /100\.0 MB/);
     return true;
   });
   assert.throws(() => assertWithinLimits('image', 0), /empty/);
   assert.equal(formatSize(512), '512 B');
   assert.equal(formatSize(2048), '2.0 KB');
-  assert.equal(formatSize(MEDIA_MAX_BYTES), '10.0 MB');
+  assert.equal(formatSize(MEDIA_MAX_BYTES), '100.0 MB');
+  // and a server answer overrides the baked default rather than adding to it
+  M.setMediaLimits({ maxBytes: 2048, quotaMb: 7 });
+  assert.equal(M.mediaLimits().maxBytes, 2048, 'the server wins');
+  assert.equal(M.mediaLimits().quotaMb, 7);
+  M.setMediaLimits({ maxBytes: MEDIA_MAX_BYTES });
   assert.equal(durationText(75.4), '1:15');
 });
 

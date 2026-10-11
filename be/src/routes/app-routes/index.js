@@ -13,7 +13,7 @@ import appInfo from './appInfo.js';
 import shares from './shares.js';
 
 // All public app routes. ctx = { users, redis, config, diagnostics, reports,
-// settings, media }, passed through from buildApp().
+// settings, media, mediaStore }, passed through from buildApp().
 export default async function appRoutes(app, ctx) {
   await app.register(signup, ctx);
   await app.register(auth, ctx);

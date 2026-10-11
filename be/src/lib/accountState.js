@@ -82,7 +82,7 @@ export async function purgeFriendReferences(users, deletedUl, redis) {
 //     their own `ref.by` string — that is the child's origin story, and the
 //     God View renders the missing parent as a ghost node.
 //   * the account doc itself last (the reverse scans read from it)
-export async function deleteAccountFully({ users, profiles, idDocs, messages, diagnostics, settings, redis, shares, contacts, media }, ul) {
+export async function deleteAccountFully({ users, profiles, idDocs, messages, diagnostics, settings, redis, shares, contacts, media, mediaStore }, ul) {
   await purgeFriendReferences(users, ul, redis);
   // admin-set limit overrides (per-user caps, device IP-flap budgets) are
   // keyed by USERNAME — the new owner of the name must start clean
@@ -112,7 +112,15 @@ export async function deleteAccountFully({ users, profiles, idDocs, messages, di
   // this account merely RECEIVED stay — they belong to the sender's quota and
   // die by their own ack/sweep rules (their envelope copies are deleted with
   // the messages above, so no device can ever fetch them again).
-  if (media) await media.deleteMany({ 'owner.ul': ul });
+  if (media) {
+    // drop the stored bytes too — at 100 MB a leaked GridFS file is the whole
+    // point of the deletion
+    if (mediaStore) {
+      const owned = await media.find({ 'owner.ul': ul }, { projection: { blob: 1, thumb: 1 } }).toArray();
+      for (const doc of owned) await mediaStore.removeParts(doc).catch(() => {});
+    }
+    await media.deleteMany({ 'owner.ul': ul });
+  }
   await cleanupAccountState(redis, ul);
   await users.deleteOne({ ul });
 }

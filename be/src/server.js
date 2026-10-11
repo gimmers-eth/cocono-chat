@@ -3,6 +3,7 @@ import { config } from './config.js';
 import { connectMongo, connectRedis } from './db.js';
 import { buildApp, defaultFeRoot, defaultSdkRoot } from './app.js';
 import { startMediaSweeper } from './lib/media.js';
+import { createMediaStore } from './lib/mediaStore.js';
 
 export async function start() {
   // H2 fix: refuse to serve with the dev default (or a too-short) JWT secret.
@@ -34,7 +35,9 @@ export async function start() {
   // the single-process assumption (same as the WS heartbeat above); the
   // message queue's own bounds are handled by Mongo's TTL index instead.
   const sweeper = startMediaSweeper({
-    media: mongo.db.collection('media'), config, log: app.log,
+    media: mongo.db.collection('media'),
+    store: createMediaStore({ db: mongo.db, config }),
+    config, log: app.log,
     everyMs: config.mediaSweepSec * 1000,
   });
 

@@ -375,8 +375,23 @@ Resulting guarantees (asserted in `be/test/multidev-repro.test.js`):
 
 A photo, video or file is **a message that references a blob**, not a blob in a
 frame. WS frames are capped at 64 KB, so the bytes move over REST
-(`POST /api/media`, `GET /api/media/:id[?part=thumb]`, `POST /api/media/:id/ack`
-— see [BE_TECH.md](./BE_TECH.md)) while the *message* rides this exact path.
+(`POST /api/media`, `PUT /api/media/:id/blob|/thumb`, `GET /api/media/:id`,
+`POST /api/media/:id/ack` — see [BE_TECH.md](./BE_TECH.md)) while the *message*
+rides this exact path.
+
+**100 MB, and the three things it forces.** The cap was raised from 10 MB, and
+a base64 JSON body of a 100 MB file is a 133 MB request, so the transport is
+now: `POST /api/media` with METADATA ONLY (`{kind, size, sha256, thumbSize?}`)
+→ `{id, stream:true}` → the ciphertext arrives as a raw `PUT` body, streamed,
+hashed and size-capped WHILE it flows (an over-cap upload is cut off mid-stream
+and its partial file is deleted — no half-blob is ever readable). Above
+`MEDIA_INLINE_MAX_BYTES` the bytes live in GridFS, since a Mongo document stops
+at 16 MB; small ones stay inline in the doc. `GET` answers `Range` (`206`,
+`Content-Range`, `Accept-Ranges`), which is what lets an interrupted fetch
+RESUME from the byte it stopped at instead of paying twice — and the caps are
+advertised by `/api/app-info.media` so the client never has a stale copy of a
+server number. The upload flow for small items (base64 JSON in one request) is
+still accepted, so nothing about a thumbnail-sized send changed.
 Delivery, ordering, idempotent retries, receipts, push gating, resync and
 offline replay therefore work untouched: a media message IS a message.
 

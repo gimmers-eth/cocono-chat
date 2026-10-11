@@ -27,8 +27,11 @@ src/
                    POST /api/devices/pending, POST /api/devices/approve,
                    GET /api/devices
       userKeys.js  GET /api/users/:username/keys (device public keys)
-      media.js     POST /api/media, GET /api/media/:id[?part=thumb],
-                   POST /api/media/:id/ack (milestone 4 blob transfer)
+      media.js     POST /api/media (base64 or metadata+streamed), PUT
+                   /api/media/:id/blob|/thumb, GET /api/media/:id[?part=thumb]
+                   (Range-aware), POST /api/media/:id/ack (M4 blob transfer)
+    lib/mediaStore.js media BYTES: inline under the doc limit, GridFS above it,
+                   and byte ranges out of either — callers never branch on which
     ws-routes/     WebSocket layer, registered by app.js
       index.js     /ws endpoint: JWT-at-upgrade auth, heartbeats, dispatch,
                    pub/sub wiring, one-live-connection-per-device
@@ -126,7 +129,12 @@ references it rides the normal queue; this is the blob locker.
   kind: 'image'|'video'|'file',
   ctSize, thumbCtSize,         // byte lengths of what is stored
   sha256,                      // digest of the ciphertext, VERIFIED on upload
-  blob: Binary,                // iv(12) ‖ ct ‖ tag(16) — unreadable server-side
+  upload: 'pending'|'ready',   // metadata registered but the bytes have not
+                               // arrived: no send may reference it, no GET
+                               // serves it (see handlers.js / the route)
+  blob: Binary | 'fs:<id>',    // iv(12) ‖ ct ‖ tag(16) — unreadable server-side,
+                               // and either inline in the doc or a GridFS
+                               // reference; readers go through lib/mediaStore.js
   thumb: Binary | null,        // client-made 256 px preview, same key, own IV
   devices: [ { ul, dv } ],     // authorised recipients (handleSend adds)
   pending: [ { ul, dv } ],     // …of those, the ones that have not acked
@@ -306,8 +314,9 @@ delivery, ordering, idempotency, receipts, push gating and resync are unchanged.
 
 | Method | Path | Purpose |
 | ------ | ---- | ------- |
-| POST | `/api/media` | `{ kind, blob, thumb?, sha256 }` (base64url ciphertext) → `{ id }`. Caps: `MEDIA_MAX_BYTES`, `MEDIA_THUMB_MAX_BYTES`, per-account `MEDIA_QUOTA_MB`; the claimed sha256 must match the bytes (a stored digest never lies) |
-| GET | `/api/media/:id` | the ciphertext, as `application/octet-stream` + `nosniff` (never a browser-renderable mime from our origin) with `x-cocono-kind` and `ETag = sha256`. `?part=thumb` returns just the encrypted poster (video previews without a 10 MB pull) and does NOT ack; a blob with no poster answers `404 no_thumb` — deliberately NOT `unknown_media`, because that code means "the payload is gone", which is the one reading that must never trigger an ack |
+| POST | `/api/media` | EITHER `{ kind, blob, thumb?, sha256 }` (base64url ciphertext, small — the body limit refuses it past `MEDIA_JSON_MAX_BYTES` with `use_stream_upload`) OR metadata only `{ kind, size, sha256, thumbSize? }` → `{ id, stream: true }`, reserving the quota on the claim. Either way the claimed sha256 must match the bytes: a stored digest never lies |
+| PUT | `/api/media/:id/blob`, `/api/media/:id/thumb` | the raw ciphertext stream (owner only, one shot each — a second PUT is `already_uploaded`). The cap is enforced DURING the stream and the digest is computed as it lands; overflow or mismatch tears the partial file back out, so a failed upload costs no quota and leaves no GridFS chunks |
+| GET | `/api/media/:id` | the ciphertext, as `application/octet-stream` + `nosniff` (never a browser-renderable mime from our origin) with `x-cocono-kind`, `ETag = sha256`, `Accept-Ranges: bytes` and `Content-Length`. **`Range: bytes=a-b` → 206 + `Content-Range`** (single range; unsatisfiable → 416), which is what makes a 100 MB fetch resumable instead of restartable. `?part=thumb` returns just the encrypted poster (video previews without pulling the payload) and does NOT ack; a blob with no poster answers `404 no_thumb` — deliberately NOT `unknown_media`, because that code means "the payload is gone", which is the one reading that must never trigger an ack. An upload the sender never finished answers 409 `upload_incomplete` rather than serving a ghost |
 | POST | `/api/media/:id/ack` | `{ downloaded: true\|false }` — the second is "delete it before I download it". Idempotent; authorisation is exactly `(account, device) ∈ devices` |
 
 The envelope gains one optional plaintext field `m.att = { id, kind, size }`
@@ -317,7 +326,10 @@ exactly the claimed kind/size (`unknown_attachment` / `invalid_envelope`) and
 the sender's own devices included, so a blob cannot vanish before every device
 that was promised it has answered.
 
-Config (see `.env.example`): `MEDIA_MAX_BYTES` (10 MiB),
+Config (see `.env.example`): `MEDIA_MAX_BYTES` (100 MiB),
+`MEDIA_INLINE_MAX_BYTES` (8 MiB — above it the bytes are in GridFS, because a
+Mongo document caps at 16 MB) and `MEDIA_JSON_MAX_BYTES` (8 MiB — above it a
+base64 body is refused and the client must stream),
 `MEDIA_THUMB_MAX_BYTES` (64 KiB), `MEDIA_QUOTA_MB` (100),
 `MEDIA_RETENTION_DAYS` (7), `MEDIA_ORPHAN_MAX_SEC` (86400),
 `MEDIA_SWEEP_SEC` (3600), `MEDIA_UP_IP_LIMIT`/`MEDIA_UP_ACCOUNT_LIMIT`,

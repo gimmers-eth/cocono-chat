@@ -29,6 +29,8 @@ const mk = (tag, cls, text) => {
 const STATUS = {
   pending:     { image: 'Photo', video: 'Video', file: 'Tap download' },
   synced:      { image: 'Photo', video: 'Video', file: 'Tap download' },
+  // while it is in flight the percentage IS the message: 'downloading…' with no
+  // number is what makes a 100 MB fetch look stuck
   downloading: { image: 'Downloading…', video: 'Downloading…', file: 'Downloading…' },
   declined:    { image: 'Removed from this device', video: 'Removed from this device', file: 'Deleted — not downloaded' },
   expired:     { image: 'No longer available', video: 'No longer available', file: 'No longer available' },
@@ -137,6 +139,19 @@ export function bubbleNodes(msg, row, { verified = false } = {}) {
 
   const status = statusLine(row);
   if (status) nodes.push(status);
+  // a determinate bar while bytes are moving; when a previous session stopped
+  // mid-fetch, say where it stopped — that is what makes 'it resumes' visible
+  if (row.state === 'downloading' || (row.partialBytes > 0 && row.state === 'failed')) {
+    const pct = Math.max(0, Math.min(1, Number(row.progress) || 0));
+    const bar = mk('span', 'media-progress');
+    const fill = mk('span', 'media-progress-fill');
+    fill.style.width = `${Math.round(pct * 100)}%`;
+    bar.append(fill);
+    nodes.push(bar);
+    if (row.state === 'failed' && row.partialBytes > 0) {
+      nodes.push(mk('span', 'media-status', `${formatSize(row.partialBytes)} received — it continues from there`));
+    }
+  }
 
   // pending / failed video|file: the two choices req 6 puts IN the bubble
   // (chat.js binds them by class on its delegated listener)

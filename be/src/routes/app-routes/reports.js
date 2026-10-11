@@ -5,6 +5,7 @@ import { effectiveLimit } from '../../lib/limits.js';
 import { applyBlock } from '../../lib/blockAccount.js';
 import { createNotifier } from '../../lib/notify.js';
 import { MEDIA_ID_RE, MEDIA_KINDS, asBytes, decryptWithKey } from '../../lib/media.js';
+import { readAll } from '../../lib/mediaStore.js';
 import { b64uDecode } from '../../lib/b64u.js';
 
 // ---- REPORTING ---------------------------------------------------------
@@ -60,7 +61,7 @@ const reportMediaBudget = (config) => Number(config.reportMediaMaxBytes) > 0
   ? Number(config.reportMediaMaxBytes) : MAX_MEDIA_TOTAL_BYTES;
 const MAX_NAME_LEN = 160;
 
-export default async function reportRoutes(app, { users, redis, config, settings, reports, media, reportMedia }) {
+export default async function reportRoutes(app, { users, redis, config, settings, reports, media, reportMedia, mediaStore }) {
   const { notify: notifyAccount } = createNotifier({ redis, users });
 
   app.post('/api/me/report', {
@@ -150,7 +151,9 @@ export default async function reportRoutes(app, { users, redis, config, settings
         // until the admin deletes the report (nothing may destroy evidence
         // while it is under review — req 9's whole point)
         if (media) await media.updateOne({ _id: blobId }, { $set: { reported: true } });
-        const plain = decryptWithKey(doc.blob, item.key, item.iv);
+        // the reported blob may be inline in its doc or in GridFS — moderation
+        // has to read either, and readAll resolves both shapes
+        const plain = decryptWithKey(await readAll(mediaStore, doc, 'blob'), item.key, item.iv);
         // server-decrypted bytes are the primary evidence; a reporter's own
         // copy is the fallback when the key does not open anything (a stale
         // record on the reporter's device) — never a failure of the report

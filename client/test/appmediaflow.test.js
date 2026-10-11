@@ -1,17 +1,16 @@
-// The app-side media PIPELINE, run for real: store.js on a shimmed
-// IndexedDB, media.js's policy functions, and a stub client standing in for
-// the SDK's three media calls. This is the part a browser-only manual smoke
-// would otherwise cover — what auto-downloads, what gets acked, what a failed
-// fetch becomes, what the retention sweep drops — against the same records the
-// UI paints from.
-//
-// The SDK calls are stubbed (not the backend): the transport half is covered
-// end-to-end in media.test.js against the real server. What is being tested
-// here is the APP's decisions.
+// The app's media PIPELINE, executed: store.js on a shimmed IndexedDB, the real
+// crypto from the SDK, and a client stub that speaks the SDK's actual primitives
+// (fetch bytes with an offset / verify+decrypt / ack). This is the code that
+// decides what auto-downloads, what is acked, what survives an interrupted
+// fetch and what ages out — all of it reachable without a browser, and none of
+// it reachable by a stub that fakes the crypto away.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { installIdbShim } from './idbshim.js';
-import { startServer, waitFor, waitOpen, randUser } from './helpers.js';
+import * as c from '../src/crypto.js';
+import { b64uEncode } from '../src/encoding.js';
+import { startServer, waitFor, waitOpen, sleep, randUser } from './helpers.js';
 
 const shim = installIdbShim();
 
@@ -19,6 +18,7 @@ const shim = installIdbShim();
 const store = await import('../app/js/store.js');
 const M = await import('../app/js/media.js');
 
+const PAYLOAD = new Uint8Array(Array.from({ length: 600 }, (_, i) => (i * 13) % 251));
 const USER = 'tester';
 let seq = 0;
 
@@ -28,294 +28,301 @@ async function freshAccount() {
   return store;
 }
 
-function stubRow(over = {}) {
+/** Encrypt the way a sender does, and return the descriptor fields a row needs. */
+async function makeCipher(payload = PAYLOAD) {
+  const key = await c.generateFileKey();
+  const keyB64u = await c.exportRawAesKey(key);
+  const ct = await c.encryptBytes(key, payload);
   return {
-    id: 'blob-1', blobId: 'blob-1', peer: 'bobby', dir: 'in', kind: 'image',
-    name: 'a.jpg', mime: 'image/jpeg', size: 10, key: 'key', iv: 'aXY=',
-    thumbIv: 'dGh1', sha256: 'abc', state: 'pending', keep: false, blurred: null,
-    data: null, thumb: null, msgId: 'in:m1', ts: Date.now(), ...over,
+    ct,
+    media: {
+      key: keyB64u,
+      sha256: createHash('sha256').update(ct).digest('base64url'),
+      iv: b64uEncode(ct.slice(0, 12)),
+    },
   };
 }
 
-/** A client whose three media calls do what the test says they do. */
-function fakeClient({ fail = null, thumbFail = false } = {}) {
+/**
+ * A client speaking the SDK's media primitives. `failAfter` cuts the stream
+ * after N bytes — that is what an interrupted 100 MB fetch looks like, and the
+ * only way to prove the bytes already paid for are kept and re-used.
+ */
+function pipelineClient({ ct, media, chunks = 4, failAfter = null } = {}) {
   const calls = [];
+  let delivered = 0;
   return {
     calls,
-    async downloadMedia(id) {
-      calls.push({ what: 'download', id });
-      if (fail) throw fail(typeof id === 'string' && id.startsWith('blob') ? new Error('x') : new Error('x'));
-      return { data: new Blob([`plain bytes for ${id}`]), thumb: thumbFail ? null : new Blob([`thumb for ${id}`]) };
+    get delivered() { return delivered; },
+    async fetchMediaBytes(id, { start = 0, onChunk } = {}) {
+      calls.push({ what: 'download', id, start });
+      const rest = ct.slice(start);
+      const size = Math.max(1, Math.ceil(rest.length / chunks));
+      let at = 0;
+      while (at < rest.length) {
+        if (failAfter !== null && delivered >= failAfter) {
+          throw Object.assign(new Error('connection dropped'), { code: 'upload_failed' });
+        }
+        const part = rest.slice(at, at + size);
+        at += part.length;
+        delivered += part.length;
+        onChunk?.(part, start + at, ct.length);
+      }
+      return rest;
     },
-    async downloadThumb(id) {
-      calls.push({ what: 'thumb', id });
-      if (fail) throw fail(new Error('gone'));
-      return new Blob([`thumb for ${id}`]);
+    async decryptMediaBytes(bytes, m) {
+      calls.push({ what: 'verify' });
+      // the same digest check the SDK performs: a resume that stitched the
+      // wrong offset together fails HERE, before anything is acked
+      const got = createHash('sha256').update(bytes).digest('base64url');
+      if (m?.sha256 && got !== m.sha256) {
+        throw Object.assign(new Error('digest mismatch'), { code: 'media_tampered' });
+      }
+      const plain = await c.decryptBytes(await c.importFileKey(m.key), bytes);
+      return new Blob([plain], { type: m.mime || 'application/octet-stream' });
     },
-    async ackMedia(id, downloaded) {
-      calls.push({ what: 'ack', id, downloaded });
-      return { ok: true, deleted: downloaded };
-    },
+    async downloadThumb() { calls.push({ what: 'thumb' }); return new Blob(['poster']); },
+    async ackMedia(id, downloaded) { calls.push({ what: 'ack', id, downloaded }); return { ok: true, deleted: downloaded }; },
   };
+}
+
+/** An incoming media row for a real ciphertext, in the shape the wire gives. */
+function rowFor({ id = 'blob-1', peer = 'bobby', dir = 'in', kind = 'image', name = 'a.jpg', mime = 'image/jpeg' }, cipher) {
+  return M.mediaRow({
+    key: id, peer, dir, kind,
+    media: { id, kind, name, mime, size: PAYLOAD.length, thumbIv: 'dGh1', ...cipher.media },
+    msgId: `${dir === 'in' ? 'in' : 'out'}:${id}`, ts: Date.now(),
+  });
 }
 
 const notFound = () => Object.assign(new Error('No such attachment'), { code: 'unknown_media', status: 404 });
-const offline = () => Object.assign(new Error('fetch failed'), { code: 'TypeError' });
 
-test('pipeline: an incoming IMAGE auto-downloads, stores, then acks', async () => {
+// ---------------- arrival policy ----------------
+
+test('pipeline: an incoming IMAGE auto-downloads, is verified, then acks', async () => {
   await freshAccount();
-  const cli = fakeClient();
-  const row = M.mediaRow({
-    key: 'blob-1', peer: 'bobby', dir: 'in', kind: 'image',
-    media: { id: 'blob-1', kind: 'image', name: 'a.jpg', mime: 'image/jpeg', size: 10, key: 'k', iv: 'i', thumbIv: 't', sha256: 's' },
-    msgId: 'in:m1', ts: Date.now(),
-  });
+  const cipher = await makeCipher();
+  const row = rowFor({}, cipher);
   await store.saveMedia(row);
+  const cli = pipelineClient(cipher);
   const res = await M.applyArrivalPolicy(cli, row);
 
   assert.equal(res.state, 'stored');
   const after = await store.getMedia('blob-1');
-  assert.ok(after.data instanceof Blob, 'the decrypted bytes are on the device');
-  assert.ok(after.thumb instanceof Blob, 'and so is the thumbnail the bubble paints');
+  assert.deepEqual(new Uint8Array(await after.data.arrayBuffer()), PAYLOAD, 'the decrypted bytes are on the device');
+  assert.ok(after.thumb, 'and so is the poster the bubble paints');
   assert.equal(after.state, 'stored');
-  assert.equal(after.blurred, null, 'no override: the verified flag decides at render');
-  // THE ORDER matters: ack only after the bytes landed (req 8)
-  assert.deepEqual(cli.calls.map((c) => c.what), ['download', 'ack']);
-  assert.equal(cli.calls[1].downloaded, true);
+  assert.ok(after.storedAt > 0, 'the record knows when the bytes landed');
+  assert.equal(after.blurred, null, 'no override: the sender-verified flag decides at render');
+  // fetch → verify → ack, in that order: an unverified download must never
+  // settle the lifecycle (req 8)
+  assert.deepEqual(cli.calls.map((x) => x.what), ['download', 'verify', 'thumb', 'ack']);
+  assert.equal(cli.calls.at(-1).downloaded, true);
 });
 
 test('pipeline: a VIDEO pulls its poster only and never acks', async () => {
   await freshAccount();
-  const cli = fakeClient();
-  const row = M.mediaRow({
-    key: 'v1', peer: 'bobby', dir: 'in', kind: 'video',
-    media: { id: 'v1', kind: 'video', name: 'clip.mp4', mime: 'video/mp4', size: 9_000_000, key: 'k', iv: 'i', thumbIv: 't', sha256: 's' },
-    msgId: 'in:m2', ts: Date.now(),
-  });
+  const cipher = await makeCipher();
+  const row = rowFor({ kind: 'video', name: 'clip.mp4', mime: 'video/mp4' }, cipher);
   await store.saveMedia(row);
+  const cli = pipelineClient(cipher);
   const res = await M.applyArrivalPolicy(cli, row);
 
-  assert.equal(res.state, 'pending', 'the full bytes still wait behind the button');
-  assert.deepEqual(cli.calls.map((c) => c.what), ['thumb'], 'a poster fetch is not a download');
-  const after = await store.getMedia('v1');
-  assert.ok(after.thumb instanceof Blob, 'the poster is what the bubble and the wall show');
-  assert.equal(after.data, null);
+  assert.equal(res.state, 'pending', 'the payload still waits behind the button');
+  assert.deepEqual(cli.calls.map((x) => x.what), ['thumb'], 'a poster fetch is not a download');
+  assert.ok((await store.getMedia('blob-1')).thumb, 'the poster is what the bubble shows meanwhile');
+});
+
+test('pipeline: a poster-less video cannot delete itself — req 8 is sacred', async () => {
+  await freshAccount();
+  const cipher = await makeCipher();
+  // the sender's browser could not capture a frame: the descriptor says so
+  const noPoster = { ...rowFor({ kind: 'video', name: 'clip.mp4', mime: 'video/mp4' }, cipher), thumbIv: null };
+  await store.saveMedia(noPoster);
+  const cli = pipelineClient(cipher);
+  const res = await M.applyArrivalPolicy(cli, noPoster);
+  assert.deepEqual(cli.calls, [], 'not even a request when there is nothing to preview');
+  assert.equal(res.state, 'pending');
+
+  // and a poster fetch that 404s must not be read as "the blob is gone"
+  const withPoster = { ...noPoster, thumbIv: 'dGh1' };
+  await store.saveMedia(withPoster);
+  const cli2 = pipelineClient(cipher);
+  cli2.downloadThumb = async () => { throw Object.assign(new Error('no preview'), { code: 'no_thumb', status: 404 }); };
+  const res2 = await M.applyArrivalPolicy(cli2, withPoster);
+  assert.equal(res2.state, 'pending', 'a missing PREVIEW says nothing about the payload');
+  assert.ok(!cli2.calls.some((x) => x.what === 'ack'), 'and it never, ever acks');
 });
 
 test('pipeline: a FILE waits for the user entirely', async () => {
   await freshAccount();
-  const cli = fakeClient();
-  const row = M.mediaRow({
-    key: 'f1', peer: 'bobby', dir: 'in', kind: 'file',
-    media: { id: 'f1', kind: 'file', name: 'x.pdf', mime: 'application/pdf', size: 100, key: 'k', iv: 'i', sha256: 's' },
-    msgId: 'in:m3', ts: Date.now(),
-  });
+  const cipher = await makeCipher();
+  const row = rowFor({ kind: 'file', name: 'x.pdf', mime: 'application/pdf' }, cipher);
   await store.saveMedia(row);
+  const cli = pipelineClient(cipher);
   await M.applyArrivalPolicy(cli, row);
   assert.deepEqual(cli.calls, [], 'req 6: nothing leaves the device until asked');
-  assert.equal((await store.getMedia('f1')).state, 'pending');
+  assert.equal((await store.getMedia('blob-1')).state, 'pending');
 });
 
-test('pipeline: download failure is recoverable, a 404 is final — and both settle the ack', async () => {
+// ---------------- interruption, resume, integrity ----------------
+
+test('pipeline: an interrupted fetch keeps its bytes and RESUMES from the offset', async () => {
   await freshAccount();
-  // offline blip → 'failed' (the retry queue owns it), NO ack (the blob must
-  // stay so the retry can succeed)
-  const cli1 = fakeClient({ fail: offline });
-  const row = M.mediaRow({ key: 'b-1', peer: 'bobby', dir: 'in', kind: 'image', media: { id: 'b-1', kind: 'image', key: 'k', iv: 'i', sha256: 's' }, msgId: 'in:1', ts: 1 });
+  const cipher = await makeCipher();
+  const row = rowFor({ kind: 'file', name: 'big.bin', mime: 'application/octet-stream' }, cipher);
   await store.saveMedia(row);
-  const r1 = await M.downloadMedia(cli1, row);
+
+  // attempt 1: dies after 200 of 600 bytes
+  const first = pipelineClient({ ...cipher, failAfter: 200 });
+  const r1 = await M.downloadMedia(first, await store.getMedia('blob-1'));
   assert.equal(r1.state, 'failed');
-  assert.deepEqual(cli1.calls.map((c) => c.what), ['download'], 'a failed fetch never acks');
-  assert.equal((await store.getMedia('b-1')).state, 'failed');
+  const stopped = await store.getMedia('blob-1');
+  // the stub reports exactly how much it got through before dropping, so the
+  // assertion follows the stream instead of a magic number
+  assert.equal(stopped.partialBytes, first.delivered, 'the bytes already paid for are kept');
+  assert.ok(first.delivered > 0 && first.delivered < cipher.ct.length, 'and it is genuinely a partial fetch');
+  assert.ok(stopped.partial instanceof Blob, 'as a Blob, so it survives a reload');
+  assert.ok(!first.calls.some((x) => x.what === 'ack'), 'a failed fetch never acks');
 
-  // retried on the next open
-  const cli2 = fakeClient();
-  const n = await M.retryFailedDownloads(cli2);
-  assert.equal(n, 1, 'the retry queue picked it up');
-  assert.equal((await store.getMedia('b-1')).state, 'stored');
-
-  // a swept blob → 'expired', and it IS acked: holding it pending would pin a
-  // reference to bytes that no longer exist (and block req 8 for everyone else)
-  const cli3 = fakeClient({ fail: notFound });
-  const row3 = M.mediaRow({ key: 'b-2', peer: 'bobby', dir: 'in', kind: 'image', media: { id: 'b-2', kind: 'image', key: 'k', iv: 'i', sha256: 's' }, msgId: 'in:2', ts: 1 });
-  await store.saveMedia(row3);
-  const r3 = await M.downloadMedia(cli3, row3);
-  assert.equal(r3.state, 'expired');
-  assert.deepEqual(cli3.calls.map((c) => c.what), ['download', 'ack']);
-  assert.equal((await store.getMedia('b-2')).state, 'expired');
-
-  // expired is FINAL: the retry queue must not hammer it every reconnect
-  const cli4 = fakeClient();
-  assert.equal(await M.retryFailedDownloads(cli4), 0);
+  // attempt 2: continues from 200 — no second download of the first third
+  const second = pipelineClient(cipher);
+  const r2 = await M.downloadMedia(second, stopped);
+  assert.equal(r2.state, 'stored');
+  assert.equal(second.calls[0].start, stopped.partialBytes, 'the retry asks for the remainder only');
+  const done = await store.getMedia('blob-1');
+  assert.deepEqual(new Uint8Array(await done.data.arrayBuffer()), PAYLOAD, 'stitched back together, correctly');
+  assert.equal(done.partial, null, 'the scrap is gone once the real copy exists');
+  assert.equal(done.partialBytes, 0);
 });
 
-test('pipeline: decline deletes nothing locally that the user still sees, and acks false', async () => {
+test('pipeline: bytes that do not match the digest are never stored or acked', async () => {
   await freshAccount();
-  const cli = fakeClient();
-  const row = M.mediaRow({ key: 'f9', peer: 'bobby', dir: 'in', kind: 'file', media: { id: 'f9', kind: 'file', name: 'big.zip', key: 'k', iv: 'i', sha256: 's' }, msgId: 'in:9', ts: 1 });
+  const cipher = await makeCipher();
+  const row = rowFor({}, cipher);
   await store.saveMedia(row);
-  const res = await M.declineMedia(cli, row);
-  assert.equal(res.ok, true);
-  assert.deepEqual(cli.calls, [{ what: 'ack', id: 'f9', downloaded: false }]);
-  const after = await store.getMedia('f9');
+  const cli = pipelineClient({ ...cipher, ct: new Uint8Array(cipher.ct.length).fill(9) });  // lying server
+  const res = await M.downloadMedia(cli, row);
+  assert.equal(res.state, 'failed', 'a tampered download is a retry, not a loss');
+  assert.equal((await store.getMedia('blob-1')).data, null, 'nothing readable is stored');
+  assert.ok(!cli.calls.some((x) => x.what === 'ack'),
+    'and nothing is acked — the server keeps the real bytes for the next try');
+});
+
+test('pipeline: a 404 is final, and is still settled (an un-acked blob pins req 8)', async () => {
+  await freshAccount();
+  const cipher = await makeCipher();
+  const row = rowFor({}, cipher);
+  await store.saveMedia(row);
+  const cli = pipelineClient(cipher);
+  cli.fetchMediaBytes = async () => { cli.calls.push({ what: 'download' }); throw notFound(); };
+  const res = await M.downloadMedia(cli, row);
+  assert.equal(res.state, 'expired');
+  assert.deepEqual(cli.calls.map((x) => x.what), ['download', 'ack'], 'the pending entry is cleared');
+  assert.equal((await store.getMedia('blob-1')).partial, null, 'no partial kept for a blob that is gone');
+});
+
+test('pipeline: the retry queue picks up failed fetches on the next open, not expired ones', async () => {
+  await freshAccount();
+  const cipher = await makeCipher();
+  await store.saveMedia(rowFor({ id: 'b-1' }, cipher));
+  // the persisted scrap must be the real first bytes — a resume that stitched
+  // together the WRONG bytes must (and does) fail the digest below
+  await store.updateMedia('b-1', { state: 'failed', partialBytes: 100, partial: new Blob([cipher.ct.slice(0, 100)]) });
+  await store.saveMedia(rowFor({ id: 'b-2' }, cipher));
+  await store.updateMedia('b-2', { state: 'expired' });
+
+  const cli = pipelineClient(cipher);
+  assert.equal(await M.retryFailedDownloads(cli), 1, 'only the failed record is retried');
+  assert.equal(cli.calls[0].start, 100, 'and it continues where that record stopped');
+  assert.equal((await store.getMedia('b-1')).state, 'stored');
+  assert.equal((await store.getMedia('b-2')).state, 'expired', 'expired is never re-hammered');
+});
+
+test('pipeline: an outgoing row with no blob id yet never touches the wire', async () => {
+  await freshAccount();
+  const cli = pipelineClient(await makeCipher());
+  const row = M.mediaRow({ key: 'out:abc', blobId: null, peer: 'bobby', dir: 'out', kind: 'image', media: { name: 'x' }, msgId: 'out:abc', ts: 1 });
+  await store.saveMedia(row);
+  assert.equal((await M.downloadMedia(cli, row)).ok, false);
+  assert.deepEqual(cli.calls, [], 'the local key is not a server address (blobOf guards it)');
+});
+
+// ---------------- decline + retention ----------------
+
+test('pipeline: decline stores nothing, acks false, and keeps the row honest', async () => {
+  await freshAccount();
+  const cipher = await makeCipher();
+  const row = rowFor({ kind: 'file', name: 'big.zip' }, cipher);
+  await store.saveMedia(row);
+  const cli = pipelineClient(cipher);
+  assert.equal((await M.declineMedia(cli, row)).ok, true);
+  assert.deepEqual(cli.calls, [{ what: 'ack', id: 'blob-1', downloaded: false }]);
+  const after = await store.getMedia('blob-1');
   assert.equal(after.state, 'declined');
   assert.equal(after.data, null, 'req 6: delete-before-download leaves no bytes behind');
+});
+
+test('pipeline: retention drops bytes on AGE or on SAVING, and keeps the record', async () => {
+  await freshAccount();
+  const day = 86_400_000;
+  M.setLocalRetentionDays(7);
+  const old = Date.now() - 40 * day;
+  const mk = (id, kind, over) => store.saveMedia({
+    id, kind, peer: 'bobby', dir: 'in', name: 'a.jpg', mime: 'image/jpeg', size: 9,
+    ts: old, storedAt: old, state: 'stored', data: new Blob(['bytes']), thumb: new Blob(['t']),
+    blobId: id, key: 'k', sha256: 's', keep: false, blurred: null, ...over,
+  });
+  await mk('img-old', 'image');
+  await mk('img-stalepin', 'image', { keep: true });      // retired pin: still due
+  await mk('file-old', 'file');
+  await mk('img-saved', 'image', { ts: Date.now() - day, storedAt: Date.now() - day, savedAt: Date.now() - 60_000 });
+  await mk('img-new', 'image', { ts: Date.now(), storedAt: Date.now() });
+
+  assert.equal(await M.pruneLocalMedia(), 4, 'out of window (pin or no pin) or already handed to the phone');
+  const img = await store.getMedia('img-old');
+  assert.equal(img.state, 'pruned');
+  assert.equal(img.data, null, 'the payload goes');
+  assert.ok(img.thumb, 'the thumbnail stays: the wall keeps a picture');
+  assert.equal(img.name, 'a.jpg', 'and the record is not destroyed');
+  assert.equal(img.prunedWhy, 'age');
+  assert.equal((await store.getMedia('file-old')).thumb, null, 'a file has no preview worth keeping');
+  assert.equal((await store.getMedia('img-stalepin')).state, 'pruned', 'a stale keep:true cannot make a record immortal');
+  const saved = await store.getMedia('img-saved');
+  assert.equal(saved.prunedWhy, 'saved', 'and WHY is recorded, so the UI says the true thing');
+  assert.ok(saved.savedAt > 0);
+  assert.ok((await store.getMedia('img-new')).data, 'inside the window: untouched');
+  assert.equal(M.localRetentionDays(), 7);
 });
 
 test('pipeline: a completed download is stamped, so the next sweep spares it', async () => {
   await freshAccount();
   M.setLocalRetentionDays(7);
   const day = 86_400_000;
-  const oldTs = Date.now() - 30 * day;   // a message from a month ago
-  const cli = fakeClient();
-  const row = M.mediaRow({ key: 'late', peer: 'bobby', dir: 'in', kind: 'file',
-    media: { id: 'late', kind: 'file', name: 'late.pdf', key: 'k', iv: 'i', sha256: 's' },
-    msgId: 'in:late', ts: oldTs });
+  const cipher = await makeCipher();
+  // a message from a month ago, downloaded today
+  const row = { ...rowFor({ kind: 'file', name: 'late.bin' }, cipher), ts: Date.now() - 30 * day };
   await store.saveMedia(row);
-  await M.downloadMedia(cli, row);
+  await M.downloadMedia(pipelineClient(cipher), row);
 
-  const after = await store.getMedia('late');
+  const after = await store.getMedia(row.id);
   assert.equal(after.state, 'stored');
-  assert.ok(after.storedAt >= oldTs, 'the record knows WHEN the bytes arrived');
+  assert.ok(after.storedAt >= Date.now() - 5000, 'clock starts at arrival, not at the message');
   assert.equal(await M.pruneLocalMedia(), 0,
-    'and a file the user just chose to download is not dropped minutes later');
-
-  // pin it into the past and the very same record IS due
-  await store.updateMedia('late', { storedAt: Date.now() - 9 * day });
-  assert.equal(await M.pruneLocalMedia(), 1);
-  assert.equal((await store.getMedia('late')).state, 'pruned');
+    'a file the user just chose to download is not dropped minutes later');
+  await store.updateMedia(row.id, { storedAt: Date.now() - 9 * day });
+  assert.equal(await M.pruneLocalMedia(), 1, 'and it does go once it has genuinely been here a week');
 });
 
-test('pipeline: an outgoing row with no blob id yet never calls the wire', async () => {
-  await freshAccount();
-  const cli = fakeClient();
-  const row = M.mediaRow({ key: 'out:abc', blobId: null, peer: 'bobby', dir: 'out', kind: 'image', media: { name: 'x', key: 'k' }, msgId: 'out:abc', ts: 1 });
-  await store.saveMedia(row);
-  const res = await M.downloadMedia(cli, row);
-  assert.equal(res.ok, false);
-  assert.deepEqual(cli.calls, [], 'nothing to download from — the id is local');
-});
+// ---------------- against the real backend ----------------
 
-test('pipeline: retention drops bytes on AGE or on SAVING, and keeps the record', async () => {
-  await freshAccount();
-  const day = 86_400_000;
-  // the window is set THROUGH the app's own setter (localStorage-backed), so
-  // this exercises the same path the settings drawer uses
-  M.setLocalRetentionDays(7);
-  const old = Date.now() - 40 * day;
-  // storedAt is set with the bytes (the retention clock starts when they
-  // LAND, not when the message was sent) — these rows are genuinely old copies
-  const mk = (id, kind, over) => store.saveMedia(stubRow({ id, kind, ts: old, storedAt: old, state: 'stored', data: new Blob(['bytes']), thumb: new Blob(['t']), ...over }));
-  await mk('img-old', 'image');
-  await mk('img-stalepin', 'image', { keep: true });   // retired pin: still due
-  await mk('file-old', 'file');
-  // the phone owns this one now, so the app's copy is weight — long before any
-  // window. This is the rule that replaced 'Keep on this device'.
-  await mk('img-saved', 'image', { ts: Date.now() - day, storedAt: Date.now() - day, savedAt: Date.now() - 60_000 });
-  await store.saveMedia(stubRow({ id: 'img-new', kind: 'image', ts: Date.now(), storedAt: Date.now(), state: 'stored', data: new Blob(['bytes']), thumb: new Blob(['t']) }));
-
-  const dropped = await M.pruneLocalMedia();
-  assert.equal(dropped, 4, 'out-of-window (pin or no pin), already saved; the fresh copy survives');
-
-  const img = await store.getMedia('img-old');
-  assert.equal(img.state, 'pruned');
-  assert.equal(img.data, null, 'the megabytes are gone');
-  assert.ok(img.thumb, 'the thumbnail stays: the wall still has a picture');
-  assert.equal(img.name, 'a.jpg', 'name/size/date survive — the record is not destroyed');
-
-  const file = await store.getMedia('file-old');
-  assert.equal(file.thumb, null, 'a file has no preview worth keeping');
-
-  assert.equal((await store.getMedia('img-stalepin')).state, 'pruned',
-    'a leftover keep:true cannot make a record immortal');
-  const saved = await store.getMedia('img-saved');
-  assert.equal(saved.state, 'pruned');
-  assert.equal(saved.prunedWhy, 'saved', 'and it says WHY, so the UI can say "Saved to your phone"');
-  assert.ok(saved.savedAt > 0, 'the stamp itself survives the prune');
-  assert.ok((await store.getMedia('img-new')).data, 'inside the window: untouched');
-  assert.equal(M.localRetentionDays(), 7);
-});
-
-test('pipeline: a media message paints as media, and the tabs find it', async () => {
-  await freshAccount();
-  const media = { id: 'b7', kind: 'file', name: '../../secrets.pdf', mime: 'application/pdf', size: 1234, key: 'k', iv: 'i', sha256: 's' };
-  await store.saveMessage({ id: 'in:b7', peer: 'bobby', dir: 'in', text: M.mediaLabel('file', 'secrets.pdf'), kind: 'file', mediaId: 'b7', ts: 5 });
-  await store.saveMedia(M.mediaRow({ key: 'b7', peer: 'bobby', dir: 'in', kind: 'file', media, msgId: 'in:b7', ts: 5 }));
-
-  const msgs = await store.messagesWith('bobby');
-  const rows = await store.mediaWith('bobby');
-  assert.equal(msgs[0].kind, 'file', 'the transcript row carries the kind (no join needed for the tabs)');
-  assert.equal(rows[0].name, 'secrets.pdf', 'the path components are stripped at the door');
-  const buckets = M.tabBuckets(msgs, rows);
-  assert.deepEqual(buckets.files.map((r) => r.id), ['b7']);
-  assert.deepEqual(buckets.images, []);
-  // clearing the conversation takes the decrypted bytes with it (device-local,
-  // same contract as the transcript)
-  assert.equal(await store.clearMediaWith('bobby'), 1);
-  assert.deepEqual(await store.mediaWith('bobby'), []);
-  assert.equal((await store.messagesWith('bobby')).length, 1, 'messages clear separately');
-});
-
-test('pipeline: a video WITHOUT a poster cannot delete itself (req 8 is sacred)', async () => {
-  await freshAccount();
-  // the sender's browser could not capture a frame (normal on iOS): the
-  // descriptor has no thumbIv, and the server answers a poster request with
-  // 404 no_thumb. Both used to read as "the blob is gone" — and the ack that
-  // follows an 'expired' record DELETES the video for every device.
-  const noPoster = M.mediaRow({
-    key: 'v0', peer: 'bobby', dir: 'in', kind: 'video',
-    media: { id: 'v0', kind: 'video', name: 'clip.mp4', mime: 'video/mp4', size: 4_000_000, key: 'k', iv: 'i', sha256: 's' },
-    msgId: 'in:v0', ts: 1,
-  });
-  await store.saveMedia(noPoster);
-  const cli = fakeClient();
-  const res = await M.applyArrivalPolicy(cli, noPoster);
-  assert.deepEqual(cli.calls, [], 'not even a request: there is nothing to preview');
-  assert.equal(res.state, 'pending');
-  assert.equal((await store.getMedia('v0')).state, 'pending', 'the record waits for the user');
-
-  // and a poster request that comes back 404 must not move the state either
-  const withPoster = M.mediaRow({
-    key: 'v1', peer: 'bobby', dir: 'in', kind: 'video',
-    media: { id: 'v1', kind: 'video', name: 'clip.mp4', mime: 'video/mp4', size: 4_000_000, key: 'k', iv: 'i', thumbIv: 't', sha256: 's' },
-    msgId: 'in:v1', ts: 1,
-  });
-  await store.saveMedia(withPoster);
-  const cli2 = {
-    calls: [],
-    async downloadThumb() { this.calls.push('thumb'); throw Object.assign(new Error('no preview'), { code: 'no_thumb', status: 404 }); },
-    async downloadMedia() { this.calls.push('download'); return { data: new Blob(['x']) }; },
-    async ackMedia() { this.calls.push('ack'); },
-  };
-  const res2 = await M.applyArrivalPolicy(cli2, withPoster);
-  assert.equal(res2.ok, false);
-  assert.deepEqual(cli2.calls, ['thumb'], 'a failed DECORATION fetches nothing else');
-  assert.equal((await store.getMedia('v1')).state, 'pending', 'still waiting for the Download button');
-
-  // the same 404 on the FULL blob is genuinely 'gone' → settled with an ack
-  const cli3 = {
-    calls: [],
-    async downloadMedia() { this.calls.push('download'); throw Object.assign(new Error('gone'), { code: 'unknown_media', status: 404 }); },
-    async ackMedia(id, d) { this.calls.push(`ack:${d}`); },
-  };
-  const res3 = await M.downloadMedia(cli3, { id: 'v2', blobId: 'v2', key: 'k', kind: 'video', state: 'pending' });
-  assert.equal(res3.state, 'expired');
-  assert.deepEqual(cli3.calls, ['download', 'ack:true'], 'a payload that IS gone gets settled');
-});
-
-// The bug this guards: a VIDEO whose sender could not produce a poster (iOS
-// canvas capture failing on a phone is normal) arrived, the recipient's app
-// fetched ?part=thumb, got a 404, read it as "the payload is gone", marked the
-// record expired and ACKED it — and that ack deleted the video for every
-// device. So this runs the app's real policy against the real SDK and the real
-// server: the poster half must be harmless, and only the full download may
-// settle the lifecycle.
 test('pipeline against the real server: a poster-less video survives, then downloads', async (t) => {
   const srv = await startServer();
   const aliceName = randUser('alice');
   const bobName = randUser('bob');
-  const sendMedia = new Uint8Array(Array.from({ length: 4096 }, (_, i) => i % 251));
+  const cli = [];
   t.after(async () => {
+    for (const c0 of cli) { try { c0.disconnect(); } catch { /* gone */ } }
     await srv.deleteUser(aliceName);
     await srv.deleteUser(bobName);
     await srv.stop();
@@ -323,16 +330,16 @@ test('pipeline against the real server: a poster-less video survives, then downl
   shim.reset();
   store.setScope(`live${++seq}`);
 
-  const alice = srv.client();
-  const bob = srv.client();
+  const alice = srv.client(); cli.push(alice);
+  const bob = srv.client(); cli.push(bob);
   await alice.register(aliceName);
   await bob.register(bobName);
   alice.connect(); bob.connect();
   await Promise.all([waitOpen(alice), waitOpen(bob)]);
 
-  // NO thumb passed: this is the phone case
+  // NO thumb passed: the iPhone case where the sender cannot make a poster
   const sent = await alice.sendMedia(bobName, {
-    kind: 'video', bytes: sendMedia, name: 'clip.mp4', mime: 'video/mp4', dur: 3.5,
+    kind: 'video', bytes: PAYLOAD, name: 'clip.mp4', mime: 'video/mp4', dur: 3.5,
   });
   assert.equal(sent.media.thumbIv, undefined, 'the descriptor honestly says there is no poster');
   const msg = await waitFor(bob, 'message', (m) => m.text.startsWith('{"media":'), 20000);
@@ -340,20 +347,25 @@ test('pipeline against the real server: a poster-less video survives, then downl
 
   const row = M.mediaRow({ key: media.id, peer: bobName, dir: 'in', kind: 'video', media, msgId: 'in:1', ts: msg.ts });
   await store.saveMedia(row);
-
   const res = await M.applyArrivalPolicy(bob, row);
-  assert.equal(res.ok, false, 'the poster step reports it did nothing');
-  assert.equal(res.state, 'pending', 'and the record still waits for the user');
+  assert.equal(res.state, 'pending', 'the poster half did nothing');
   assert.ok(await srv.mongo.db.collection('media').findOne({ _id: media.id }),
     'THE VIDEO IS STILL ON THE SERVER — a preview failure must not delete payload');
-  assert.equal((await store.getMedia(media.id)).state, 'pending');
 
-  // the user's Download button then does the real thing, and THAT acks
-  const full = await M.downloadMedia(bob, { ...row, state: 'pending' });
+  // the user taps Download: progress arrives, the payload lands, then it acks
+  const seen = [];
+  const full = await M.downloadMedia(bob, { ...row, state: 'pending' }, { onProgress: (g, total) => seen.push([g, total]) });
   assert.equal(full.state, 'stored');
   const stored = await store.getMedia(media.id);
-  assert.deepEqual(new Uint8Array(await stored.data.arrayBuffer()), sendMedia);
+  assert.deepEqual(new Uint8Array(await stored.data.arrayBuffer()), PAYLOAD);
+  assert.equal(stored.state, 'stored');
+  assert.ok(stored.storedAt > 0);
+
+  // and a real browser-side poster can be cut from these bytes (no <img>, no
+  // <video> over a JPEG — the display bugs this feature shipped with)
+  assert.equal(await M.buildPoster(stored), null, 'no video decoder in Node: the row is left exactly as it was');
+  assert.equal((await store.getMedia(media.id)).data.size, PAYLOAD.length);
+
   assert.equal(await srv.mongo.db.collection('media').findOne({ _id: media.id }), null,
     'the last device to ack released it (req 8)');
-  alice.disconnect(); bob.disconnect();
 });

@@ -17,6 +17,7 @@ import { initUpdateNotice } from './update.js';
 import { applyIcons } from './icons.js';
 import { initInstallAndNotify } from './install.js';
 import { initBadgeNotify, osNotify } from './notify.js';
+import { setMediaLimits } from './media.js';
 import { noteShareLink, reportShareHit } from './shares.js';
 
 // Generic lock-screen-safe copy for relationship headline notices — no names,
@@ -311,6 +312,10 @@ fetch('/api/app-info')
   .then((r) => (r.ok ? r.json() : null))
   .then((info) => {
     if (!info?.name) return;
+    // the media caps are the server's, not ours: adopt them before anyone can
+    // pick a file, so 'too large' is decided with the real number (and the
+    // streamed-upload switch matches what the routes will actually accept)
+    setMediaLimits(info.media);
     document.title = info.name;
     putAppTitle(info.name); // feeds the service worker's zero-await notifications (IDB, not localStorage)
     for (const el of document.querySelectorAll('[data-app-name]')) el.textContent = info.name;

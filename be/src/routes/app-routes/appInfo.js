@@ -60,6 +60,18 @@ export default async function appInfoRoutes(app, { redis, config, settings }) {
     if (!rl.ok) return limited(reply, rl);
     return {
       name: await resolveAppName(settings, config),
+      // The MEDIA LIMITS the client must obey — advertised, not duplicated.
+      // A hard-coded cap in the app is how 'the limit is 10 MB' and 'the limit
+      // is 100 MB' end up living in two repos at once: the server's answer wins
+      // here, and jsonMaxBytes is the point where a base64 body is refused and
+      // the SDK switches to a streamed upload (the client cannot guess that).
+      media: {
+        maxBytes: config.mediaMaxBytes,
+        jsonMaxBytes: config.mediaJsonMaxBytes,
+        thumbMaxBytes: config.mediaThumbMaxBytes,
+        quotaMb: config.mediaQuotaMb,
+        retentionDays: config.mediaRetentionDays,
+      },
       vapidPublicKey: config.vapidPublicKey || null,
       version: resolveVersion(),
       build: resolveBuild(),

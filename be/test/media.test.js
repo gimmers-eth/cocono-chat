@@ -13,6 +13,7 @@ import { canonical } from '../src/lib/canon.js';
 import { b64uDecode, b64uEncode } from '../src/lib/b64u.js';
 import { config } from '../src/config.js';
 import { sweepMedia } from '../src/lib/media.js';
+import { createMediaStore } from '../src/lib/mediaStore.js';
 import { LIMIT_CATALOG, effectiveLimit } from '../src/lib/limits.js';
 
 const LIMITS = {
@@ -39,6 +40,9 @@ async function setupLive(overrides = {}) {
     ...ctx,
     conf,
     media: ctx.mongo.db.collection('media'),
+    // the real store, built the same way app.js builds it — the size-split
+    // storage (inline vs GridFS) is exactly the thing a fake would hide
+    mediaStore: createMediaStore({ db: ctx.mongo.db, config: { ...config, ...LIMITS, ...overrides } }),
     port: ctx.app.server.address().port,
   };
 }
@@ -575,7 +579,7 @@ test('media: sweeper — retention delete, orphan delete, report pin survives', 
     await mk('orphan-upload', { ageMs: 2 * 3600_000, devices: [] });
     await mk('fresh-sent', { ageMs: 60_000, devices: [{ ul: 'bobby', dv: 'd1' }] });
 
-    assert.deepEqual(await sweepMedia(ctx.media, ctx.conf), { expired: 1, orphans: 1 });
+    assert.deepEqual(await sweepMedia({ media: ctx.media, store: ctx.mediaStore }, ctx.conf), { expired: 1, orphans: 1 });
     assert.deepEqual(
       (await ctx.media.find({}).toArray()).map((d) => d._id).sort(),
       ['fresh-sent', 'stale-reported'],
@@ -689,7 +693,7 @@ test('reports: a reported attachment is decrypted server-side and pinned', async
     const doc = await ctx.media.findOne({ _id: id });
     assert.equal(doc.reported, true);
     await ctx.media.updateOne({ _id: id }, { $set: { ts: new Date(Date.now() - 99 * 86400_000) } });
-    assert.deepEqual(await sweepMedia(ctx.media, ctx.conf), { expired: 0, orphans: 0 });
+    assert.deepEqual(await sweepMedia({ media: ctx.media, store: ctx.mediaStore }, ctx.conf), { expired: 0, orphans: 0 });
     assert.ok(await ctx.media.findOne({ _id: id }));
     wsA.ws.close();
   } finally { await ctx.teardown(); }
@@ -1000,13 +1004,13 @@ test('media: an untouched file/video is NEVER swept before the retention time (r
     // 6 days: nobody tapped anything, so every blob must still be there
     const six = Date.now() - 6 * 86400_000;
     for (const id of kept) await ctx.media.updateOne({ _id: id }, { $set: { ts: new Date(six) } });
-    assert.deepEqual(await sweepMedia(ctx.media, ctx.conf), { expired: 0, orphans: 0 });
+    assert.deepEqual(await sweepMedia({ media: ctx.media, store: ctx.mediaStore }, ctx.conf), { expired: 0, orphans: 0 });
     for (const id of kept) assert.ok(await ctx.media.findOne({ _id: id }), `${id} survived the sweep`);
 
     // past the window the sweep is what bounds storage — that is the deal
     const eight = Date.now() - 8 * 86400_000;
     for (const id of kept) await ctx.media.updateOne({ _id: id }, { $set: { ts: new Date(eight) } });
-    assert.equal((await sweepMedia(ctx.media, ctx.conf)).expired, 2);
+    assert.equal((await sweepMedia({ media: ctx.media, store: ctx.mediaStore }, ctx.conf)).expired, 2);
 
     // and a tapped device releases it immediately, which is the OTHER half:
     // the ack list, not the clock, is what normally frees the space
@@ -1019,6 +1023,175 @@ test('media: an untouched file/video is NEVER swept before the retention time (r
     assert.equal((await ctx.app.inject({
       method: 'POST', url: `/api/media/${id}/ack`, payload: { downloaded: true }, headers: auth(bob.token),
     })).json().deleted, true, 'tapped on every device sent to => released now');
+    ws.ws.close();
+  } finally { await ctx.teardown(); }
+});
+
+// ================== streaming, ranges and GridFS (the 100 MB work) ==================
+// A 100 MB file cannot be a base64 JSON body (133 MB) and cannot be a Mongo
+// document (16 MB), and an interrupted fetch must not start over. These are the
+// four things that make the cap real.
+
+const sha256Of = (buf) => createHash('sha256').update(buf).digest('base64url');
+
+test('media: streamed upload — metadata, raw PUT, then it is real', async () => {
+  const ctx = await setupLive();
+  try {
+    const alice = await createUser(ctx, makeClient(), 'alice');
+    const bytes = randomBytes(5000);
+    const digest = sha256Of(bytes);
+    const meta = await ctx.app.inject({
+      method: 'POST', url: '/api/media', headers: auth(alice.token),
+      payload: { kind: 'file', size: bytes.length, sha256: digest, thumbSize: 40 },
+    });
+    assert.equal(meta.statusCode, 201, meta.body);
+    const { id, stream } = meta.json();
+    assert.equal(stream, true, 'the answer tells the client to stream');
+
+    let doc = await ctx.media.findOne({ _id: id });
+    assert.equal(doc.upload, 'pending', 'nothing is readable yet');
+    assert.equal(doc.blob, null);
+    assert.equal(doc.ctSize, bytes.length, 'the claim reserves the quota');
+
+    // the JSON path is refused for anything over the JSON cap — the client must
+    // not be left guessing why its 100 MB body vanished
+    const tooBig = await ctx.app.inject({
+      method: 'POST', url: '/api/media', headers: auth(alice.token),
+      payload: { kind: 'file', blob: 'A'.repeat(Math.ceil((ctx.conf.mediaJsonMaxBytes + 10) * 1.4)), sha256: digest },
+    });
+    assert.ok([413, 400].includes(tooBig.statusCode), `oversized JSON body: ${tooBig.statusCode}`);
+
+    const put = await ctx.app.inject({
+      method: 'PUT', url: `/api/media/${id}/blob`,
+      headers: { ...auth(alice.token), 'content-type': 'application/octet-stream' },
+      payload: bytes,
+    });
+    assert.equal(put.statusCode, 200, put.body);
+    assert.deepEqual(put.json(), { ok: true, bytes: bytes.length, upload: 'ready' });
+    doc = await ctx.media.findOne({ _id: id });
+    assert.equal(doc.upload, 'ready');
+    assert.equal(doc.sha256, digest);
+
+    // a second upload of the same part is refused, not appended
+    const twice = await ctx.app.inject({ method: 'PUT', url: `/api/media/${id}/blob`, headers: { ...auth(alice.token), 'content-type': 'application/octet-stream' }, payload: bytes });
+    assert.equal(twice.statusCode, 409);
+
+    // and a stranger PUTting at a guessed id gets the same answer as a
+    // non-existent blob (no oracle, no overwrite)
+    const carol = await createUser(ctx, makeClient(), 'carol');
+    const intruder = await ctx.app.inject({ method: 'PUT', url: `/api/media/${id}/blob`, headers: { ...auth(carol.token), 'content-type': 'application/octet-stream' }, payload: bytes });
+    assert.equal(intruder.statusCode, 404);
+
+    const got = await ctx.app.inject({ method: 'GET', url: `/api/media/${id}`, headers: auth(alice.token) });
+    assert.equal(got.statusCode, 200);
+    assert.deepEqual([...got.rawPayload], [...bytes]);
+  } finally { await ctx.teardown(); }
+});
+
+test('media: a streamed digest that lies is refused and leaves nothing behind', async () => {
+  const ctx = await setupLive();
+  try {
+    const alice = await createUser(ctx, makeClient(), 'alice');
+    const bytes = randomBytes(2000);
+    const meta = await ctx.app.inject({
+      method: 'POST', url: '/api/media', headers: auth(alice.token),
+      payload: { kind: 'image', size: bytes.length, sha256: sha256Of(randomBytes(2000)) },  // a lie
+    });
+    const id = meta.json().id;
+    const put = await ctx.app.inject({ method: 'PUT', url: `/api/media/${id}/blob`, headers: { ...auth(alice.token), 'content-type': 'application/octet-stream' }, payload: bytes });
+    assert.equal(put.statusCode, 400);
+    assert.equal(put.json().error, 'bad_sha256');
+    const doc = await ctx.media.findOne({ _id: id });
+    assert.equal(doc.blob, null, 'the partial file was torn down, not left as quota');
+    if (doc.upload !== 'pending') throw new Error('an incomplete upload must stay incomplete');
+    const files = await ctx.mongo.db.collection('media.chunks').countDocuments({});
+    assert.equal(files, 0, 'no orphan chunks in GridFS either');
+  } finally { await ctx.teardown(); }
+});
+
+test('media: a big blob lives in GridFS, reads back whole, and answers byte ranges', async () => {
+  // inline threshold dropped to nothing on purpose: everything takes the
+  // GridFS path, which is the one a 100 MB file must survive
+  const ctx = await setupLive({ mediaInlineMaxBytes: 0 });
+  try {
+    const alice = await createUser(ctx, makeClient(), 'alice');
+    const bytes = randomBytes(300_000);
+    const meta = await ctx.app.inject({
+      method: 'POST', url: '/api/media', headers: auth(alice.token),
+      payload: { kind: 'video', size: bytes.length, sha256: sha256Of(bytes) },
+    });
+    const id = meta.json().id;
+    await ctx.app.inject({ method: 'PUT', url: `/api/media/${id}/blob`, headers: { ...auth(alice.token), 'content-type': 'application/octet-stream' }, payload: bytes });
+    const doc = await ctx.media.findOne({ _id: id });
+    assert.match(doc.blob, /^fs:/, 'stored by reference — a Mongo doc could not hold it');
+    assert.ok((await ctx.mongo.db.collection('media.chunks').countDocuments({})) > 0, 'the chunks exist');
+
+    const all = await ctx.app.inject({ method: 'GET', url: `/api/media/${id}`, headers: auth(alice.token) });
+    assert.equal(all.headers['accept-ranges'], 'bytes');
+    assert.equal(all.headers['content-length'], String(bytes.length));
+    assert.deepEqual([...all.rawPayload], [...bytes], 'the whole file still round-trips');
+
+    // THE RESUME: a client that got 100 KB and dropped asks for the rest
+    const resume = await ctx.app.inject({
+      method: 'GET', url: `/api/media/${id}`, headers: { ...auth(alice.token), range: 'bytes=100000-' },
+    });
+    assert.equal(resume.statusCode, 206);
+    assert.equal(resume.headers['content-range'], `bytes 100000-${bytes.length - 1}/${bytes.length}`);
+    assert.deepEqual([...resume.rawPayload], [...bytes.subarray(100000)]);
+
+    const middle = await ctx.app.inject({ method: 'GET', url: `/api/media/${id}`, headers: { ...auth(alice.token), range: 'bytes=1000-1009' } });
+    assert.deepEqual([...middle.rawPayload], [...bytes.subarray(1000, 1010)]);
+
+    const past = await ctx.app.inject({ method: 'GET', url: `/api/media/${id}`, headers: { ...auth(alice.token), range: `bytes=${bytes.length + 10}-` } });
+    assert.equal(past.statusCode, 416, 'an unsatisfiable range says so, it does not send 0 bytes');
+
+    // deleting the blob (last ack) must take the chunks with it
+    const bob = await createUser(ctx, makeClient(), 'bobby');
+    const ws = await connectWs(ctx.port, alice.token);
+    const cid = 'gridfs-ack-1';
+    ws.send({ type: 'msg', msg: buildEnvelope(alice, bob, bob.d, cid, { att: { id, kind: 'video', size: bytes.length } }).env });
+    assert.equal((await ws.waitFor((m) => m.type === 'ack' && m.cid === cid)).ok, true);
+    const ack = await ctx.app.inject({ method: 'POST', url: `/api/media/${id}/ack`, payload: { downloaded: true }, headers: auth(bob.token) });
+    assert.equal(ack.json().deleted, true);
+    assert.equal(await ctx.media.findOne({ _id: id }), null);
+    assert.equal(await ctx.mongo.db.collection('media.chunks').countDocuments({}), 0,
+      'a deleted blob whose chunks remain is a leak nobody will ever find again');
+    ws.ws.close();
+  } finally { await ctx.teardown(); }
+});
+
+test('media: a half-uploaded blob cannot be sent or fetched (no ghost attachments)', async () => {
+  const ctx = await setupLive();
+  try {
+    const alice = await createUser(ctx, makeClient(), 'alice');
+    const bob = await createUser(ctx, makeClient(), 'bobby');
+    const bytes = randomBytes(500);
+    const meta = await ctx.app.inject({
+      method: 'POST', url: '/api/media', headers: auth(alice.token),
+      payload: { kind: 'image', size: bytes.length, sha256: sha256Of(bytes) },
+    });
+    const id = meta.json().id;
+
+    const ws = await connectWs(ctx.port, alice.token);
+    const cid = 'incomplete-send-1';
+    ws.send({ type: 'msg', msg: buildEnvelope(alice, bob, bob.d, cid, { att: { id, kind: 'image', size: bytes.length } }).env });
+    const ack = await ws.waitFor((m) => m.type === 'ack' && m.cid === cid);
+    assert.equal(ack.ok, false);
+    assert.equal(ack.error, 'attachment_incomplete',
+      'a message may never point at bytes that are not there');
+    assert.deepEqual((await ctx.media.findOne({ _id: id })).devices, [], 'and nothing was registered');
+
+    // once the bytes land, the same send goes through
+    const putOk = await ctx.app.inject({
+      method: 'PUT', url: `/api/media/${id}/blob`,
+      headers: { ...auth(alice.token), 'content-type': 'application/octet-stream' },
+      payload: bytes,
+    });
+    assert.equal(putOk.statusCode, 200, putOk.body);
+    const cid2 = 'incomplete-send-2';
+    ws.send({ type: 'msg', msg: buildEnvelope(alice, bob, bob.d, cid2, { att: { id, kind: 'image', size: bytes.length } }).env });
+    const ack2 = await ws.waitFor((m) => m.type === 'ack' && m.cid === cid2);
+    assert.equal(ack2.ok, true, JSON.stringify(ack2));
     ws.ws.close();
   } finally { await ctx.teardown(); }
 });

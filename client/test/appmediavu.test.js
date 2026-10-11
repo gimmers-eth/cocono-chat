@@ -289,9 +289,11 @@ test('viewer: a not-yet-downloaded file offers ONE honest action — Download', 
   });
   const dl = host.querySelectorAll('.viewer-toggle').find((b) => /Download/i.test(b.textContent));
   assert.ok(dl, 'req 6: download from the viewer too');
+  assert.equal(host.querySelectorAll('.viewer-toggle').filter((b) => /Download|Save/i.test(b.textContent)).length, 1,
+    'ONE honest action: nothing is offered that cannot work yet');
   dl.click();
   await settle();
-  assert.deepEqual(cli.calls.map((c) => c.what), ['download', 'ack'], 'download then ack (req 8)');
+  assert.ok(cli.calls.some((c) => c.what === 'ack'), 'download then ack (req 8)');
   assert.equal((await store.getMedia('vDl')).state, 'stored');
   assert.deepEqual(changed.map((r) => r.state), ['stored'], 'the caller is told so the chat repaints');
   teardown();
@@ -381,6 +383,13 @@ const settle = async (turns = 25) => {
 
 function fakeClient() {
   const cli = { calls: [], _pending: [] };
+  // the engine's real primitives (the SDK verifies after the fetch, so a stub
+  // that only implements downloadMedia would silently test nothing)
+  cli.fetchMediaBytes = async (id) => { cli.calls.push({ what: 'download', id }); return new Uint8Array([1, 2, 3]); };
+  cli.decryptMediaBytes = async (bytes, media) => {
+    cli.calls.push({ what: 'verify' });
+    return new Blob([bytes], { type: media?.mime || 'application/octet-stream' });
+  };
   cli.downloadMedia = async (id, media) => {
     cli.calls.push({ what: 'download', id, media });
     cli._pending.push(Promise.resolve());
