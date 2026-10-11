@@ -144,7 +144,7 @@ app.addHook('onSend', async (request, reply, payload) => {
     media: mongo.db.collection('media'),
     // the BYTES of those docs live here: inline under a size threshold, GridFS
     // above it (a Mongo document cannot hold 100 MB) — see lib/mediaStore.js
-    mediaStore: createMediaStore({ db: mongo.db, config }),
+    mediaStore: createMediaStore({ db: mongo.db, config, mediaDocs: mongo.db.collection('media') }),
     // share-link attribution (created/seen edges) + the durable
     // "has messaged" edges the God View graph draws — see lib/shares.js
     shares: mongo.db.collection('shares'),

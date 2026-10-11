@@ -23,7 +23,11 @@ export const isFileRef = (v) => typeof v === 'string' && v.startsWith(FS_PREFIX)
 export const fileRef = (id) => `${FS_PREFIX}${id}`;
 export const fileIdOf = (ref) => String(ref).slice(FS_PREFIX.length);
 
-export function createMediaStore({ db, config }) {
+// A file younger than this is assumed to be an upload in flight, not an orphan:
+// the sweep must never race a client that is mid-PUT.
+const ORPHAN_FILE_GRACE_MS = 30 * 60 * 1000;
+
+export function createMediaStore({ db, config, mediaDocs = db.collection('media') }) {
   const bucket = new GridFSBucket(db, { bucketName: 'media', chunkSizeBytes: CHUNK_BYTES });
   const fileName = (id, part) => `${id}.${part}`;
 
@@ -100,6 +104,27 @@ export function createMediaStore({ db, config }) {
 
     async length(ref) {
       return lengthOf(bucket, new ObjectId(fileIdOf(ref)));
+    },
+
+    /**
+     * Reclaim stored files that no `media` document references any more. Every
+     * other delete path goes through a document, so a file left without one is
+     * permanently invisible — this is the only thing that can find it. Called
+     * from the sweeper, not from a request path.
+     */
+    async dropOrphanFiles() {
+      const names = new Set();
+      const docs = await mediaDocs.find({}, { projection: { _id: 1 } }).toArray();
+      for (const d of docs) { names.add(`${d._id}.blob`); names.add(`${d._id}.thumb`); }
+      const staleBefore = new Date(Date.now() - ORPHAN_FILE_GRACE_MS);
+      const files = await bucket.find({ uploadDate: { $lt: staleBefore } }).toArray();
+      let dropped = 0;
+      for (const f of files) {
+        if (names.has(f.filename)) continue;
+        await bucket.delete(f._id);
+        dropped += 1;
+      }
+      return dropped;
     },
 
     /** Remove every GridFS file a doc points at (both parts). */

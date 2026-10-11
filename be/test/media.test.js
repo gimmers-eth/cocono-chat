@@ -42,7 +42,10 @@ async function setupLive(overrides = {}) {
     media: ctx.mongo.db.collection('media'),
     // the real store, built the same way app.js builds it — the size-split
     // storage (inline vs GridFS) is exactly the thing a fake would hide
-    mediaStore: createMediaStore({ db: ctx.mongo.db, config: { ...config, ...LIMITS, ...overrides } }),
+    mediaStore: createMediaStore({
+      db: ctx.mongo.db, mediaDocs: ctx.mongo.db.collection('media'),
+      config: { ...config, ...LIMITS, ...overrides },
+    }),
     port: ctx.app.server.address().port,
   };
 }
@@ -579,7 +582,7 @@ test('media: sweeper — retention delete, orphan delete, report pin survives', 
     await mk('orphan-upload', { ageMs: 2 * 3600_000, devices: [] });
     await mk('fresh-sent', { ageMs: 60_000, devices: [{ ul: 'bobby', dv: 'd1' }] });
 
-    assert.deepEqual(await sweepMedia({ media: ctx.media, store: ctx.mediaStore }, ctx.conf), { expired: 1, orphans: 1 });
+    assert.deepEqual(await sweepMedia({ media: ctx.media, store: ctx.mediaStore }, ctx.conf), { expired: 1, orphans: 1, files: 0 });
     assert.deepEqual(
       (await ctx.media.find({}).toArray()).map((d) => d._id).sort(),
       ['fresh-sent', 'stale-reported'],
@@ -693,7 +696,7 @@ test('reports: a reported attachment is decrypted server-side and pinned', async
     const doc = await ctx.media.findOne({ _id: id });
     assert.equal(doc.reported, true);
     await ctx.media.updateOne({ _id: id }, { $set: { ts: new Date(Date.now() - 99 * 86400_000) } });
-    assert.deepEqual(await sweepMedia({ media: ctx.media, store: ctx.mediaStore }, ctx.conf), { expired: 0, orphans: 0 });
+    assert.deepEqual(await sweepMedia({ media: ctx.media, store: ctx.mediaStore }, ctx.conf), { expired: 0, orphans: 0, files: 0 });
     assert.ok(await ctx.media.findOne({ _id: id }));
     wsA.ws.close();
   } finally { await ctx.teardown(); }
@@ -1004,7 +1007,7 @@ test('media: an untouched file/video is NEVER swept before the retention time (r
     // 6 days: nobody tapped anything, so every blob must still be there
     const six = Date.now() - 6 * 86400_000;
     for (const id of kept) await ctx.media.updateOne({ _id: id }, { $set: { ts: new Date(six) } });
-    assert.deepEqual(await sweepMedia({ media: ctx.media, store: ctx.mediaStore }, ctx.conf), { expired: 0, orphans: 0 });
+    assert.deepEqual(await sweepMedia({ media: ctx.media, store: ctx.mediaStore }, ctx.conf), { expired: 0, orphans: 0, files: 0 });
     for (const id of kept) assert.ok(await ctx.media.findOne({ _id: id }), `${id} survived the sweep`);
 
     // past the window the sweep is what bounds storage — that is the deal
@@ -1193,5 +1196,40 @@ test('media: a half-uploaded blob cannot be sent or fetched (no ghost attachment
     const ack2 = await ws.waitFor((m) => m.type === 'ack' && m.cid === cid2);
     assert.equal(ack2.ok, true, JSON.stringify(ack2));
     ws.ws.close();
+  } finally { await ctx.teardown(); }
+});
+
+test('media: the sweeper reclaims a stored file whose document is gone', async () => {
+  const ctx = await setupLive({ mediaInlineMaxBytes: 0 });   // force GridFS
+  try {
+    const alice = await createUser(ctx, makeClient(), 'alice');
+    const bytes = randomBytes(3000);
+    const meta = await ctx.app.inject({
+      method: 'POST', url: '/api/media', headers: auth(alice.token),
+      payload: { kind: 'file', size: bytes.length, sha256: sha(bytes) },
+    });
+    const id = meta.json().id;
+    await ctx.app.inject({
+      method: 'PUT', url: `/api/media/${id}/blob`,
+      headers: { ...auth(alice.token), 'content-type': 'application/octet-stream' }, payload: bytes,
+    });
+    assert.equal((await ctx.mongo.db.collection('media.files').countDocuments({})), 1);
+
+    // the document disappears underneath the normal paths — a hand-delete, a
+    // crash between two writes, an operator cleaning up. Nothing else in the
+    // module could ever find those bytes again.
+    await ctx.media.deleteOne({ _id: id });
+    const swept = await sweepMedia({ media: ctx.media, store: ctx.mediaStore }, {
+      ...ctx.conf, mediaRetentionDays: 7, mediaOrphanMaxSec: 3600,
+    });
+    assert.equal(swept.files, 0, 'a file younger than the grace window is an upload in flight, not an orphan');
+    assert.equal((await ctx.mongo.db.collection('media.files').countDocuments({})), 1, 'and it is left alone');
+
+    // backdate it past the grace, and the next sweep takes the chunks with it
+    await ctx.mongo.db.collection('media.files').updateMany({}, { $set: { uploadDate: new Date(Date.now() - 60 * 60 * 1000) } });
+    const swept2 = await sweepMedia({ media: ctx.media, store: ctx.mediaStore }, ctx.conf);
+    assert.equal(swept2.files, 1);
+    assert.equal((await ctx.mongo.db.collection('media.files').countDocuments({})), 0);
+    assert.equal((await ctx.mongo.db.collection('media.chunks').countDocuments({})), 0, 'no chunks left behind');
   } finally { await ctx.teardown(); }
 });

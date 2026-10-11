@@ -136,7 +136,13 @@ export async function sweepMedia(deps, config, { now = Date.now() } = {}) {
   for (const d of expiredDocs) await deleteBlob({ media, store }, d);
   const orphans = orphanDocs.filter((d) => !ids.has(String(d._id)));
   for (const d of orphans) await deleteBlob({ media, store }, d);
-  return { expired: expiredDocs.length, orphans: orphans.length };
+  // A stored file whose document is gone is invisible to every other path in
+  // this module — nothing would ever look for it again, so the space is lost
+  // permanently. Reclaim those too (an aborted PUT that wrote a file and then
+  // failed before its doc update is enough to create one).
+  let files = 0;
+  if (store?.dropOrphanFiles) files = await store.dropOrphanFiles().catch(() => 0);
+  return { expired: expiredDocs.length, orphans: orphans.length, files };
 }
 
 /** Boot the hourly sweeper (single-process assumption, like the message

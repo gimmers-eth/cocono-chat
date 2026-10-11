@@ -79,7 +79,10 @@ export async function setupAdmin(overrides = {}) {
     reports: db.collection('reports'),
     reportMedia: db.collection('report_media'),
     media: db.collection('media'),
-    mediaStore: createMediaStore({ db, config: { ...config, coldSendRequiresVerification: false, ...overrides } }),
+    mediaStore: createMediaStore({
+      db, mediaDocs: db.collection('media'),
+      config: { ...config, coldSendRequiresVerification: false, ...overrides },
+    }),
     settings: db.collection('settings'),
     messages: db.collection('messages'),
     idDocs: db.collection('id_docs'),

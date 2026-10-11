@@ -36,7 +36,7 @@ export async function start() {
   // message queue's own bounds are handled by Mongo's TTL index instead.
   const sweeper = startMediaSweeper({
     media: mongo.db.collection('media'),
-    store: createMediaStore({ db: mongo.db, config }),
+    store: createMediaStore({ db: mongo.db, config, mediaDocs: mongo.db.collection('media') }),
     config, log: app.log,
     everyMs: config.mediaSweepSec * 1000,
   });

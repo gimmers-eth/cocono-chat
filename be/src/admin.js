@@ -82,7 +82,7 @@ await app.register(async function adminScope(instance) {
     graph: mongo.db.collection('graph'),
     // media blobs — account deletion purges owned uploads (lib/accountState)
     media: mongo.db.collection('media'),
-    mediaStore: createMediaStore({ db: mongo.db, config }),
+    mediaStore: createMediaStore({ db: mongo.db, config, mediaDocs: mongo.db.collection('media') }),
   });
 });
 
