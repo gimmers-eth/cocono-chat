@@ -33,10 +33,23 @@ const STATUS = {
   declined:    { image: 'Removed from this device', video: 'Removed from this device', file: 'Deleted — not downloaded' },
   expired:     { image: 'No longer available', video: 'No longer available', file: 'No longer available' },
   failed:      { image: 'Download failed', video: 'Download failed', file: 'Download failed' },
-  pruned:      { image: 'Removed from this device', video: 'Removed from this device', file: 'Removed from this device' },
+  // 'pruned' splits on WHY the record says it is (prunedWhy): a copy the phone
+  // already owns is not a loss, and the thumbnail that stays on the wall is a
+  // preview, not the file.
+  pruned:      { image: '', video: '', file: '' },
 };
 
 function statusLine(row) {
+  if (row?.state === 'pruned') {
+    // the honest sentence needs the reason the sweep recorded when it dropped
+    // the bytes — 'Removed from this device' over something the user saved
+    // reads like the app lost their file
+    const saved = row.prunedWhy === 'saved';
+    const text = saved
+      ? (row.kind === 'file' ? 'Saved to your phone' : 'Saved to your phone · preview only here')
+      : 'Removed from this device';
+    return mk('span', 'media-status', text);
+  }
   const t = STATUS[row?.state]?.[row?.kind];
   return t ? mk('span', 'media-status', t) : null;
 }

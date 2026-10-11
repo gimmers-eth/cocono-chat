@@ -154,6 +154,24 @@ test('bubble: an "image" that turns out to be SVG is never painted as a picture'
 
 // ---------------- tabs ----------------
 
+test('bubble: a pruned row says SAVED when the phone has it, REMOVED when it aged out', async () => {
+  await fresh();
+  const saved = await stored({ id: 'pw1' });
+  await store.updateMedia('pw1', { ...M.prunePatch({ ...saved, savedAt: Date.now() - 5 }) });
+  const savedNodes = bubbleNodes({ dir: 'in', kind: 'image', state: 'delivered' }, await store.getMedia('pw1'), {});
+  assert.match(savedNodes.map((x) => x.textContent).join(' '), /Saved to your phone/,
+    'the person owns a copy — say that, not "removed"');
+  assert.match(savedNodes.map((x) => x.textContent).join(' '), /preview only here/,
+    'and explain the thumbnail that is left');
+
+  const aged = await stored({ id: 'pw2' });
+  await store.updateMedia('pw2', M.prunePatch(aged));
+  const agedNodes = bubbleNodes({ dir: 'in', kind: 'file', state: 'delivered' }, await store.getMedia('pw2'), {});
+  assert.match(agedNodes.map((x) => x.textContent).join(' '), /Removed from this device/);
+  assert.ok(!/Saved/i.test(agedNodes.map((x) => x.textContent).join(' ')),
+    'the app must not claim a save that never happened');
+});
+
 test('tabs: the strip is five icons and switching is a callback, not a location', async () => {
   await fresh();
   const strip = dom.byId('chat-tabs');
