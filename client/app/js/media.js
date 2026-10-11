@@ -745,7 +745,13 @@ export async function downloadMedia(client, row, { thumbOnly = false, onProgress
  */
 function noop() {}
 
-async function fetchResumable(client, blobId, row, { onProgress = noop } = {}) {
+async function fetchResumable(client, blobId, row, { onProgress } = {}) {
+  // `?? noop`, NOT a default parameter: the caller passes `onProgress: null`
+  // when nobody is watching (the auto-download on arrival), and a default only
+  // fills in for `undefined` — so the first progress callback threw
+  // 'onProgress is not a function' and every incoming image landed in
+  // 'failed'. The bug was invisible to a stub that never called the callback.
+  const report = typeof onProgress === 'function' ? onProgress : noop;
   const parts = [];
   let cursor = 0;
   if (row.partial && Number(row.partialBytes) > 0) {
@@ -762,7 +768,7 @@ async function fetchResumable(client, blobId, row, { onProgress = noop } = {}) {
           cursor += bytes.length;
         },
         onProgress: (got, total) => {
-          onProgress(got, total);              // the viewer's bar, live
+          report(got, total);                  // the viewer's bar, live
           const p = total ? Math.min(1, got / total) : 0;
           // throttled to ~2 % steps: an IDB write per 64 KB chunk would be a
           // thousand writes for one file, and the bar cannot show the difference

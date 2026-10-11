@@ -6,7 +6,7 @@
 // it reachable by a stub that fakes the crypto away.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { installIdbShim } from './idbshim.js';
 import * as c from '../src/crypto.js';
 import { b64uEncode } from '../src/encoding.js';
@@ -54,7 +54,7 @@ function pipelineClient({ ct, media, chunks = 4, failAfter = null } = {}) {
   return {
     calls,
     get delivered() { return delivered; },
-    async fetchMediaBytes(id, { start = 0, onChunk } = {}) {
+    async fetchMediaBytes(id, { start = 0, onChunk, onProgress } = {}) {
       calls.push({ what: 'download', id, start });
       const rest = ct.slice(start);
       const size = Math.max(1, Math.ceil(rest.length / chunks));
@@ -67,6 +67,10 @@ function pipelineClient({ ct, media, chunks = 4, failAfter = null } = {}) {
         at += part.length;
         delivered += part.length;
         onChunk?.(part, start + at, ct.length);
+        // the real client reports progress too; a stub that skipped it let a
+        // crash in that exact callback pass every test in the file
+        if (typeof onProgress !== 'function') throw new TypeError('fetchMediaBytes must hand onProgress to the caller');
+        onProgress?.(start + at, ct.length);
       }
       return rest;
     },
@@ -368,4 +372,50 @@ test('pipeline against the real server: a poster-less video survives, then downl
 
   assert.equal(await srv.mongo.db.collection('media').findOne({ _id: media.id }), null,
     'the last device to ack released it (req 8)');
+});
+
+test('pipeline against the real server: an IMAGE arrives, downloads, verifies and acks', async (t) => {
+  // Why this test exists: the auto-download of an IMAGE is the one path that
+  // runs WITHOUT a watching progress callback, and a `onProgress = noop`
+  // default-parameter never fires for `null` — so every incoming image failed
+  // with 'onProgress is not a function'. Only the real SDK, calling the real
+  // contract, could show that. (The video case passed because the user taps it
+  // and the tap passes a callback.)
+  const srv = await startServer();
+  const aliceName = randUser('alice');
+  const bobName = randUser('bob');
+  const cli = [];
+  t.after(async () => {
+    for (const c0 of cli) { try { c0.disconnect(); } catch { /* gone */ } }
+    await srv.deleteUser(aliceName);
+    await srv.deleteUser(bobName);
+    await srv.stop();
+  });
+  shim.reset();
+  store.setScope(`img${++seq}`);
+
+  const alice = srv.client(); cli.push(alice);
+  const bob = srv.client(); cli.push(bob);
+  await alice.register(aliceName);
+  await bob.register(bobName);
+  alice.connect(); bob.connect();
+  await Promise.all([waitOpen(alice), waitOpen(bob)]);
+
+  const jpg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...randomBytes(40_000), 0xff, 0xd9]);
+  const thumb = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...randomBytes(1200), 0xff, 0xd9]);
+  await alice.sendMedia(bobName, { kind: 'image', bytes: jpg, thumb, name: 'photo.jpg', mime: 'image/jpeg', w: 900, h: 700 });
+  const media = await waitFor(bob, 'message', (m) => m.text.startsWith('{"media":'), 20000).then((m) => JSON.parse(m.text).media);
+
+  const row = M.mediaRow({ key: media.id, peer: bobName, dir: 'in', kind: 'image', media, msgId: 'in:img', ts: Date.now() });
+  await store.saveMedia(row);
+  const res = await M.applyArrivalPolicy(bob, row);        // NO onProgress: the arrival case
+  assert.equal(res.state, 'stored', `${res.state}: ${res.error?.message ?? ''}`);
+
+  const after = await store.getMedia(media.id);
+  assert.equal(after.state, 'stored');
+  assert.deepEqual(new Uint8Array(await after.data.arrayBuffer()), jpg, 'the photo arrived intact');
+  assert.ok(after.thumb && after.thumb.size > 0, 'with its preview');
+  assert.equal(after.data.type, 'image/jpeg', 'typed, so the bubble can paint it');
+  assert.equal(await srv.mongo.db.collection('media').countDocuments({ _id: media.id }), 0,
+    'and the ack released the server copy (req 8)');
 });
