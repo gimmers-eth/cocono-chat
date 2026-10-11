@@ -993,6 +993,12 @@ body[data-view="blocked"] .page-footer { display: none; }
   border-top: 1px solid var(--border); opacity: .75; user-select: none;
 }
 
+/* Update notice (js/update.js): the footer build turns into a reload button
+   when a newer build is on the server, and into plain copy if reload failed. */
+.update-notice { display: block; margin-top: .4rem; font-size: .85rem; color: var(--text); }
+.update-notice .btn-update { display: block; width: 100%; }
+.update-notice .update-manual { opacity: .85; }
+
 /* trust-modal evidence table + consequence box */
 .trust-facts {
   /* thin grey rules cap the evidence table top & bottom so it reads as a
