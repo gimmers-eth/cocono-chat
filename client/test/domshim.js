@@ -35,6 +35,12 @@ class El {
     // the properties the media code touches (declared so tests can assert them)
     this.src = '';
     this.href = '';
+    // declared because a real engine declares it: `download` is an own property
+    // on every browser that supports downloads, and the code under test probes
+    // `'download' in a` BEFORE assigning (assignment would create it and make
+    // the probe meaningless). A test simulating a browser WITHOUT the feature
+    // deletes it, which is what an old iOS really looks like.
+    this.download = '';
     this.type = '';
     this.value = '';
     this.title = '';

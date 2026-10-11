@@ -1523,7 +1523,6 @@ body[data-view="blocked"] .page-footer { display: none; }
 .viewer-toggle:hover:not(:disabled) { border-color: var(--accent); }
 .viewer-toggle:disabled { opacity: .5; cursor: default; }
 .viewer-toggle i { margin-right: .4em; }
-.viewer-keep-on { border-color: var(--accent); color: var(--accent); }
 
 /* STAFF MODERATION notice at the TOP of the peer profile sheet (chat.js):
    a red alarm strip — the platform's own verdict about this account. Same

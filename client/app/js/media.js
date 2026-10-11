@@ -288,22 +288,26 @@ export function isBlurred(rec, verified) {
 }
 
 /**
- * Records whose DECRYPTED bytes are past the local window and unpinned.
+ * When the app may throw away a copy it holds. Two independent triggers
+ * (product rule, 2026-10):
  *
- * The clock starts when the bytes LANDED ON THIS DEVICE (`storedAt`), not when
- * the message was sent. Reading `ts` instead — which an earlier version did —
- * made manual downloads meaningless: open a three-week-old conversation, tap
- * Download on a file, and the next prune pass drops the bytes you just waited
- * for, because the message is old. `ts` stays what it always was: the position
- * of the media in the conversation timeline.
+ *   1. the retention window has passed — measured from `storedAt`, when the
+ *      bytes LANDED on this device, not from `ts`; and
+ *   2. the item has already been handed to the phone (`savedAt`): the person
+ *      owns a copy in Files/Downloads, so the app's duplicate is pure weight.
  *
- * `keep` (the viewer's 'Keep in app') is the only exemption. Note the label:
- *  Keep keeps the copy IN the app; 'Save to device' gives it to the OS.
+ * The old 'Keep on this device' pin is gone: with rule 2 the user has a
+ * stronger, ordinary thing — they saved the file — and a second way to
+ * accumulate invisible data forever was not worth its label confusion. (A
+ * leftover `keep: true` on a record written by an older build is IGNORED here,
+ * deliberately: nothing may become un-prunable because a feature moved on.)
+ *
+ * `ts` stays what it always was: the media's position in the conversation.
  */
 export function pruneDue(records, { now = Date.now(), days = LOCAL_RETENTION_DAYS_DEFAULT } = {}) {
   const cutoff = now - Math.max(0, Number(days) || 0) * 86_400_000;
-  return (records ?? []).filter((r) => r && r.state === 'stored' && r.keep !== true
-    && Number(r.storedAt ?? r.ts) < cutoff);
+  return (records ?? []).filter((r) => r && r.state === 'stored'
+    && (Number(r.savedAt) > 0 || Number(r.storedAt ?? r.ts) < cutoff));
 }
 
 /** Dropping bytes keeps the record: name, size, date and direction stay (the
@@ -318,7 +322,13 @@ export function pruneDue(records, { now = Date.now(), days = LOCAL_RETENTION_DAY
  */
 export function prunePatch(rec) {
   const keepThumb = rec.kind === 'image' || rec.kind === 'video';
-  return { data: null, thumb: keepThumb ? rec.thumb ?? null : null, state: 'pruned' };
+  return {
+    data: null,
+    thumb: keepThumb ? rec.thumb ?? null : null,
+    state: 'pruned',
+    // WHY this copy is gone, decided at prune time while the facts are fresh
+    prunedWhy: Number(rec.savedAt) > 0 ? 'saved' : 'age',
+  };
 }
 
 // ---------------- the hand-off to the DEVICE (req 3/6's last step) ----------------
@@ -363,56 +373,76 @@ export function deviceFileName(row) {
 }
 
 /**
- * Hand the decrypted bytes to the device. Two doors, because mobile browsers
- * disagree about who owns "download":
- *   1. Web Share with files — iOS/Android's way to "Save to Files" or open the
- *      item in another app, and the only one that behaves in an installed PWA.
- *      It needs a user gesture, which a button press is.
- *   2. A same-origin `<a download>` on the Blob URL — desktop and Android
- *      Chrome write it to Downloads.
- * `how` says WHICH door was used, and the caller must say it out loud: a save
- * that quietly landed nowhere is worse than an error. 'cancelled' (a dismissed
- * share sheet) is a normal outcome, not a failure.
+ * Hand the decrypted bytes to the phone: a real DOWNLOAD (an `<a download>` on
+ * the Blob URL), which is what the user asked for. The Web Share sheet used to
+ * be the preferred door and is not: on a phone it opens a sheet, "does not
+ * save the file", and puts a chooser where a result should be. Sharing is still
+ * reachable from the file once it is in Files, so nothing is lost by removing
+ * it from this button.
+ *
+ * Writes `savedAt` on success — that stamp is what lets the retention job
+ * release the app's own duplicate (rule 2 of `pruneDue`).
+ *
+ * `how` is reported because a save nobody confirms is indistinguishable from a
+ * broken button: 'saved' (download started), 'unsupported' (no anchor
+ * download in this engine — the caller then offers the fallback), 'failed'.
  */
 export async function saveToDevice(row) {
+  if (!hasLocalBytes(row)) return { ok: false, how: 'none' };
+  const name = deviceFileName(row);
+  // Its OWN URL, outside the bubble/viewer scopes: a re-render or a closed
+  // modal must never revoke the address a save is mid-flight on.
+  let url = '';
+  try {
+    const a = document.createElement('a');
+    // Probe BEFORE assigning: `a.download = x` CREATES the property, so an
+    // `'download' in a` check afterwards is true in every engine and the
+    // unsupported branch becomes code that can never run (my own test caught
+    // exactly this). The anchor also must not be built before we know it works.
+    if (!('download' in a)) return { ok: false, how: 'unsupported', name };
+    url = URL.createObjectURL(row.data);
+    a.href = url;
+    a.download = name;          // the filename the OS stores it under
+    a.rel = 'noopener';
+    a.style.display = 'none';
+    document.body.append(a);
+    a.click();
+    a.remove();
+    await updateMedia(row.id, { savedAt: Date.now() });
+    return { ok: true, how: 'saved', name };
+  } catch (error) {
+    return { ok: false, how: 'failed', error };
+  } finally {
+    // Long enough for a big write to hand off, short enough that a failed save
+    // cannot strand the bytes in the tab forever.
+    if (url) setTimeout(() => { try { URL.revokeObjectURL(url); } catch { /* gone */ } }, 10_000);
+  }
+}
+
+/**
+ * Last-resort door for engines that swallow `<a download>` (iOS in an
+ * installed PWA is the case). Separate on purpose: Save is the normal button,
+ * this one only appears when Save could not happen, so the user is never asked
+ * to choose between two words for the same thing.
+ */
+export async function shareToDevice(row) {
   if (!hasLocalBytes(row)) return { ok: false, how: 'none' };
   const name = deviceFileName(row);
   const type = String(row.mime ?? '').trim() || 'application/octet-stream';
   let file = row.data;
   try {
     file = new File([row.data], name, { type, lastModified: Number(row.ts) || Date.now() });
-  } catch { /* older engines: a nameless Blob still downloads via the anchor */ }
-
+  } catch { /* no File constructor: a Blob still shares on most engines */ }
   try {
-    if (typeof navigator?.share === 'function' && navigator.canShare?.({ files: [file] }) === true) {
-      await navigator.share({ files: [file], title: name });
-      return { ok: true, how: 'shared', name };
+    if (typeof navigator?.share !== 'function' || navigator.canShare?.({ files: [file] }) !== true) {
+      return { ok: false, how: 'unsupported', name };
     }
-  } catch (err) {
-    if (err?.name === 'AbortError') return { ok: false, how: 'cancelled' };
-    // any other share failure (denied, no handler): fall through to the anchor
-  }
-
-  // Its OWN URL, deliberately outside the bubble/viewer scopes: a re-render or
-  // a closed modal must never revoke the address a save is mid-flight on.
-  let url = '';
-  try {
-    url = URL.createObjectURL(row.data);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = name;
-    a.rel = 'noopener';
-    a.style.display = 'none';
-    document.body.append(a);
-    a.click();
-    a.remove();
-    return { ok: true, how: 'saved', name };
-  } catch (err) {
-    return { ok: false, how: 'failed', error: err };
-  } finally {
-    // Long enough for a 10 MB write to hand off, short enough that a failed
-    // save cannot strand the bytes in the tab forever.
-    if (url) setTimeout(() => { try { URL.revokeObjectURL(url); } catch { /* gone */ } }, 10_000);
+    await navigator.share({ files: [file], title: name });
+    await updateMedia(row.id, { savedAt: Date.now() });
+    return { ok: true, how: 'shared', name };
+  } catch (error) {
+    if (error?.name === 'AbortError') return { ok: false, how: 'cancelled' };
+    return { ok: false, how: 'failed', error };
   }
 }
 
@@ -526,11 +556,17 @@ export function mediaRow({ key, blobId = key, peer, dir, kind, media, msgId, ts 
     sha256: media?.sha256 ?? null,
     w: media?.w ?? null, h: media?.h ?? null, dur: media?.dur ?? null,
     animated: media?.animated === true,
+    // `keep` is RETIRED (see pruneDue): a record written by an older build may
+    // still carry keep:true, and the sweep ignores it — nothing may become
+    // un-prunable because a feature moved on.
     state: 'pending',      // nothing on this device yet (the sender's own row
                            // is written 'stored' by the caller — it made the bytes)
     storedAt: null,        // when the bytes ARRIVED here: the prune clock
                            // (ts is the conversation position, a different thing)
-    keep: false,
+    savedAt: null,         // when they were handed to the PHONE — after that
+                           // the app's copy is weight, not a holding (prune rule 2)
+    prunedWhy: null,       // 'saved' | 'age': why a pruned row says what it says
+
     blurred: null,         // null = no override, use the verified-flag default
     data: null,
     thumb: null,

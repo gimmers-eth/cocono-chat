@@ -17,7 +17,7 @@ import { mediaWith, messagesWith, updateMedia } from '../store.js';
 import {
   formatSize, durationText, isBlurred, objectUrl, releaseScope, filterMedia,
   tabBuckets, downloadMedia, declineMedia, renderableAsImage,
-  saveToDevice, hasLocalBytes,
+  saveToDevice, shareToDevice, hasLocalBytes,
 } from '../media.js';
 
 // exported so chat.js and the tests agree on the vocabulary
@@ -409,46 +409,49 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
     controls.append(expand);
   }
   if (hasLocalBytes(row)) {
+    // SAVE IS A DOWNLOAD. It used to open the Web Share sheet first, which on a
+    // phone is a chooser, not a result — 'Save' that leaves the file nowhere
+    // visible is worse than no button. Share survives only as the explicit
+    // fallback this reveals if (and only if) the engine refuses to download
+    // (iOS in an installed PWA is that case), so the user is never asked to
+    // pick between two words for the same thing.
     const save = btn('viewer-toggle', 'mediaSave', 'Save to device',
-      row.kind === 'file' ? 'Save this file, or open it in another app'
-        : row.kind === 'video' ? 'Save this video to the device'
-          : 'Save this photo to the device');
+      row.kind === 'file' ? 'Download this file to the phone'
+        : row.kind === 'video' ? 'Download this video to the phone'
+          : 'Download this photo to the phone');
     save.addEventListener('click', async () => {
       save.disabled = true;
       const res = await saveToDevice(row);
       save.disabled = false;
-      if (res.ok) status(res.how === 'shared'
-        ? 'Shared — choose “Save to Files”, or any app that can open it.'
-        : `Sent to your downloads as ${res.name}. Nothing appeared? This browser blocks in-app downloads — open it from your Files app, or long-press the photo.`);
-      else if (res.how === 'cancelled') status('Save cancelled.');
-      else status('This browser would not hand the file over — try expanding it and saving from there.', true);
+      if (res.ok) {
+        status(`Saved as ${res.name} — open it from your Files/Downloads app.`);
+        // the stamp is the point: it tells the retention job this copy is now
+        // a duplicate of something the person owns
+        onChange?.({ ...row, savedAt: Date.now() });
+        return;
+      }
+      if (res.how === 'unsupported') {
+        status('This browser blocks in-app downloads — use Share to put it in Files, or open it in another app.', true);
+        const share = btn('viewer-toggle', 'mediaShare', 'Share instead', 'Save via the share sheet');
+        share.addEventListener('click', async () => {
+          const sres = await shareToDevice(row);
+          if (sres.ok) { status('Shared — choose “Save to Files”.'); onChange?.({ ...row, savedAt: Date.now() }); }
+          else if (sres.how === 'cancelled') status('Share cancelled.');
+          else status('No save route works in this browser.', true);
+        });
+        controls.append(share);
+        return;
+      }
+      status(res.how === 'cancelled' ? 'Save cancelled.' : 'The save did not start — try again.', true);
     });
     controls.append(save);
   }
-  // Keep (DESIGN.md's "mark to keep long term"): the local prune job skips
-  // pinned records. Say what the alternative actually costs — once the server
-  // has deleted the blob, a pruned copy is gone for good on this device.
-  if (row.state === 'stored') {
-    // 'in app', never 'on this device': the two buttons in this row are the
-    // ONLY pair in the feature whose labels sound alike and do opposite things
-    // — Save hands the bytes to the OS (out of our reach, immortal), Keep
-    // exempts our own copy from the sweep (stays here, invisible, deletable by
-    // clearing the chat). Saying 'Keep on this device' made them read as two
-    // strengths of the same verb.
-    const keep = btn(`viewer-toggle${row.keep ? ' viewer-keep-on' : ''}`, 'mediaKeep',
-      row.keep ? 'Kept in app' : 'Keep in app',
-      row.keep ? 'Unpin: after the retention window the app may drop these bytes (they are not in your Files unless you Save them)'
-        : 'Pin: keep these bytes in the app past the retention window — to put them in your phone, use Save to device');
-    keep.addEventListener('click', async () => {
-      const next = !row.keep;
-      await updateMedia(row.id, { keep: next });
-      row.keep = next;
-      keep.classList.toggle('viewer-keep-on', next);
-      keep.replaceChildren(iconEl('mediaKeep'), document.createTextNode(next ? 'Kept in app' : 'Keep in app'));
-      onChange?.({ ...row });
-    });
-    controls.append(keep);
-  }
+  // There is no 'Keep on this device' pin any more, deliberately. Two things
+  // replaced it: saving the file makes the PHONE the owner (so the app may
+  // release its duplicate — prune rule 2), and the retention window covers
+  // everything else. A pin only ever grew a pile of data nobody could see,
+  // clean or name, and its label was indistinguishable from Save's.
+
   if (controls.children.length) host.append(controls);
 
   // the ONE teardown: the full-size Blob URLs go when the modal closes (they

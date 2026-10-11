@@ -415,19 +415,20 @@ replay dedup · envelope HMAC/sender-mismatch/unknown-recipient · auth flow hap
   (chat · images · videos · files · links) with sent-vs-received borders and a
   searchable file list, the message-modal viewer (Blur / Play-Pause for animated
   images / Play / Mute / Download / Keep), and a per-device retention setting.
-- **Getting the bytes ONTO the phone** was the missing half: `Download` only
-  moved them from the server into the app's own encrypted store, so a stored
-  file could not be opened by anything else. Every stored item now offers
-  **Save to device** (file bubble, Files-tab row, viewer), preferring
-  `navigator.share({files})` — the door that works in an installed PWA on
-  iOS/Android, reaching *Save to Files* or another app — with a same-origin
-  `<a download>` fallback whose filename always carries an extension
-  (`deviceFileName` scrubs the sender's untrusted name; `IMG_0142` without
-  `.jpg` opens in nothing). It says WHICH door it used, and a dismissed share
-  sheet reads cancelled, never failed: a save that quietly landed nowhere is
-  worse than an error. Images also get **Expand** (shared lightbox,
-  `{round:false}` — its 50% radius suits the square-cropped avatars it was built
-  for and carves the corners off a photo).
+- **Getting the bytes ONTO the phone, and releasing the app's copy.** Save is a
+  real DOWNLOAD (`<a download>` on the Blob URL, filename always carrying an
+  extension via `deviceFileName`); the Web Share sheet, which on a phone is a
+  chooser and not a result, is now only revealed when the engine refuses to
+  download. There is no 'Keep on this device' pin any more — its label was
+  indistinguishable from Save's, and the rule is now two observable triggers:
+  the retention window passed **since the bytes landed** (`storedAt`, not the
+  message's age) or the phone already owns a copy (`savedAt`). Only the payload
+  goes; the transcript row, name/size/date and a photo/video thumbnail stay, and
+  `prunedWhy: 'saved' | 'age'` is recorded so the UI tells the truth about which
+  one happened. A stale `keep: true` is deliberately ignored — nothing may become
+  un-prunable because a feature moved on. Images also get **Expand** (shared
+  lightbox with `{round:false}`: the 50% radius suits the square-cropped avatars
+  it was built for and carves the corners off a photo).
 - **Keep in app ≠ Save to device** — the pair that read as one verb, so the
   labels now name the two destinations. **Save to device** gives the bytes to the
   OS: outside the app's reach (no sweep, no clear-chat, the phone's own storage).

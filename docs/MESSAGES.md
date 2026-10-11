@@ -446,36 +446,32 @@ sweep until the admin deletes the report (which deletes its media docs with it).
 | Decrypted media bytes on a device | client IDB `media` | settings drawer, 7 d default | boot + daily prune, measured **from when the bytes landed on that device** (`storedAt`), not from the message's age; `keep: true` ("Keep on this device") exempt |
 | Text transcripts on a device | client IDB `messages` | none — the user's own history | clear-chat stays manual |
 
-### 2.13a "Keep in app" vs "Save to device" — two buttons, two destinations
+### 2.13a Getting a file out of the app: Save, and the two ways a copy is released
 
-They run in opposite directions, which is why the labels share no noun:
+**Save to device** is a DOWNLOAD — a same-origin `<a download>` on the Blob URL,
+landing in the phone's Files/Downloads under a name that always carries an
+extension (`deviceFileName` adds one; `IMG_0142` without `.jpg` opens nowhere).
+It used to open the Web Share sheet first, which on a phone is a chooser rather
+than a result; Share is now only **revealed when the engine refuses to
+download** (iOS in an installed PWA is that case), so the user is never handed
+two words for one action.
 
-- **Save to device** hands the bytes to the operating system — `navigator.share`
-  with files where the browser allows it (iOS/Android's route to *Save to
-  Files*, or to any app that opens the type), a same-origin `<a download>`
-  otherwise. After that they are outside the app entirely: no retention window,
-  clear-chat, logout or site-data wipe can remove them, and they occupy the
-  phone's own storage. Needs the full payload on this device (a `pruned` row
-  must be re-fetched first).
-- **Keep in app** is a flag on this device's media record. The copy stays
-  inside the app's encrypted store and is exempt from the local sweep below —
-  invisible outside the app, **not** synced to your other devices, silent to the
-  server, and deleted if you clear the chat or the site's data.
+There is **no 'Keep on this device' pin** — its label was indistinguishable from
+Save's, and two triggers that are both observable replaced it:
 
-Pin what you want at full size inside the app; Save what you need to open or
-keep elsewhere. The settings drawer's window (1/3/7/30/90 days, default 7)
-applies to everything not pinned.
+| Trigger | Why the app may release its copy | What the user sees |
+| ------- | ------------------------------------ | ------------------ |
+| `savedAt` | the phone owns a copy now, so the app's is weight | "Saved to your phone" (a photo/video keeps its preview) |
+| `storedAt` + window | the retention window (drawer: 1/3/7/30/90 d, default 7) passed since the bytes LANDED here | "Removed from this device" + **Download again** |
 
-Without Keep, once the window passes the sweep drops the bytes and the record
-becomes `pruned`. What stays: the message in the transcript, its name/size/date,
-and for a photo or video the 256 px thumbnail — the wall keeps its picture and
-only the payload goes. What goes: the full-resolution image, the video, the
-file, and with them the ability to **Save to device**. The viewer then offers
-**Download again**, because only the server knows whether a copy survives (a
-blob lives until EVERY listed device has acked) — and it takes that answer,
-`404 unknown_media` → `expired`, as the verdict. `pruned` is therefore not
-`expired`: one is this device choosing to let bytes go, the other is the network
-confirming there is nothing left to fetch.
+Either way only the PAYLOAD goes: the transcript row, name/size/date, and for a
+photo or video the 256 px thumbnail stay, so the wall keeps its picture. The
+reason is stored (`prunedWhy: 'saved' | 'age'`) because the two sentences are
+different and only one of them is a loss. `pruned` is not `expired`: a pruned row
+asks the server again (only the server knows whether a copy survived — a blob
+lives until EVERY listed device has acked), and `404 unknown_media` is what makes
+it `expired`. A leftover `keep: true` from an older build is ignored on purpose:
+nothing may become un-prunable because a feature moved on.
 
 ### 2.14 Scaling & implementation notes
 

@@ -90,9 +90,13 @@ test('media: rows carry the blob pointer separately from the local key', () => {
   assert.equal(blobOf(inRow), 'blob-1');
   assert.equal(inRow.peer, 'bobby', 'peers are stored lowercase, like every other store');
   assert.equal(inRow.state, 'pending');
-  assert.equal(inRow.keep, false);
   assert.equal(inRow.blurred, null, 'null = no override, use the verified-flag default');
   assert.equal(inRow.data, null);
+  // the two timestamps the retention rule reads — and NO `keep`: the pin is
+  // retired, and a record must not become un-prunable because a feature moved
+  assert.equal(inRow.savedAt, null, 'not handed to the phone yet');
+  assert.equal(inRow.storedAt, null, 'not fetched here yet');
+  assert.equal(inRow.keep, undefined, 'there is no pin field any more');
 
   // OUTGOING: written before the upload answers, so there is no blob yet
   const outRow = mediaRow({ key: 'out:abc', blobId: null, peer: 'bobby', dir: 'out', kind: 'file', media: { name: 'n' }, msgId: 'out:abc', ts: 1 });
@@ -120,25 +124,34 @@ test('media: blur policy (req 7) — display only, sender-verified clears it', (
   assert.equal(isBlurred({ dir: 'out', kind: 'image' }, false), false);
 });
 
-test('media: local pruning drops bytes, keeps records, honours Keep', () => {
+test('media: pruning drops bytes when the window passes OR the phone has it', () => {
   const day = 86_400_000;
   const now = 10 * day;
   const rows = [
     { id: 'old', state: 'stored', ts: now - 30 * day, kind: 'image', keep: false, data: 1, thumb: 1 },
+    // a stale pin from a build that had 'Keep on this device': retired, so it
+    // must NOT make the record immortal
     { id: 'pinned', state: 'stored', ts: now - 30 * day, kind: 'file', keep: true, data: 1 },
-    { id: 'recent', state: 'stored', ts: now - day, kind: 'image', keep: false, data: 1 },
+    // saved to the phone yesterday: the person owns it now, the app's copy is
+    // weight, so it goes — long before the window
+    { id: 'saved', state: 'stored', ts: now - day, storedAt: now - day, savedAt: now - 2, kind: 'image', data: 1, thumb: 1 },
+    { id: 'recent', state: 'stored', ts: now - day, storedAt: now - day, kind: 'image', data: 1 },
     { id: 'pending', state: 'pending', ts: now - 30 * day, kind: 'file', data: null },
     { id: 'declined', state: 'declined', ts: now - 30 * day, kind: 'file', data: null },
   ];
   const due = pruneDue(rows, { now, days: 7 });
-  assert.deepEqual(due.map((r) => r.id), ['old'], 'only stored, unpinned, out-of-window records');
+  assert.deepEqual(due.map((r) => r.id).sort(), ['old', 'pinned', 'saved'],
+    'due = past the window (pin or no pin), or already handed to the phone');
   const patch = prunePatch(rows[0]);
   assert.equal(patch.data, null, 'the bytes go');
   assert.ok(patch.thumb, 'an image keeps its thumbnail (the wall still shows it)');
   assert.equal(patch.state, 'pruned');
   const filePatch = prunePatch({ id: 'f', kind: 'file', thumb: 1 });
   assert.equal(filePatch.thumb, null, 'a file has no preview to keep');
-  assert.equal(pruneDue(rows, { now, days: LOCAL_RETENTION_DAYS_DEFAULT }).length, 1);
+  assert.equal(pruneDue(rows, { now, days: LOCAL_RETENTION_DAYS_DEFAULT }).length, 3);
+  assert.equal(prunePatch({ id: 's', kind: 'image', savedAt: now - 5 }).prunedWhy, 'saved',
+    'and the record remembers WHY, so the UI can say "Saved to your phone" rather than "removed"');
+  assert.equal(prunePatch({ id: 'a', kind: 'image' }).prunedWhy, 'age');
 });
 
 test('media: the retention window is measured from when the bytes ARRIVED', () => {

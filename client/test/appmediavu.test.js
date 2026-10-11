@@ -224,7 +224,7 @@ test('tabs: the files list is searchable and keeps its caret while typing', asyn
 
 // ---------------- the viewer ----------------
 
-test('viewer: blur and Keep are user choices that PERSIST, and the download button works', async () => {
+test('viewer: blur persists, and Save is a real download that stamps savedAt', async () => {
   await fresh();
   const img = await stored({ id: 'vBlur' });
   await store.saveMessage({ id: 'in:v', peer: 'bobby', dir: 'in', kind: 'image', mediaId: 'vBlur', ts: 1, text: 'Photo' });
@@ -248,10 +248,11 @@ test('viewer: blur and Keep are user choices that PERSIST, and the download butt
   assert.equal((await store.getMedia('vBlur')).blurred, false, 'the toggle writes the override');
   assert.deepEqual(changed.map((r) => r.blurred), [false]);
 
-  const keepBtn = host.querySelectorAll('.viewer-toggle').find((b) => /Keep/i.test(b.textContent));
-  keepBtn.click();
-  await settle();
-  assert.equal((await store.getMedia('vBlur')).keep, true, 'Keep pins against the local prune (§4.5)');
+  // There is no pin any more — and that has to be asserted, because the
+  // alternative is a button quietly reappearing next to Save years later
+  assert.ok(!host.querySelectorAll('.viewer-toggle').some((b) => /Keep/i.test(b.textContent)),
+    'no Keep button: Save-to-phone and the window are the two rules');
+  assert.equal((await store.getMedia('vBlur')).keep, undefined);
   teardown();
   assert.equal(host.children.length, 0, 'closing empties the pane');
 });
@@ -380,53 +381,88 @@ function setNavigator(value) {
   Object.defineProperty(globalThis, 'navigator', { value, configurable: true, writable: true });
 }
 
-test('save: the share sheet is the door when the browser can use it', async () => {
+test('save: pressing Save downloads — it does NOT open a share sheet', async () => {
   await fresh();
-  const shared = [];
-  setNavigator({
-    canShare: (data) => !!(data?.files?.length),
-    share: async (data) => { shared.push(data); },
-  });
-  const row = await stored({ id: 'sv1', kind: 'file', name: 'invoice.pdf', mime: 'application/pdf' });
-  const res = await M.saveToDevice(row);
-  assert.equal(res.ok, true);
-  assert.equal(res.how, 'shared', 'iOS/Android: "Save to Files" or another app lives here');
-  assert.equal(shared[0].files[0].name, 'invoice.pdf', 'the FILE carries the name the user sees');
-  assert.equal(shared[0].files[0].type, 'application/pdf');
-  assert.equal(shared[0].title, 'invoice.pdf');
-  setNavigator({ onLine: true, userAgent: 'node' });
-});
-
-test('save: no share support → a same-origin download anchor with the right filename', async () => {
-  await fresh();
-  setNavigator({ onLine: true });     // no share/canShare at all (desktop Firefox)
-  const row = await stored({ id: 'sv2', kind: 'video', name: 'clip', mime: 'video/mp4' });
+  // the phone case: a share SHEET is a chooser, not a result, and the report
+  // was exactly that ('opens the OS share and does not save the file'), so the
+  // download anchor is the primary door even when sharing is available
+  let shared = 0;
+  setNavigator({ canShare: () => true, share: async () => { shared += 1; } });
+  const row = await stored({ id: 'sv1', kind: 'file', name: 'invoice', mime: 'application/pdf' });
   const before = dom.created.length;
   const res = await M.saveToDevice(row);
-  assert.equal(res.how, 'saved', res.how);
+  assert.equal(res.ok, true);
+  assert.equal(res.how, 'saved');
+  assert.equal(shared, 0, 'the share sheet must not open on a normal Save');
   const anchor = dom.created.slice(before).find((el) => el.tagName === 'A');
-  assert.ok(anchor, 'a <a download> is the fallback door');
-  assert.equal(anchor.download, 'clip.mp4', 'and it carries the extension the OS needs');
-  assert.match(anchor.href, /^blob:local\//);
-  assert.equal(anchor.parentNode, null, 'removed again — no stray node in the body');
+  assert.equal(anchor.download, 'invoice.pdf', 'the extension is added — a nameless file opens nowhere');
+  assert.equal((await store.getMedia('sv1')).savedAt > 0, true,
+    'and the record is stamped, which is what lets the sweep release the duplicate');
   setNavigator({ onLine: true, userAgent: 'node' });
 });
 
-test('save: a dismissed sheet is not an error, and missing bytes are not a save', async () => {
+test('save: an engine that blocks downloads gets ONE explicit fallback', async () => {
+  await fresh();
+  let shared = 0;
+  setNavigator({ canShare: () => true, share: async () => { shared += 1; } });
+  const row = await stored({ id: 'sv2' });
+  // no <a download> support: the anchor door refuses, then Share is offered
+  const realCreate = document.createElement.bind(document);
+  document.createElement = (tag) => {
+    const el = realCreate(tag);
+    // DELETE the property: the code under test asks `'download' in a`, which is
+    // exactly how a browser without download support presents (an own property
+    // set to undefined would still answer true — that is the whole check)
+    if (String(tag).toLowerCase() === 'a') delete el.download;
+    return el;
+  };
+  const host = dom.byId('msg-media');
+  const statuses = [];
+  const teardown = view.openViewer(host, {
+    client: fakeClient(), msg: { dir: 'in', kind: 'image' }, row,
+    verified: true, onChange: () => {}, onStatus: (t) => statuses.push(t),
+  });
+  const togglesBefore = host.querySelectorAll('.viewer-toggle').length;
+  host.querySelectorAll('.viewer-toggle').find((b) => /Save to device/i.test(b.textContent)).click();
+  await settle(30);
+  document.createElement = realCreate;
+  assert.equal(shared, 0, 'Share is not opened behind the user\'s back');
+  const share = host.querySelectorAll('.viewer-toggle').find((b) => /Share instead/i.test(b.textContent));
+  assert.ok(share, 'the fallback APPEARS only after the download door fails');
+  assert.equal(host.querySelectorAll('.viewer-toggle').length, togglesBefore + 1,
+    'exactly one new control appeared — the revealed fallback, nothing else');
+  share.click();
+  await settle();
+  assert.equal(shared, 1, 'and it is one tap away when they want it');
+  assert.ok((await store.getMedia('sv2')).savedAt > 0);
+  teardown();
+  setNavigator({ onLine: true, userAgent: 'node' });
+});
+
+test('save: a dismissed share sheet is not an error, and no bytes is no save', async () => {
   await fresh();
   setNavigator({
     canShare: () => true,
     share: async () => { const e = new Error('dismissed'); e.name = 'AbortError'; throw e; },
   });
   const withBytes = await stored({ id: 'sv3' });
-  assert.deepEqual((await M.saveToDevice(withBytes)).how, 'cancelled',
-    'the user closing the share sheet must not be reported as a failure');
+  // the SHARE door (the fallback) keeps the cancelled distinction; the download
+  // door has no sheet to dismiss at all
+  const dismissed = await M.shareToDevice(withBytes);
+  assert.equal(dismissed.ok, false);
+  assert.equal(dismissed.how, 'cancelled',
+    'a share sheet the user closed must not be reported as a failure');
+  assert.equal((await store.getMedia('sv3')).savedAt, null,
+    'and nothing is stamped: no save happened, so the app keeps its copy');
 
   setNavigator({ canShare: () => true, share: async () => {} });
-  const nothing = { ...row({ id: 'sv4' }), data: null };
-  const res = await M.saveToDevice(nothing);
-  assert.equal(res.ok, false);
-  assert.equal(res.how, 'none', 'nothing to hand over: no share sheet, no anchor');
+  // a record with no bytes (never fetched, or already pruned): both doors must
+  // refuse WITHOUT stamping savedAt — a pruned row must not look saved
+  const nothing = { ...row({ id: 'sv4' }), data: null, state: 'pruned' };
+  await store.saveMedia(nothing);
+  assert.equal((await M.saveToDevice(nothing)).how, 'none', 'nothing to hand over: no anchor, no sheet');
+  assert.equal((await M.shareToDevice(nothing)).how, 'none');
+  assert.equal((await store.getMedia('sv4')).savedAt, null, 'and the record is untouched');
   setNavigator({ onLine: true, userAgent: 'node' });
 });
 
@@ -539,7 +575,7 @@ test('viewer: a PRUNED file may be fetched again; an expired one may not', async
   teardown();
 });
 
-test('viewer copy: Save and Keep cannot read as two strengths of the same verb', async () => {
+test('viewer copy: exactly one save door, and no pin to confuse it with', async () => {
   await fresh();
   const img = await stored({ id: 'copy1' });
   const host = dom.byId('msg-media');
@@ -548,11 +584,8 @@ test('viewer copy: Save and Keep cannot read as two strengths of the same verb',
     verified: true, onChange: () => {}, onStatus: () => {},
   });
   const labels = host.querySelectorAll('.viewer-toggle').map((b) => b.textContent.trim());
-  const save = labels.find((t) => /Save/.test(t));
-  const keep = labels.find((t) => /Keep/.test(t));
-  assert.equal(save, 'Save to device', 'the one that leaves the app says device');
-  assert.equal(keep, 'Keep in app', 'the one that stays says app');
-  assert.ok(!/device/i.test(keep), 'Keep must not claim the device — that is the other button');
-  assert.ok(!/\bapp\b/i.test(save), 'and Save must not sound in-app');
+  assert.deepEqual(labels.filter((t) => /Save|Keep|Share/.test(t)), ['Save to device'],
+    'one door out of the app, named for what it does; the pin is gone and Share is a revealed fallback');
+  assert.ok(labels.some((t) => /Expand/i.test(t)), 'a photo also gets the full-size view');
   teardown();
 });

@@ -51,7 +51,7 @@ export const ICONS = {
   mediaPause: 'fa-pause',
   mediaMute: 'fa-volume-xmark',
   mediaUnmute: 'fa-volume',
-  mediaKeep: 'fa-bookmark',
+  mediaShare: 'fa-share-nodes',        // the download-refused fallback only
   mediaExpired: 'fa-circle-question',
 
   // friendship (one-way trust) — sidebar + menu identity marks

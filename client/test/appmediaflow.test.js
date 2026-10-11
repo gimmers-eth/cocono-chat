@@ -196,7 +196,7 @@ test('pipeline: an outgoing row with no blob id yet never calls the wire', async
   assert.deepEqual(cli.calls, [], 'nothing to download from — the id is local');
 });
 
-test('pipeline: local retention drops bytes, keeps the record, honours Keep', async () => {
+test('pipeline: retention drops bytes on AGE or on SAVING, and keeps the record', async () => {
   await freshAccount();
   const day = 86_400_000;
   // the window is set THROUGH the app's own setter (localStorage-backed), so
@@ -207,12 +207,15 @@ test('pipeline: local retention drops bytes, keeps the record, honours Keep', as
   // LAND, not when the message was sent) — these rows are genuinely old copies
   const mk = (id, kind, over) => store.saveMedia(stubRow({ id, kind, ts: old, storedAt: old, state: 'stored', data: new Blob(['bytes']), thumb: new Blob(['t']), ...over }));
   await mk('img-old', 'image');
-  await mk('img-pinned', 'image', { keep: true });
+  await mk('img-stalepin', 'image', { keep: true });   // retired pin: still due
   await mk('file-old', 'file');
+  // the phone owns this one now, so the app's copy is weight — long before any
+  // window. This is the rule that replaced 'Keep on this device'.
+  await mk('img-saved', 'image', { ts: Date.now() - day, storedAt: Date.now() - day, savedAt: Date.now() - 60_000 });
   await store.saveMedia(stubRow({ id: 'img-new', kind: 'image', ts: Date.now(), storedAt: Date.now(), state: 'stored', data: new Blob(['bytes']), thumb: new Blob(['t']) }));
 
   const dropped = await M.pruneLocalMedia();
-  assert.equal(dropped, 2, 'the two unpinned out-of-window rows (not the pinned one, not the fresh one)');
+  assert.equal(dropped, 4, 'out-of-window (pin or no pin), already saved; the fresh copy survives');
 
   const img = await store.getMedia('img-old');
   assert.equal(img.state, 'pruned');
@@ -223,7 +226,12 @@ test('pipeline: local retention drops bytes, keeps the record, honours Keep', as
   const file = await store.getMedia('file-old');
   assert.equal(file.thumb, null, 'a file has no preview worth keeping');
 
-  assert.ok((await store.getMedia('img-pinned')).data, 'Keep means Keep');
+  assert.equal((await store.getMedia('img-stalepin')).state, 'pruned',
+    'a leftover keep:true cannot make a record immortal');
+  const saved = await store.getMedia('img-saved');
+  assert.equal(saved.state, 'pruned');
+  assert.equal(saved.prunedWhy, 'saved', 'and it says WHY, so the UI can say "Saved to your phone"');
+  assert.ok(saved.savedAt > 0, 'the stamp itself survives the prune');
   assert.ok((await store.getMedia('img-new')).data, 'inside the window: untouched');
   assert.equal(M.localRetentionDays(), 7);
 });
