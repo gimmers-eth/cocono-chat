@@ -7,7 +7,7 @@ import { rateLimit, setRateLimitsGate } from './lib/rateLimit.js';
 import { effectiveLimit } from './lib/limits.js';
 import { registerSecurityHeaders, limited, fail } from './routes/shared.js';
 import appRoutes from './routes/app-routes/index.js';
-import { resolveAppName } from './routes/app-routes/appInfo.js';
+import { resolveAppName, resolveBuild } from './routes/app-routes/appInfo.js';
 import { resetLimitsCache } from './lib/limits.js';
 import wsRoutes from './routes/ws-routes/index.js';
 
@@ -171,6 +171,27 @@ app.addHook('onSend', async (request, reply, payload) => {
         .type('application/manifest+json')
         .send({ ...manifestTemplate, name, short_name: name });
     });
+
+    // The app shell is served with the current build BAKED IN
+    // (meta[name=app-build], token lives in client/app/index.html): the
+    // running page can then know its own build instead of guessing — a
+    // stale cached shell carries a stale number, so the client's "update
+    // available" notice (client/app/js/update.js) can never nag a user who
+    // already has the current build. Same TTL-cached git identity as
+    // /api/app-info, so the two always agree. Registered BEFORE
+    // @fastify/static, like the manifest route above.
+    let indexTemplate = null;
+    const serveIndex = async (request, reply) => {
+      if (!indexTemplate) {
+        indexTemplate = fs.readFileSync(path.join(feRoot, 'index.html'), 'utf8');
+      }
+      return reply
+        .type('text/html; charset=utf-8')
+        .header('cache-control', 'no-cache')
+        .send(indexTemplate.replace(/__APP_BUILD__/g, String(resolveBuild() ?? ''))); // all: the file's doc-comment spells the token too
+    };
+    app.get('/', serveIndex);
+    app.get('/index.html', serveIndex);
 
     await app.register(fastifyStatic, { root: feRoot ,
       cacheControl: 'no-cache'});

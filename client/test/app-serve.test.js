@@ -39,6 +39,13 @@ test('app shell and assets are served', async (t) => {
   assert.equal(index.status, 200);
   const html = await index.text();
   assert.match(html, /<div id="view-app"/);
+  // update-notice contract: the server bakes its build number into the shell
+  // (be/src/app.js serveIndex), and the token must never leak unserved
+  assert.match(html, /<meta name="app-build" content="\d*"/, 'baked app-build meta present');
+  assert.doesNotMatch(html, /__APP_BUILD__/, 'token rewritten');
+  const direct = await fetch(`${srv.base}/index.html`);
+  assert.equal(direct.status, 200);
+  assert.match(await direct.text(), /<meta name="app-build" content="\d*"/);
   assert.match(html, /id="theme-link"[^>]*themes\/dark\/theme\.css/);
   assert.match(html, /src="\/js\/main\.js"/);
   assert.match(html, /id="drawer-overlay" class="overlay"/);
