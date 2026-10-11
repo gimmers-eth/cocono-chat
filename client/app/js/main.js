@@ -13,6 +13,7 @@ import { setScope, setFriends, loadFriends, ensureScoped, loadPeerMuted, saveMut
 import { purgeLocalAccount } from './accountPurge.js';
 import { initKeyboardFit } from './keyboard.js';
 import { mountDiagnostics } from './diag.js';
+import { initUpdateNotice } from './update.js';
 import { applyIcons } from './icons.js';
 import { initInstallAndNotify } from './install.js';
 import { initBadgeNotify, osNotify } from './notify.js';
@@ -313,13 +314,11 @@ fetch('/api/app-info')
     document.title = info.name;
     putAppTitle(info.name); // feeds the service worker's zero-await notifications (IDB, not localStorage)
     for (const el of document.querySelectorAll('[data-app-name]')) el.textContent = info.name;
-    if (info.version) {
-      localStorage.setItem('cocono.appversion', info.version); // what THIS page was served by
-      const v = $('client-version');
-      if (v) v.textContent = `v${info.version}`;
-    }
   })
   .catch(() => {});
+// Footer build number + "update available" reload button (js/update.js):
+// polls /api/app-info and compares against the build that served this page.
+initUpdateNotice();
 chat.wire();
 chat.connectEvents();
 home.wire();

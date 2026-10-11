@@ -10,6 +10,14 @@ test('app-info: env default, admin override, manifest reflects name', async () =
     assert.equal(d.statusCode, 200);
     assert.equal(d.json().name, config.appName);
 
+    // Build identity for the update notice (client/js/update.js): a git-sha
+    // string plus a plain NUMBER when git can answer (devbox deploys do).
+    const { version, build } = d.json();
+    assert.match(String(version), /\S+ \(/, 'version is "<sha> (date)"');
+    if (build !== null) {
+      assert.ok(Number.isInteger(build) && build > 0, `build must be a positive integer, got ${build}`);
+    }
+
     await mongo.db.collection('settings').updateOne(
       { _id: 'branding' }, { $set: { appName: 'Renamed' } }, { upsert: true },
     );
