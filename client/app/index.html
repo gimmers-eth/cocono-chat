@@ -2,6 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <!-- The server rewrites the token below to its current build number when it
+       serves this file (see be/src/app.js: serveIndex). The running page
+       compares this baked-in number against /api/app-info: that is how it
+       knows whether the bundle IT is running is stale — the update notice in
+       client/app/js/update.js. Un-served copies keep the token -> treated
+       as "unknown own build" and the notice falls back to boot-time proxy. -->
+  <meta name="app-build" content="__APP_BUILD__" />
   <!-- zoom (pinch + double-tap) is disabled on mobile: the app chrome is not
        a document to zoom, and double-tap zoom fought the tap targets. iOS
        ignores user-scalable, so main.js also blocks gesturestart. -->
