@@ -57,8 +57,14 @@ function statusLine(row) {
 /** Preview picture: thumb when present, else the decrypted bytes (a send
  *  without a poster, or an image that could not be thumbnailed). */
 function previewEl(row, blur) {
-  const blob = row.thumb ?? (row.state === 'stored' ? row.data : null);
+  // A picture, or nothing. The fallback used to reach for `row.data` on any
+  // stored row, which for a VIDEO meant handing MP4 bytes to an <img> — the
+  // engine paints a broken/looping frame instead of a preview. A video with no
+  // poster shows the film icon (and the recipient side generates its own
+  // first-frame poster, media.js buildPoster, once the bytes land).
+  const blob = row.thumb ?? (renderableAsImage(row) && row.state === 'stored' ? row.data : null);
   if (!blob || !blob.size) return null;
+  if (blob.type && !blob.type.startsWith('image/')) return null;
   const img = mk('img', `media-thumb media-${row.kind}${blur ? ' is-blurred' : ''}`);
   img.alt = '';
   img.decoding = 'async';

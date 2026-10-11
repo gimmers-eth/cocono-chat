@@ -323,7 +323,7 @@ test('viewer: animated images get a real pause (the poster), videos get play + m
   });
   const video = host2.querySelector('.viewer-video');
   assert.equal(video.playsInline, true);
-  assert.equal(video.controls, undefined, 'no native controls: the app row owns them');
+  assert.equal(video.controls, false, 'no native controls: the app row owns them');
   assert.equal(video.muted, true, 'a video that starts with sound is a hostile default');
   const toggles = host2.querySelectorAll('.viewer-toggle');
   toggles.find((b) => /Play/i.test(b.textContent)).click();
@@ -606,4 +606,90 @@ test('viewer copy: exactly one save door, and no pin to confuse it with', async 
     'one door out of the app, named for what it does; the pin is gone and Share is a revealed fallback');
   assert.ok(labels.some((t) => /Expand/i.test(t)), 'a photo also gets the full-size view');
   teardown();
+});
+
+// ---------------- the video display bugs ----------------
+
+test('viewer: a video plays ONLY on press — never autoplay, never loop, no native chrome', async () => {
+  await fresh();
+  const vid = await stored({ id: 'vFlags', kind: 'video' });
+  const host = dom.byId('msg-media');
+  const teardown = view.openViewer(host, {
+    client: fakeClient(), msg: { dir: 'in', kind: 'video' }, row: vid,
+    verified: true, onChange: () => {}, onStatus: () => {},
+  });
+  const video = host.querySelector('.viewer-video');
+  assert.ok(video, 'with the bytes on the device, the player is there');
+  assert.equal(video.autoplay, false, 'a video must not start by itself');
+  assert.equal(video.loop, false, 'and certainly not on a loop');
+  assert.equal(video.controls, false, 'the control row owns play/mute, not the UA');
+  assert.equal(video.paused, true, 'it is still paused before the tap');
+  teardown();
+});
+
+test('viewer: a NOT-downloaded video is a poster and a Download button — never a <video> over a JPEG', async () => {
+  await fresh();
+  const poster = new Blob(['JPEGDATA'], { type: 'image/jpeg' });
+  const v = { ...row({ id: 'vNope', kind: 'video' }), state: 'pending', data: null, thumb: poster };
+  await store.saveMedia(v);
+  const host = dom.byId('msg-media');
+  const teardown = view.openViewer(host, {
+    client: fakeClient(), msg: { dir: 'in', kind: 'video' }, row: v,
+    verified: true, onChange: () => {}, onStatus: () => {},
+  });
+  assert.equal(host.querySelector('.viewer-video'), null,
+    'feeding <video> the poster is how the could-not-be-played error was manufactured');
+  assert.ok(host.querySelector('.viewer-poster'), 'the poster is what shows');
+  assert.ok(host.querySelectorAll('.viewer-toggle').some((b) => /Download/i.test(b.textContent)));
+  teardown();
+});
+
+test('bubble: a video is never painted as an <img> over its own video bytes', async () => {
+  await fresh();
+  const mp4 = new Blob([new Uint8Array([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70])], { type: 'video/mp4' });
+  const v = { ...row({ id: 'vImg', kind: 'video' }), state: 'stored', data: mp4, thumb: null };
+  await store.saveMedia(v);
+  const nodes = bubbleNodes({ dir: 'in', kind: 'video', state: 'delivered' }, v, {});
+  const classes = classesOf(nodes);
+  assert.ok(!classes.some((c) => /media-thumb/.test(c)),
+    'no <img> pointed at video bytes (that is the looping mess in the chat)');
+  assert.ok(classes.some((c) => /media-gone-ic/.test(c)), 'an icon says video until a poster exists');
+});
+
+test('poster: the recipient draws its own frame once the bytes land, typed correctly', async () => {
+  await fresh();
+  const mp4 = new Blob([new Uint8Array([0, 0, 0, 0x18])], { type: 'video/mp4' });
+  const v = { ...row({ id: 'vPoster', kind: 'video' }), state: 'stored', data: mp4, thumb: null };
+  await store.saveMedia(v);
+  // stub the decode surface the shim cannot provide: metadata + a painted
+  // frame + a JPEG out, so the LOGIC (typed blob, persist, dims) is what is
+  // actually under test here
+  const seen = [];
+  const realCreate = document.createElement.bind(document);
+  document.createElement = (tag) => {
+    const el = realCreate(tag);
+    if (el.tagName === 'VIDEO') {
+      el.videoWidth = 1920; el.videoHeight = 1080; el.duration = 12;
+      el.readyState = 4;
+      Object.defineProperty(el, 'src', { set(v2) { seen.push(v2); el.onloadedmetadata?.(); } });
+    }
+    if (el.tagName === 'CANVAS') {
+      el.getContext = () => ({ drawImage() {} });
+      el.toBlob = (cb) => cb(new Blob(['poster'], { type: 'image/jpeg' }));
+    }
+    return el;
+  };
+  const out = await M.buildPoster(await store.getMedia('vPoster'));
+  document.createElement = realCreate;
+  assert.ok(out, 'a frame was produced');
+  assert.equal((await store.getMedia('vPoster')).thumb.size, 6, 'and stored on the record');
+  assert.equal((await store.getMedia('vPoster')).w, 1920, 'with the real dimensions');
+  assert.equal((await store.getMedia('vPoster')).dur, 12);
+  assert.match(seen[0], /^blob:local\//);
+  // an undecodable video keeps its record exactly as it was
+  const v2 = { ...row({ id: 'vPoster2', kind: 'video' }), state: 'stored', data: mp4, thumb: null };
+  await store.saveMedia(v2);
+  assert.equal(await M.buildPoster(await store.getMedia('vPoster2')), null,
+    'no poster, no crash, no harm to the download');
+  assert.equal((await store.getMedia('vPoster2')).thumb, null);
 });

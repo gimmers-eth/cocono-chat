@@ -981,3 +981,44 @@ test('media: a blob with no preview says no_thumb, never unknown_media (poster f
     send.ws.close();
   } finally { await ctx.teardown(); }
 });
+
+test('media: an untouched file/video is NEVER swept before the retention time (req: tap-to-download is a promise)', async () => {
+  const ctx = await setupLive({ mediaRetentionDays: 7 });
+  try {
+    const alice = await createUser(ctx, makeClient(), 'alice');
+    const bob = await createUser(ctx, makeClient(), 'bobby');
+    const ws = await connectWs(ctx.port, alice.token);
+    const kept = [];
+    for (const kind of ['file', 'video']) {
+      const up = await upload(ctx, alice.token, { kind });
+      const id = up.res.json().id;
+      const cid = `hold-${kind}-1`;
+      ws.send({ type: 'msg', msg: buildEnvelope(alice, bob, bob.d, cid, { att: { id, kind, size: up.blob.length } }).env });
+      assert.equal((await ws.waitFor((m) => m.type === 'ack' && m.cid === cid)).ok, true);
+      kept.push(id);
+    }
+    // 6 days: nobody tapped anything, so every blob must still be there
+    const six = Date.now() - 6 * 86400_000;
+    for (const id of kept) await ctx.media.updateOne({ _id: id }, { $set: { ts: new Date(six) } });
+    assert.deepEqual(await sweepMedia(ctx.media, ctx.conf), { expired: 0, orphans: 0 });
+    for (const id of kept) assert.ok(await ctx.media.findOne({ _id: id }), `${id} survived the sweep`);
+
+    // past the window the sweep is what bounds storage — that is the deal
+    const eight = Date.now() - 8 * 86400_000;
+    for (const id of kept) await ctx.media.updateOne({ _id: id }, { $set: { ts: new Date(eight) } });
+    assert.equal((await sweepMedia(ctx.media, ctx.conf)).expired, 2);
+
+    // and a tapped device releases it immediately, which is the OTHER half:
+    // the ack list, not the clock, is what normally frees the space
+    const up = await upload(ctx, alice.token, { kind: 'file' });
+    const id = up.res.json().id;
+    const cid = 'hold-file-2';
+    ws.send({ type: 'msg', msg: buildEnvelope(alice, bob, bob.d, cid, { att: { id, kind: 'file', size: up.blob.length } }).env });
+    await ws.waitFor((m) => m.type === 'ack' && m.cid === cid);
+    assert.ok((await ctx.media.findOne({ _id: id })).pending.length === 1);
+    assert.equal((await ctx.app.inject({
+      method: 'POST', url: `/api/media/${id}/ack`, payload: { downloaded: true }, headers: auth(bob.token),
+    })).json().deleted, true, 'tapped on every device sent to => released now');
+    ws.ws.close();
+  } finally { await ctx.teardown(); }
+});

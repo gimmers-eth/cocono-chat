@@ -446,6 +446,68 @@ export async function shareToDevice(row) {
   }
 }
 
+/**
+ * Make a video into a PICTURE, on the device that holds the bytes.
+ *
+ * The sender's poster is best-effort — their browser may refuse to decode a
+ * phone recording at all (normal on iOS) — and with none, the recipient's
+ * bubble showed a film icon that reads as 'the video never arrived'. Once the
+ * payload is local we can decode it OURS and take the frame, so the bubble, the
+ * wall and the <video> poster all get real pixels.
+ *
+ * Never fatal: an undecodable video still downloads, still plays where the
+ * engine can, and simply keeps its icon.
+ */
+export async function buildPoster(row) {
+  if (!row || row.kind !== 'video' || !hasLocalBytes(row)) return null;
+  if (row.thumb && row.thumb.size) return row.thumb;      // sender made one
+  // typed on purpose: a typeless Blob URL is what made <video> refuse to play
+  const url = URL.createObjectURL(new Blob([row.data], { type: String(row.mime ?? '').trim() || 'video/mp4' }));
+  try {
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'metadata';
+    const ok = await new Promise((resolve) => {
+      let settled = false;
+      const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+      video.onloadedmetadata = () => {
+        // a hair IN, not 0: the first frame of many phone recordings is black
+        if (video.duration > 0.2) { try { video.currentTime = Math.min(0.2, video.duration / 2); } catch { /* no seek */ } }
+        else done(true);
+        if (video.readyState >= 2) done(true);
+        else video.onseeked = () => done(true);
+        setTimeout(() => done(true), 3000);
+      };
+      video.onerror = () => done(false);
+      setTimeout(() => done(false), 6000);
+      // LOADED LAST, and deliberately: a Blob source can answer with its
+      // metadata before a listener attached after the assignment ever sees it,
+      // which is how this function silently returned no poster for a video that
+      // decodes perfectly well.
+      video.src = url;
+    });
+    if (!ok || !video.videoWidth) return null;
+    const canvas = document.createElement('canvas');
+    const scale = Math.min(1, THUMB_MAX_EDGE / Math.max(video.videoWidth, video.videoHeight));
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    const out = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', THUMB_QUALITY));
+    if (!out) return null;
+    await updateMedia(row.id, {
+      thumb: out,
+      w: video.videoWidth, h: video.videoHeight,
+      ...(Number.isFinite(video.duration) ? { dur: video.duration } : {}),
+    });
+    return out;
+  } catch {
+    return null;
+  } finally {
+    try { URL.revokeObjectURL(url); } catch { /* gone */ }
+  }
+}
+
 // ---------------- the conversation tabs (req 1/4) ----------------
 
 /** One entry per URL in a message, in order, de-duplicated per message. */
@@ -615,6 +677,13 @@ export async function downloadMedia(client, row, { thumbOnly = false } = {}) {
     await updateMedia(row.id, { state: 'downloading' });
     const { data, thumb } = await client.downloadMedia(blob, row);
     await updateMedia(row.id, { data, ...(thumb ? { thumb } : {}), state: 'stored', storedAt: Date.now() });
+    // A video with no poster from the sender gets one made HERE, from the
+    // bytes that just landed: otherwise the chat shows a film icon and the
+    // person cannot tell whether anything arrived at all. Fire-and-forget —
+    // a poster we cannot draw must never undo a finished download.
+    if (row.kind === 'video' && !thumb) {
+      buildPoster({ ...row, data, state: 'stored' }).catch(() => null);
+    }
     // ack AFTER the bytes are safely on the device: that is what lets the
     // server delete the blob (req 8)
     await client.ackMedia(blob, true).catch(() => {});

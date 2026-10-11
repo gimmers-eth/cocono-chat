@@ -1079,6 +1079,11 @@ export class CoconoClient extends Emitter {
   async downloadMedia(id, media = {}) {
     this.#requireToken();
     const { key, sha256, thumbIv } = media;
+    // Every Blob is built WITH its type. A typeless Blob URL is fine for an
+    // <img> (which sniffs) and is REFUSED by a <video> on WebKit/Blink — the
+    // engine answers NotSupportedError to play(), which surfaced as 'This video
+    // could not be played here' on both ends of a working download.
+    const videoType = String(media.mime ?? '').trim() || 'application/octet-stream';
     if (!key || !sha256) throw new CoconoError('downloadMedia needs the media descriptor (key + sha256)', 'no_media_key');
     const fileKey = await c.importFileKey(key);
     const ct = await this.api.downloadMediaRaw(this.token, id);
@@ -1093,10 +1098,12 @@ export class CoconoClient extends Emitter {
       // AES-GCM's tag is what authenticates it
       const t = await this.api.downloadMediaRaw(this.token, id, { part: 'thumb' }).catch(() => null);
       if (t && t.length) {
-        try { thumb = new Blob([await c.decryptBytes(fileKey, t)]); } catch { thumb = null; }
+        // a poster is whatever the SENDER encoded it as (media.js always
+        // makes JPEG thumbs), never the video's own mime
+        try { thumb = new Blob([await c.decryptBytes(fileKey, t)], { type: 'image/jpeg' }); } catch { thumb = null; }
       }
     }
-    return { data: new Blob([plain]), thumb };
+    return { data: new Blob([plain], { type: videoType }), thumb };
   }
 
   /** Poster/preview bytes ONLY — a video thumbnail without pulling the blob. */
@@ -1104,7 +1111,7 @@ export class CoconoClient extends Emitter {
     this.#requireToken();
     if (!media.key) throw new CoconoError('downloadThumb needs the media descriptor (key)', 'no_media_key');
     const t = await this.api.downloadMediaRaw(this.token, id, { part: 'thumb' });
-    return new Blob([await c.decryptBytes(await c.importFileKey(media.key), t)]);
+    return new Blob([await c.decryptBytes(await c.importFileKey(media.key), t)], { type: 'image/jpeg' });
   }
 
   /**

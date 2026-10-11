@@ -270,7 +270,12 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
   const pane = mk('div', `viewer-pane viewer-kind-${shape}`);
   const blur = isImage && isBlurred(row, verified);
 
-  const full = row.data ?? row.thumb ?? null;
+  // What may be SHOWN, by kind. A picture can be displayed from its poster;
+  // a video needs its real bytes — feeding <video> the JPEG poster made it load
+  // and then fail the moment play() was pressed, which is the other half of
+  // 'this video could not be played here'. A file has no picture at all.
+  const full = shape === 'video' ? (row.data ?? null)
+    : shape === 'image' ? (row.data ?? row.thumb ?? null) : null;
   if (shape === 'file') {
     const card = mk('div', 'viewer-file');
     const ic = mk('span', 'viewer-file-icon');
@@ -279,7 +284,9 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
     card.append(mk('p', 'viewer-file-name', row.name || 'attachment'));
     card.append(mk('p', 'muted small', `${formatSize(row.size)} · ${new Date(row.ts).toLocaleString()}`));
     if (row.state === 'expired') card.append(mk('p', 'media-status', 'No longer available on the server.'));
-    if (row.state === 'pruned') card.append(mk('p', 'media-status', 'Removed from this device — it cannot be downloaded again.'));
+    if (row.state === 'pruned') card.append(mk('p', 'media-status',
+      row.prunedWhy === 'saved' ? 'Saved to your phone — this copy is no longer kept in the app.'
+        : 'Removed from this device to save space.'));
     pane.append(card);
   } else if (full && full.size) {
     if (isImage) {
@@ -308,6 +315,13 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
       video.src = url;
       video.playsInline = true;   // NO native controls: the row below is ours
       video.preload = 'metadata';
+      // Stated explicitly because a video that 'constantly loops' was the
+      // report: nothing in here may start by itself. A phone that just spent
+      // mobile data fetching this file does not want it playing on open, and
+      // `loop` on a chat attachment is never intended.
+      video.autoplay = false;
+      video.loop = false;
+      video.controls = false;
       if (row.thumb && row.thumb.size) video.poster = objectUrl(row.thumb, 'viewer');
       const play = btn('viewer-toggle', 'mediaPlay', 'Play', 'Play this video');
       play.addEventListener('click', () => {
