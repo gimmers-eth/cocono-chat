@@ -832,9 +832,9 @@ export function createChat({ client, onHomeRefresh }) {
         b.className = 'msg-mention';
         b.dataset.ul = seg.name;
         b.title = `View ${seg.name}'s profile`;
-        // the '@' is part of the message text (Copy keeps it); the NAME is
-        // the single-line component: trust icon + worn badge
-        b.append(document.createTextNode('@'));
+        // the chip's content is the NAME as the single-line component
+        // (trust icon + worn badge); the '@' is parsing furniture, not
+        // display — it stays in the wire text, never in the bubble
         b.append(mountLine(document.createElement('span'), mentionLineOpts(seg.name, ctx)));
         nodes.push(b);
       } else {

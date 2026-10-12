@@ -1713,13 +1713,18 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
    OUT bubble links take the bubble text colour and keep the underline */
 .msg.out .msg-link { color: var(--bubble-text); }
 .msg-mention {
-  /* the single-line user component, clickable: reset button chrome, inherit
-     the bubble's text colour, keep the component's own icon/badge rhythm */
-  display: inline-flex; align-items: center; padding: 0; border: 0;
-  background: none; color: inherit; font: inherit; cursor: pointer;
-  vertical-align: baseline; border-radius: 6px;
+  /* THE chip: the same skin as .badge-chip (raised panel + hairline
+     border, 999px), holding the single-line user component (trust icon +
+     name + worn badge). No '@' sigil — that is parsing furniture, not
+     display — and the text colour stays the bubble's own. */
+  display: inline-flex; align-items: center;
+  padding: .1rem .55rem;
+  background: var(--panel-raised); border: 1px solid var(--border);
+  color: inherit; font: inherit; font-size: .85rem; cursor: pointer;
+  vertical-align: baseline; border-radius: 999px;
 }
 .msg-mention .uname { font-size: inherit; }
+.msg-mention:hover { border-color: var(--accent); }
 .msg-mention:hover .uname-text { text-decoration: underline; text-underline-offset: 2px; }
 
 /* ---- composer @-mention search ----
