@@ -126,7 +126,13 @@ acting. It refuses to run with uncommitted changes or a diverged history —
 commit/stash or resolve first.
 
 Static FE/SDK files (`client/app`, `client/src`) are read per request and
-need NO restart. **Do NOT trust `node --watch` for `be/` sources**: it has
+need NO restart — **with one exception: `client/app/index.html`.** `serveIndex`
+in `be/src/app.js` reads it ONCE into `indexTemplate` (it bakes the build number
+in) and caches it for the life of the process, so an HTML edit is invisible until
+`systemctl --user restart cocono-be`. Check with
+`curl -s https://dev.co.co.no/index.html | grep -c '<the thing you changed>'`
+before believing a markup fix is live — this silently un-shipped a duplicate-id
+fix once. **Do NOT trust `node --watch` for `be/` sources**: it has
 been observed to silently stop restarting its child after a while (2026-10
 incident: server code was ~15 min stale, a new required-field check never
 went live, and blocks were accepted without reasons while tests said the

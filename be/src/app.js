@@ -184,6 +184,11 @@ app.addHook('onSend', async (request, reply, payload) => {
     // already has the current build. Same TTL-cached git identity as
     // /api/app-info, so the two always agree. Registered BEFORE
     // @fastify/static, like the manifest route above.
+    //
+    // NOTE the consequence: this is the ONE static file that is not read per
+    // request. The template is cached for the life of the process, so an edit to
+    // client/app/index.html needs `systemctl --user restart cocono-be` — every
+    // other FE/SDK file is picked up on the next request.
     let indexTemplate = null;
     const serveIndex = async (request, reply) => {
       if (!indexTemplate) {
