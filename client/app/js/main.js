@@ -85,7 +85,12 @@ export const client = new CoconoClient({
   logging,
 });
 
-const chat = createChat({ client, onHomeRefresh: () => home.renderConversationList() });
+let groupsMock = null; // set at boot below (declared early: the refresh
+// closure must never TDZ-touch it)
+const chat = createChat({ client, onHomeRefresh: () => {
+  home.renderConversationList();
+  groupsMock?.updateTabBadges?.(); // the chats-tab unread count is the same fact
+} });
 const home = createHome({ client, chat, onLogout: () => showAuth() });
 const auth = createAuth({ client, onLoggedIn: (res) => enterApp({ gesture: true, fresh: res?.fresh === true, signedUp: res?.signedUp === true }) });
 
@@ -337,7 +342,7 @@ chat.connectEvents();
 home.wire();
 // GROUPS P1 MOCK (docs/features/groups.md): sidebar tabs + room chats from
 // fixtures — no store, no network. P5 replaces this mount with real data.
-mountGroups({ client });
+groupsMock = mountGroups({ client });
 auth.wire();
 // CONTROL NUDGES (be/src/lib/notify.js): the server says a slice of
 // authoritative state THIS account caches moved because of someone else.

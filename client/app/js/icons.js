@@ -115,8 +115,7 @@ export const ICONS = {
   users: 'fa-users',                 // group chats / members
   crown: 'fa-crown',                 // my role: owner
   groupAdmin: 'fa-user-shield',      // my role: admin
-  groupMember: 'fa-user',            // my role: member
-  lock: 'fa-lock',                   // read-only room
+  groupMember: 'fa-user',           // my role: member
   starRegular: 'fa-regular fa-star', // un-starred room
   tabSearch: 'fa-magnifying-glass',  // sidebar search tab (coming soon)
 };

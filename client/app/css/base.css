@@ -1781,6 +1781,12 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
 .side-tab i { font-size: .95rem; }
 .side-tab:hover { background: var(--panel-raised); }
 .side-tab.active { color: var(--accent); }
+/* unread count riding the tab (0 included — a silent tab says so) */
+.side-tab .tab-badge {
+  margin-left: .3rem; flex: none; min-width: 1.25rem; text-align: center;
+  background: var(--accent); color: var(--on-accent); border-radius: 999px;
+  font-size: .68rem; font-weight: 700; padding: .08rem .35rem;
+}
 
 /* ---- the slider: sidebar BODY only (header/filter/foot never move).
    Same track+transform mechanism as the message modal's forward panes ---- */
@@ -1844,7 +1850,9 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
 }
 .room-open:hover { background: var(--panel); }
 .room-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.room-lock { font-size: .7rem; color: var(--muted); flex: none; }
+/* read-only rooms: NO padlock — the name itself sits inside (…) in italic,
+   and the room header spells "(read only)" out in words */
+.room-name.ro { font-style: italic; }
 /* room tags (req 15): the same glyphs as the chat tag strip, quiet grey,
    and what the pinned sidebar filter matches on */
 .room-tag-ic { font-size: .7rem; color: var(--muted); flex: none; margin-left: .15rem; }

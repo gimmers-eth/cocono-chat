@@ -126,4 +126,8 @@ as quiet glyphs and matched by the PINNED sidebar filter (the shared
 tags.js state — one click filters DMs and rooms together, req 15); room
 rows and the room header share a MUTE speaker (muted = red, mirrored
 between panes); opening/closing a room plays the chat pane's slide, whose
-pacing now MATCHES the settings panel (.22s in / .2s out).
+pacing now MATCHES the settings panel (.22s in / .2s out). Read-only rooms carry NO padlock: their name shows inside
+(#italic-parens) in the list and the room header spells "#name (read only)".
+The chats/groups SIDEBAR TABS wear unread BADGES — the chats tab counts
+real DM unreads from the local store (same fact the row dots read), the
+groups tab sums the room unreads; a tab with nothing waiting shows '0'.

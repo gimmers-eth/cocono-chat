@@ -21,6 +21,7 @@ import { mountLine } from './userline.js';
 import { PS } from './peername.js';
 import { nameChipEl } from '../badges.js';
 import { tagIconEl, TAG_LABELS, currentFilter } from '../tags.js';
+import { allMessages, isUnread } from '../store.js';
 
 // ---------------------------------------------------------------- fixtures
 
@@ -135,7 +136,27 @@ const stub = (what) => toast(`${what} arrives with the group API (P4/P5).`);
 
 let track = null;
 let listHost = null; // #group-list
+let chatBadge = null; // unread messages behind the chats tab
+let groupBadge = null; // unread mock rooms behind the groups tab
 const TABS = ['chats', 'groups', 'search'];
+
+// The tab bar shows the NUMBER OF UNREAD MESSAGES waiting behind each
+// tab — the chats tab counts real DM unreads from the local store (every
+// 'in' message past the read marker, exactly what dots the sidebar rows),
+// the groups tab sums the mock rooms' unread fixtures. 0 shows as '0':
+// a silent tab says so, it is not missing.
+async function updateTabBadges() {
+  let chats = 0;
+  try {
+    for (const m of await allMessages()) {
+      if (m.dir === 'in' && isUnread(m.peer, m.ts)) chats += 1;
+    }
+  } catch { /* store not open (boot/offline): the count reads 0 */ }
+  let rooms = 0;
+  for (const g of FAKE_GROUPS) for (const r of g.rooms) rooms += r.unread ?? 0;
+  if (chatBadge) chatBadge.textContent = String(chats);
+  if (groupBadge) groupBadge.textContent = String(rooms);
+}
 
 function buildTabBar(sidebar, anchorAfter) {
   const nav = el('nav', 'side-tabs');
@@ -151,6 +172,14 @@ function buildTabBar(sidebar, anchorAfter) {
     b.setAttribute('role', 'tab');
     b.setAttribute('aria-selected', String(i === 0));
     b.append(iconEl(icon), el('span', 'side-tab-label', label));
+    b.append(iconEl(icon), el('span', 'side-tab-label', label));
+    if (key === 'chats' || key === 'groups') {
+      const badge = el('span', 'tab-badge', '0');
+      badge.title = key === 'chats' ? 'Unread messages in your chats' : 'Unread messages in your group rooms';
+      b.append(badge);
+      if (key === 'chats') chatBadge = badge;
+      else groupBadge = badge;
+    }
     b.addEventListener('click', () => setTab(i));
     nav.append(b);
   }
@@ -223,6 +252,7 @@ function renderGroups() {
     paintRooms(li, rooms, g);
     listHost.append(li);
   }
+  updateTabBadges(); // room unread fixtures changed (or the store did)
 }
 
 function groupRow(g) {
@@ -284,13 +314,11 @@ function paintRooms(li, host, g) {
     star.addEventListener('click', () => { r.starred = !r.starred; paintRooms(li, host, g); });
     const open = el('button', 'room-open');
     open.type = 'button';
-    const nm = el('span', 'room-name', `#${r.name}`);
+    // READ-ONLY rooms carry NO padlock: the name itself shows inside
+    // (…) — italic by CSS — and the header spells it out in words
+    const nm = el('span', r.ro ? 'room-name ro' : 'room-name', r.ro ? `(#${r.name})` : `#${r.name}`);
+    if (r.ro) nm.title = 'Read-only for you with your current passes';
     open.append(nm);
-    if (r.ro) {
-      const lock = iconEl('lock', 'room-lock');
-      lock.title = 'Read-only for you with your current passes';
-      open.append(lock);
-    }
     // the room's OWN tags (req 15) — quiet glyphs, same family as the
     // chat tag strip; they are what the sidebar filter matches on
     for (const t of r.tags ?? []) {
@@ -476,7 +504,7 @@ function openRoom(g, r) {
   renderGroups();
   activeCtx = { g, r };
   headName.replaceChildren(iconEl('users', 'gh-ic'), el('span', 'gh-group', g.name));
-  headRoom.textContent = `#${r.name}${r.ro ? ' — read-only (pass)' : ''}`;
+  headRoom.textContent = `#${r.name}${r.ro ? ' (read only)' : ''}`;
   paintHeadMute();
   msgHost.hidden = false;
   tabPanel.hidden = true;
@@ -523,4 +551,8 @@ export function mountGroups({ client }) {
   // the shared state — here we only RE-PAINT from it, so one click filters
   // both panes and the buttons' aria stays exactly as tags.js set it.
   sidebar.querySelector('.convo-filter')?.addEventListener('click', () => renderGroups());
+  updateTabBadges();
+  // main.js calls this whenever the DM list repaints (open/read/send), so
+  // the chats-tab number tracks the same truth the rows dot from
+  return { updateTabBadges };
 }
