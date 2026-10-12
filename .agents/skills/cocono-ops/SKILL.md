@@ -216,6 +216,15 @@ add must write into it.
   user's phone tell me whether this worked?" If not, add the `logEvent` line
   before you call it done — three rounds of video-preview debugging were
   guesswork precisely because the failure had no voice.
+- **Worked example (2026-10-12, video would not show for anyone)**: the journal
+  in one report said `poster: no preview (decode-error)` ×13 and `transcode:
+  skipped (metadata never arrived)`. Both were the same event — the CSP had
+  `img-src … blob:` but **no `media-src`**, so `default-src 'self'` refused every
+  `blob:` `<video>` before a decoder ran. Photos worked, video could not,
+  server-side tests were green. When a report says media elements error, check
+  the response headers (`curl -sI https://dev.co.co.no/ | grep -i
+  content-security-policy`) before investigating codecs — and after changing a
+  header, clients need a RELOAD for the new policy to apply.
 
 
 - **Think about spacing before declaring done.** Every new element gets checked against its container's existing rhythm: alignment (centered bar → centered contents), gaps/padding on the same rem scale already used there, and symmetric breathing room when an element adds a line. Trailing/inline crowding (a button hugging the last word, mixed px/rem margins, uneven top-vs-bottom space) is a bug, not a detail.

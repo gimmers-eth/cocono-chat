@@ -508,6 +508,22 @@ replay dedup · envelope HMAC/sender-mismatch/unknown-recipient · auth flow hap
 
 ## Test-maintenance lessons (baked into the suites)
 
+- **A CSP block and an undecodable clip are the same `error` event.** The video
+  feature was investigated twice as a codec problem (HEVC/.mov, iOS poster
+  capture) while the real cause was a response header: the policy carried
+  `img-src 'self' data: blob:` and **no `media-src`**, so `default-src 'self'`
+  governed `<video>` and every decrypted attachment — displayed through
+  `URL.createObjectURL` — was refused by the browser *before a decoder ran*.
+  Photos worked, video could not, on every platform, and server-side tests saw
+  nothing because the server was behaving exactly as configured. What ended it
+  was the client journal in one round (`poster: no preview (decode-error)` ×13,
+  `transcode: skipped (metadata never arrived)`). Rules: any "media does not
+  render" report puts the security headers in the same suspicion list as the
+  codecs; a directive that media depends on gets a test
+  (`be/test/media.test.js` asserts `media-src … blob:` and that nothing else was
+  widened); and a failure path that cannot distinguish "blocked" from
+  "undecodable" must at least say which event it saw.
+
 - **A capability gate must be checked against the platform that PRODUCES the
   data.** The video transcode was written around `captureStream()` and gated on
   it — and WebKit, the engine on every iPhone that records the HEVC `.mov` the
