@@ -271,6 +271,16 @@ auth.d }`) — a device can only ever confirm its own mail. Copies are NOT
 deleted on pull: they get `pulledAt` + `expireAt = pulledAt +
 MSG_RETENTION_SEC` so a device that later loses its local store can recover
 them via `resync` (same device identity only — ciphertext is per-device).
+- **A deliberate clear is not an eviction.** The client asks for `resync` only
+  when its local transcript is EMPTY — which is precisely what "Clear messages"
+  produces, so the replay handed back everything the user had just deleted on the
+  next refresh. `client/app/js/store.js` now marks a transcript that was emptied
+  ON PURPOSE (`transcriptClearedAt()`, per account, in localStorage so it survives
+  the very eviction it is distinguishing) and the resync gate reads it. The mark
+  is dropped the moment ANY message is stored again, so a later, genuine eviction
+  is still recoverable; and clearing one conversation while others still hold rows
+  marks nothing, because there the two readings of "empty" were never confused.
+  Asserted in `client/test/store.test.js`.
 Every newly-pulled doc triggers a receipt published to the sender's device
 channel:
 

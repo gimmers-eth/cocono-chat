@@ -84,6 +84,7 @@ export async function deleteAccountData(username) {
   if (!ul) return;
   try {
     localStorage.removeItem(`cocono.reads.${ul}`);
+    localStorage.removeItem(`cocono.cleared.${ul}`);
     localStorage.removeItem(ownerKey(ul));
   } catch { /* storage unavailable — nothing to clean */ }
   if (scope === ul) {
@@ -147,6 +148,9 @@ async function withStore(mode, fn, store = MESSAGES) {
 }
 
 export function saveMessage(msg) {
+  // The transcript is no longer empty-by-choice, so a future eviction SHOULD be
+  // recoverable again: drop the deliberate-clear marker (see clearedKey).
+  forgetTranscriptCleared();
   return withStore('readwrite', (s) => s.put(msg));
 }
 
@@ -237,24 +241,58 @@ export async function clearMessages(peer) {
   const msgs = await messagesWith(peer);
   if (!msgs.length) return 0;
   const db = await openDb();
-  return new Promise((resolve, reject) => {
+  await new Promise((resolve, reject) => {
     const tx = db.transaction(MESSAGES, 'readwrite');
     const store = tx.objectStore(MESSAGES);
     for (const m of msgs) store.delete(m.id);
-    tx.oncomplete = () => resolve(msgs.length);
+    tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
+  // Marked only when this cleared the LAST of it. An empty transcript is the one
+  // state that can be mistaken for an evicted store, so that is the only case the
+  // recovery replay has to be told about — clearing one conversation while others
+  // still hold rows must not cost those others their recovery.
+  if ((await allMessages()).length === 0) noteTranscriptCleared();
+  return msgs.length;
 }
 
 // Wipe the ENTIRE local transcript (settings → Clear all messages). Same
 // contract as clearMessages: device-local only — other devices, the peer's
 // copies and the friends list are untouched. Returns the deleted count.
 export function clearAllMessages() {
+  noteTranscriptCleared();
   return withStore('readwrite', (s) => {
     const count = s.count();
     s.clear();
     return count;
   });
+}
+
+// --- "empty because I SAID so" (localStorage, scoped like the transcript) ---
+//
+// An empty transcript is ambiguous, and the two readings want opposite things:
+// the browser may have EVICTED IndexedDB while the identity survived — in which
+// case the server's retained copies are a lifeline and chat.js asks for a replay
+// (`requestResync`) — or the USER may have pressed Clear, in which case a replay
+// resurrects exactly what they just deleted. The store cannot tell the difference
+// from inside itself, so the deliberate act leaves a marker behind.
+//
+// It is dropped the moment any message is stored again, which is what keeps the
+// recovery path alive: clear today, receive a message tomorrow, lose the browser
+// store next week and the replay still brings next-week's mail back.
+const clearedKey = () => `cocono.cleared.${scope}`;
+
+function noteTranscriptCleared() {
+  try { localStorage.setItem(clearedKey(), String(Date.now())); } catch { /* private mode */ }
+}
+
+/** When this device's transcript was last emptied ON PURPOSE (0 = never/unknown). */
+export function transcriptClearedAt() {
+  try { return Number(localStorage.getItem(clearedKey()) ?? 0) || 0; } catch { return 0; }
+}
+
+function forgetTranscriptCleared() {
+  try { localStorage.removeItem(clearedKey()); } catch { /* nothing to forget */ }
 }
 
 // Usernames known ON THIS DEVICE: peers we hold messages with, PLUS added

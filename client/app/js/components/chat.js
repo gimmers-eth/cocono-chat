@@ -22,7 +22,7 @@ import { mountLine, setAvatar } from './userline.js';
 import { errorText, humanError } from '../errors.js';
 import {
   saveMessage, updateMessage, messagesWith, markRead, allMessages, isUnread,
-  getMessage, deleteMessage, clearMessages,
+  getMessage, deleteMessage, clearMessages, transcriptClearedAt,
   saveMedia, getMedia, updateMedia, mediaWith, deleteMedia, clearMediaWith,
   loadPeerAvatars, rememberPeerAvatar, AVATARS_EVENT,
   loadFriends, friendAdd, friendDel, friendMarkFlags, setFriends, FRIENDS_EVENT, loadPeerBlocked, loadPeerMuted, rememberPeerMuted, loadPeerChips,
@@ -264,7 +264,13 @@ export function createChat({ client, onHomeRefresh }) {
       }
       if (state !== 'open' || resynced) return;
       resynced = true;
-      if ((await allMessages()).length === 0) client.requestResync();
+      // An empty transcript is ambiguous, and the two readings want opposite
+      // things: the browser may have EVICTED the store while the identity
+      // survived (then the server's retained copies are a lifeline — that is what
+      // this replay is for), or the USER pressed Clear, in which case replaying
+      // hands back exactly what they just deleted. store.js remembers which one
+      // happened, and forgets it as soon as any message is stored again.
+      if ((await allMessages()).length === 0 && !transcriptClearedAt()) client.requestResync();
     });
 
     client.on('message', async (m) => {
