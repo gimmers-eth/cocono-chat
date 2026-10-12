@@ -1799,8 +1799,12 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
 }
 
 /* ---- group & room rows ---- */
-.group-list { list-style: none; margin: 0; padding: .3rem .6rem 1rem; display: flex; flex-direction: column; gap: .15rem; }
-.group-item { display: flex; flex-direction: column; gap: .1rem; }
+.group-list { list-style: none; margin: 0; padding: .3rem .6rem 1rem; display: flex; flex-direction: column; }
+/* Groups are SEPARATE blocks: a hairline under each one (the last row
+   rests on the list's own bottom padding). The name row keeps the
+   sidebar's colour; the rooms under it get the raised tint. */
+.group-item { display: flex; flex-direction: column; gap: .15rem; padding-bottom: .5rem; margin-bottom: .5rem; border-bottom: 1px solid var(--divider); }
+.group-item:last-child { border-bottom: 0; margin-bottom: 0; }
 .group-row { display: flex; align-items: center; gap: .3rem; padding: .2rem .15rem; border-radius: 8px; }
 .group-row:hover { background: var(--panel-raised); }
 .grp-name {
@@ -1820,20 +1824,23 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
 .role-owner { color: rgb(240, 192, 74); }
 .role-admin { color: var(--accent); }
 .role-member { color: var(--muted); }
-.room-list { list-style: none; margin: 0; padding: 0 0 0 .55rem; display: flex; flex-direction: column; gap: .05rem; }
+.room-list { list-style: none; margin: 0 .1rem; padding: .25rem .35rem .3rem .45rem; display: flex; flex-direction: column; gap: .05rem;
+  /* the rooms block sits a step LIGHTER than the sidebar — a card under
+     the group name (the name row keeps its existing colour) */
+  background: var(--panel-raised); border-radius: 10px; }
 .room-row { display: flex; align-items: center; gap: .2rem; }
 .room-star {
   flex: none; width: 1.7rem; height: 1.7rem; display: grid; place-items: center;
   border: 0; background: none; cursor: pointer; color: var(--muted); border-radius: 6px;
 }
-.room-star:hover { background: var(--panel-raised); }
+.room-star:hover { background: var(--panel); }
 .room-star .star-on { color: var(--warning); }
 .room-open {
   flex: 1; min-width: 0; display: flex; align-items: center; gap: .4rem;
   border: 0; background: none; cursor: pointer; color: var(--text); font: inherit;
   text-align: left; padding: .32rem .4rem; border-radius: 8px;
 }
-.room-open:hover { background: var(--panel-raised); }
+.room-open:hover { background: var(--panel); }
 .room-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .room-lock { font-size: .7rem; color: var(--muted); flex: none; }
 .room-unread {

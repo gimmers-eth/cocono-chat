@@ -204,8 +204,10 @@ function renderGroups() {
     const li = el('li', 'group-item');
     li.append(groupRow(g));
     const rooms = el('ul', 'room-list');
-    rooms.hidden = !g.open;
     li.append(rooms);
+    // paintRooms owns host.hidden: a COLLAPSED group still shows its
+    // STARRED rooms (req 13 — the hidden flag and the star filter must
+    // never disagree, which is exactly how starring looked broken)
     paintRooms(li, rooms, g);
     listHost.append(li);
   }
@@ -246,8 +248,7 @@ function groupRow(g) {
     nameBtn.title = g.open ? `Collapse ${g.name}` : `Expand ${g.name}`;
     const li = row.closest('.group-item');
     const rooms = li.querySelector('.room-list');
-    rooms.hidden = !g.open;
-    paintRooms(li, rooms, g);
+    paintRooms(li, rooms, g); // also decides visibility (stars stay)
   };
   chev.addEventListener('click', toggle);
   nameBtn.addEventListener('click', toggle);
@@ -281,7 +282,8 @@ function paintRooms(li, host, g) {
     rr.append(star, open);
     host.append(rr);
   }
-  if (!g.open && !g.rooms.some((r) => r.starred)) host.hidden = true;
+  // visible whenever anything would render: open rooms OR kept stars
+  host.hidden = host.children.length === 0;
 }
 
 // ---------------------------------------------------------------- the room chat view
