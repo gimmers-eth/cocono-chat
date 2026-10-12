@@ -22,6 +22,7 @@
 
 import { $ } from './ui.js';
 import { iconEl } from './icons.js';
+import { getAppInfo } from './appinfo.js';
 import { readSwLog } from './swkv.js';
 import { keyboardLogLines } from './keyboard.js';
 import { appLogLines } from './applog.js';
@@ -87,11 +88,9 @@ export async function collectDiagnostics() {
   });
   await attempt('version', async () => {
     const cached = localStorage.getItem('cocono.appversion') ?? 'never-loaded';
-    let live = '?';
-    try {
-      const r = await fetch('/api/app-info');
-      if (r.ok) live = (await r.json()).version ?? '?';
-    } catch { /* offline */ }
+    // the page's SHARED read — a report must not add app-info pressure
+    const info = await getAppInfo();
+    const live = info?.version ?? '?';
     return `page ${cached} / server ${live}${cached === live ? '' : '  <-- MISMATCH (stale bundle?)'}`;
   });
   await attempt('sw-log', async () => {

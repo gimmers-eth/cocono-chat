@@ -332,7 +332,12 @@ export function createChat({ client, onHomeRefresh }) {
       loadPeerAvatars().then((avatars) => {
         const rec = avatars.get(m.peer.toLowerCase());
         if (rec && Date.now() - (rec.ts ?? 0) < 86_400_000) return;
-        return client.viewProfile(m.peer).then((prof) => rememberPeerAvatar(m.peer, prof.avatar));
+        return client.viewProfile(m.peer)
+          .then((prof) => rememberPeerAvatar(m.peer, prof.avatar))
+          // a FAILED lookup gets the same day of quiet as a good one (the
+          // throttle reads the record's ts): a 404 account must not re-prime
+          // on every incoming message
+          .catch(() => rememberPeerAvatar(m.peer, null));
       }).catch(() => {});
       if (currentPeer && currentPeer.toLowerCase() === m.peer.toLowerCase()) {
         await render();

@@ -22,6 +22,7 @@
 // provably stale — switches to the close-and-re-open copy.
 
 import { $ } from './ui.js';
+import { getAppInfo } from './appinfo.js';
 
 export const BOOT_VERSION_KEY = 'cocono.appversion'; // server version at last page boot (diagnostics read this too)
 const TRIED_BUILD_KEY = 'cocono.update.tried'; // server version we already reloaded for
@@ -46,14 +47,9 @@ const shortLabel = (info) => (info.build ? `v${info.build}` : `v${String(info.ve
  * `pollMs: 0` disables the interval. Returns { refresh, stop }.
  */
 export function initUpdateNotice({ fetchAppInfo, getOwnBuild = ownBuild, pollMs = DEFAULT_POLL_MS, retryMs = 10_000 } = {}) {
-  fetchAppInfo ??= async () => {
-    try {
-      const r = await fetch('/api/app-info');
-      return r.ok ? await r.json() : null;
-    } catch {
-      return null; // offline: keep whatever the footer already says
-    }
-    };
+  fetchAppInfo ??= () => getAppInfo(); // the page's SHARED read (appinfo.js):
+  // boot branding + this notice + enablePush cost ONE request per refresh,
+  // and failures are never cached (the retry below must see the wire again)
   // THIS page load has not spoken to the server yet; the first answer is
   // what served us (network-first SW) and overwrites any older session's
   // record — a stale carried-over value must never drive the notice.
@@ -65,6 +61,15 @@ export function initUpdateNotice({ fetchAppInfo, getOwnBuild = ownBuild, pollMs 
     v.textContent = shortLabel(info);
     v.title = `client build (git commit ${info.version})`;
   };
+
+  // The footer number is a fact about THIS page BEFORE any network: the
+  // served shell bakes it (meta[name=app-build]). Paint it SYNCHRONOUSLY at
+  // init — a boot fetch that dies (offline start, a deploy bounce, a 429)
+  // must never leave the footer BLANK (the desktop "version missing"
+  // symptom). The server answer below refines the title and drives the
+  // staleness notice; the 5-minute poll keeps that verdict fresh.
+  const ownNow = getOwnBuild();
+  if (ownNow !== null) paintVersion({ build: ownNow, version: `baked build ${ownNow}` });
 
   const isStale = (info) => {
     const own = getOwnBuild();
@@ -110,17 +115,18 @@ export function initUpdateNotice({ fetchAppInfo, getOwnBuild = ownBuild, pollMs 
   };
 
   const onInfo = (info) => { if (info?.version) render(info); };
-  // A boot that lands on a server BOUNCE (a restart, a blip) must not leave
-  // the footer BLANK until the next 5-minute poll: fast-retry (decaying,
-  // capped) until the FIRST answer paints the version. The desktop symptom
-  // this kills: "version is missing from the sidebar footer" after opening
-  // the app during a deploy.
+  // A boot that lands on a server BOUNCE (a restart, a blip) fast-retries
+  // — SHORT and HARD-CAPPED (5 tries, decaying 10s/20s/30s…, stop at the
+  // first paint) — so the footer refines seconds after the server is back.
+  // The cap matters: an unbounded chain turns a persistently refused client
+  // (a throttled device) into a self-sustaining app-info storm against the
+  // limiter — the very 429s that blanked the footer in the first place.
   let painted = false;
   let retries = 0;
   const refresh = async () => {
     const info = await fetchAppInfo();
     onInfo(info);
-    if (!painted && retryMs > 0 && retries < 30) {
+    if (!painted && retryMs > 0 && retries < 5) {
       retries += 1;
       setTimeout(refresh, Math.min(retryMs * retries, DEFAULT_POLL_MS));
     }

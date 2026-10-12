@@ -342,7 +342,7 @@ export class CoconoClient extends Emitter {
    * an already-granted subscription silently.
    * @returns {Promise<{state: 'enabled'|'denied'|'needs-prompt'|'unsupported'|'unconfigured', permission?: string}>}
    */
-  async enablePush({ prompt = true } = {}) {
+  async enablePush({ prompt = true, appInfo = null } = {}) {
     if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)
       || typeof PushManager === 'undefined' || typeof Notification === 'undefined') {
       return { state: 'unsupported' };
@@ -353,7 +353,10 @@ export class CoconoClient extends Emitter {
       permission = await Notification.requestPermission();
     }
     if (permission !== 'granted') return { state: 'denied', permission };
-    const info = await this.api.appInfo();
+    // VAPID key: the page may hand us its ALREADY-FETCHED app-info answer
+    // (appinfo.js keeps one request per refresh across the whole app);
+    // standalone SDK users (Node scripts) keep the plain endpoint read.
+    const info = await (appInfo ? appInfo() : this.api.appInfo());
     if (!info?.vapidPublicKey) return { state: 'unconfigured', permission };
     const reg = await navigator.serviceWorker.ready;
     let sub = await reg.pushManager.getSubscription();

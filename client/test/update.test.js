@@ -136,11 +136,24 @@ test('update: a boot that lands on a server bounce FAST-RETRIES until the footer
     if (i < 3) return null;
     return structuredClone(BOOT);
   };
-  initUpdateNotice({ fetchAppInfo, getOwnBuild: () => 12, pollMs: 0, retryMs: 15 });
-  assert.equal(versionEl().textContent, '', 'blank while the server is down — honest, not fake');
+  // NO baked marker on this one — the footer genuinely has nothing until a
+  // fetch answers (a shell from before the marker era)
+  initUpdateNotice({ fetchAppInfo, getOwnBuild: () => null, pollMs: 0, retryMs: 15 });
+  assert.equal(versionEl().textContent, '', 'blank while the server is down AND the shell has no marker — honest, not fake');
   await new Promise((r) => setTimeout(r, 200));
   assert.equal(versionEl().textContent, 'v12',
     'seconds after the server is back, NOT five minutes (the old single-shot boot)');
+});
+
+test('marker: the footer paints from the BAKED number immediately — even if the fetch never answers at all', async () => {
+  dom.reset();
+  dom.created.length = 0;
+  localStorage.removeItem(BOOT_VERSION_KEY);
+  localStorage.removeItem(TRIED_KEY);
+  // a fetch that never settles: the OLD code left the footer BLANK forever;
+  // the baked meta build needs no network to say which client you run
+  initUpdateNotice({ fetchAppInfo: () => new Promise(() => {}), getOwnBuild: () => 331, pollMs: 0, retryMs: 0 });
+  assert.equal(versionEl().textContent, 'v331', "the shell's own number, painted synchronously at init");
 });
 
 test('markup declares the slots and the baked-build token', () => {

@@ -15,6 +15,7 @@ import { initKeyboardFit } from './keyboard.js';
 import { mountDiagnostics } from './diag.js';
 import { installErrorCapture, logError } from './applog.js';
 import { initUpdateNotice } from './update.js';
+import { getAppInfo } from './appinfo.js';
 import { applyIcons } from './icons.js';
 import { initInstallAndNotify } from './install.js';
 import { initBadgeNotify, osNotify } from './notify.js';
@@ -255,7 +256,7 @@ async function enterApp({ gesture = false, offline = false, fresh = false, signe
   // for permission; on silent boot-resume it only re-registers a
   // subscription if permission was already granted. Both are best-effort.
   if (offline) return;
-  client.enablePush({ prompt: gesture }).then((r) => {
+  client.enablePush({ prompt: gesture, appInfo: getAppInfo }).then((r) => {
     if (r.state !== 'enabled' && r.state !== 'needs-prompt' && r.state !== 'unsupported') {
       client.logger.debug(`push not enabled: ${r.state} (${r.permission ?? 'n/a'})`);
     }
@@ -312,9 +313,10 @@ paintOnline();
 
 // Branding: the admin-configurable app name (see /api/app-info) fills every
 // [data-app-name] slot and the document title. The baked-in defaults keep
-// the page correct even if this fetch never lands.
-fetch('/api/app-info')
-  .then((r) => (r.ok ? r.json() : null))
+// the page correct even if this fetch never lands. ONE fetch serves the
+// whole page: the update notice, push enablement and diagnostics share the
+// appinfo.js answer (30 s TTL = the server's own cache window).
+getAppInfo()
   .then((info) => {
     if (!info?.name) return;
     // the media caps are the server's, not ours: adopt them before anyone can

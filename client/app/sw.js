@@ -84,6 +84,14 @@ async function showNotification(titleText, body, type) {
 }
 
 async function appTitle() {
+  // The PAGE hands the name to IDB on every app-info read (putAppTitle in
+  // main.js) — a notification must not cost another endpoint hit. The
+  // fetch is the cache-MISS fallback only (first notification before any
+  // page boot has spoken, or a wiped kv).
+  try {
+    const hit = await swLib().kvGet('apptitle');
+    if (hit) return hit;
+  } catch { /* fall through to the wire */ }
   try {
     const res = await fetch('/api/app-info');
     if (res.ok) {

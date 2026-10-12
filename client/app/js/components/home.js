@@ -491,10 +491,21 @@ export function createHome({ client, chat, onLogout }) {
   // One profile fetch per peer per day: the server hands out the avatar
   // ONLY when the add is mutual, so null results are cached too and simply
   // render as initials.
-  function primeProfiles(peers) {
+  // The cooldown is PERSISTED, not just per-page-load: the avatar record's
+  // ts survives reloads, so opening the app does NOT re-GET /profile for
+  // every conversation in the list (a 10-chat sidebar used to cost 10+ hits
+  // PER refresh; the list paints from the cache anyway). 30 minutes keeps
+  // premium/badge drift invisible in practice, and a chat OPEN still primes
+  // unthrottled (chat.js primePeerProfile — that surface wants the newest
+  // certificate).
+  async function primeProfiles(peers) {
     const selfUl = String(client.username ?? '').toLowerCase();
+    let persisted = new Map();
+    try { persisted = await loadPeerAvatars(); } catch { /* offline store: in-session map only */ }
     for (const peer of new Set([...peers, selfUl])) {
       if (!peer) continue;
+      const rec = persisted.get(peer);
+      if (rec && Date.now() - (rec.ts ?? 0) < 30 * 60_000) continue;
       const last = avatarPriming.get(peer) ?? 0;
       if (Date.now() - last < 5 * 60_000) continue;
       avatarPriming.set(peer, Date.now());
@@ -513,7 +524,11 @@ export function createHome({ client, chat, onLogout }) {
             renderOwnBadges();
           }
         })
-        .catch(() => avatarPriming.delete(peer)); // retry after cooldown
+        .catch(() => { /* failure KEEPS the 5-minute cooldown stamp — the
+            old delete made the NEXT sidebar paint hit the wire again: a
+            dead account (a wiped self-profile 404) turned every refresh
+            into another profile request, hundreds per hour. Silence, not
+            speed, is the right answer to a 404. */ });
     }
   }
 
