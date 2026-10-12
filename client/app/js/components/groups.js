@@ -574,18 +574,11 @@ function openRoom(g, r) {
   msgHost.hidden = false;
   tabPanel.hidden = true;
   view.hidden = false;
-  const b = document.body;
-  b.classList.add('group-open');
-  if (b.classList.contains('chat-sliding-out')) {
-    // a DM ride still in flight: land the pane at rest, transition-free —
-    // the room is simply THERE (the entry glide is from off-stage only)
-    b.classList.add('no-slide');
-    b.classList.remove('chat-sliding-out');
-    void b.offsetWidth;
-    b.classList.remove('no-slide');
-  } else {
-    playEnter(view); // desktop keeps the class-driven hop; mobile rides via CSS
-  }
+  document.body.classList.add('group-open');
+  // Mobile: the class alone rides the pane in FROM THE RIGHT (the menu
+  // recedes left) — the .entering hop below is desktop chrome (CSS disables
+  // it on phones).
+  playEnter(view);
   bubble(r.msgs ?? []);
 }
 
@@ -594,22 +587,13 @@ function closeRoom() {
   // the tag strip is NOT repainted here: it belongs to the pane and rides
   // out WITH it. Hiding it eagerly made the tags visibly vanish a beat
   // before the room itself left (P1 review). Re-opening repaints.
-  // MOBILE CAROUSEL EXIT: ride the pane OUT to the right (the same
-  // chat-sliding-out ride chat.js runs), then the transition-free reset
+  // MOBILE CAROUSEL EXIT: dropping group-open IS the ride — the pane
+  // travels back out to the right and the menu returns from the left
+  // (CSS visibility delay keeps it painted for the trip; only the hidden
+  // flip waits for the transition to end)
   if (!reducedMotion() && window.matchMedia?.('(max-width: 899px)').matches && !view.hidden) {
-    const b = document.body;
-    b.classList.add('chat-sliding-out');
-    let settled = false;
-    const done = () => {
-      if (settled) return;
-      settled = true;
-      b.classList.add('no-slide');
-      b.classList.remove('group-open', 'chat-sliding-out');
-      void b.offsetWidth;
-      b.classList.remove('no-slide');
-      view.hidden = true;
-    };
-    setTimeout(done, 320);
+    document.body.classList.remove('group-open');
+    setTimeout(() => { view.hidden = true; }, 300);
     return;
   }
   if (reducedMotion() || view.hidden) {

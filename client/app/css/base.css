@@ -917,39 +917,32 @@ span.avatar.chat-avatar { display: inline-grid; place-items: center; font-size: 
 /* ---------- mobile: one pane at a time ---------- */
 
 @media (max-width: 899px) {
-  /* TWO-PANEL CAROUSEL: the sidebar and the chat/room pane are full-width
-     panels; the pane RIDES IN from the left and OUT to the right on a
-     transform transition over the (never hidden) list. The old
-     display:none<->flex swap is what killed every previous attempt to
-     animate this: a display change cannot transition, and a slide started
-     under display:none is consumed invisibly. The JS (chat.js
-     closeChatPane / groups.js closeRoom) holds .chat-sliding-out through
-     the exit ride, then drops the body classes with .no-slide so the
-     off-stage reset never swings back across the screen. */
-  #view-app { position: relative; }
+  /* TWO-PANEL CAROUSEL (P1 review, final directions): opening slides
+     EVERYTHING LEFT — the menu recedes to the left while the chat/room
+     pane enters FROM THE RIGHT (it travels leftward into place). Closing
+     slides everything RIGHT — the pane rides out to the right and the menu
+     returns. Rest state is off-stage RIGHT with visibility delayed past
+     the ride (transition-delay on a discrete property), so the exit needs
+     no reset dance at all: the ride simply ENDS where rest begins. */
+  #view-app { position: relative; overflow: hidden; }
+  .sidebar { transition: transform .28s cubic-bezier(.22, .9, .3, 1); }
+  body.chat-open .sidebar, body.group-open .sidebar { transform: translateX(-100%); }
   .chat-pane {
     position: absolute; inset: 0; z-index: 6; display: flex;
-    transform: translateX(-100%); visibility: hidden;
+    transform: translateX(100%); visibility: hidden;
+    transition: transform .28s cubic-bezier(.22, .9, .3, 1), visibility 0s linear .28s;
   }
   body.chat-open .chat-pane, body.group-open .chat-pane {
     transform: none; visibility: visible;
+    transition: transform .28s cubic-bezier(.22, .9, .3, 1), visibility 0s;
   }
-  body.chat-sliding-out .chat-pane { transform: translateX(100%); visibility: visible; }
-  @media (prefers-reduced-motion: no-preference) {
-    .chat-pane, body.chat-sliding-out .chat-pane {
-      transition: transform .28s cubic-bezier(.4, 0, .85, .35), visibility 0s linear .28s;
-    }
-    body.chat-open .chat-pane, body.group-open .chat-pane {
-      transition: transform .28s cubic-bezier(.22, .9, .3, 1), visibility 0s;
-    }
-    body.chat-sliding-out .chat-pane { transition: transform .28s cubic-bezier(.4, 0, .85, .35), visibility 0s; }
+  /* reduced motion / no-transition engines: same endpoints, no ride */
+  @media (prefers-reduced-motion: reduce) {
+    .sidebar, .chat-pane, body.chat-open .chat-pane, body.group-open .chat-pane { transition: none; }
   }
-  body.no-slide .chat-pane { transition: none !important; }
-  /* the PANE rides; the per-view keyframe hops are desktop-only chrome */
+  /* the PANES ride; per-view keyframe hops are desktop chrome */
   .chat-view.entering, .chat-view.closing,
   .group-view.entering, .group-view.closing { animation: none; }
-  /* the sidebar list is the UNDERLAY of the ride — never display:none */
-  body.chat-open .sidebar, body.group-open .sidebar { display: flex; }
   .msg { max-width: 82%; }
 }
 

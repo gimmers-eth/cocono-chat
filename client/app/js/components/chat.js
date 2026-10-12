@@ -2854,14 +2854,12 @@ export function createChat({ client, onHomeRefresh }) {
       // the carousel transition — pure CSS). A ride still in flight from a
       // just-closed chat is cancelled transition-free so the new pane lands
       // at rest instead of dragging the old ride's +100% transform.
-      // THE CAROUSEL ENTRY: chat-open is a TRANSFORM target on mobile, so
-      // the class alone rides the pane in from the left (pure CSS
-      // transition, no timing traps); a ride still in flight from a
-      // just-closed chat is cancelled transition-free. Desktop keeps its
-      // class-driven hop — and BOTH need the class set.
+      // THE CAROUSEL ENTRY: chat-open is a TRANSFORM target on mobile (the
+      // pane rides in FROM THE RIGHT, the menu recedes left — pure CSS
+      // transition; the .entering hop below is disabled there). Desktop
+      // keeps its class-driven hop.
       setChatOpen(true);
-      if (window.matchMedia?.('(max-width: 899px)').matches) cancelRide();
-      else playChatEnter();
+      playChatEnter();
       const last = await render();
       // history = a real conversation existed at open: something received,
       // or something sent that the server accepted (sent/delivered). A
@@ -2930,17 +2928,6 @@ export function createChat({ client, onHomeRefresh }) {
     input.placeholder = enabled ? 'Type a message' : `${currentPeer ?? 'This user'} no longer exists`;
   }
 
-  // Cancel an in-flight carousel ride: drop the +100% transform with the
-  // transition disabled so the pane lands at rest instead of swinging back
-  // across the screen when the new chat-open class moves its target to 0.
-  function cancelRide() {
-    const b = document.body;
-    if (!b.classList.contains('chat-sliding-out')) return;
-    b.classList.add('no-slide');
-    b.classList.remove('chat-sliding-out');
-    void b.offsetWidth;
-    b.classList.remove('no-slide');
-  }
 
   const paneClosing = () => $('chat-view').classList.contains('closing');
   function closeChatPane() {
@@ -2973,26 +2960,18 @@ export function createChat({ client, onHomeRefresh }) {
       $('chat-empty').hidden = false;
     };
     if (anim && window.matchMedia?.('(max-width: 899px)').matches && !view.hidden) {
-      // MOBILE CAROUSEL EXIT: the pane RIDES OUT to the right (the CSS
-      // transform transition does the motion while chat-open is still on).
-      // When the ride settles, chat-open drops and the sliding-out class is
-      // removed under .no-slide — the off-stage LEFT position snaps back
-      // with zero transition, so the pane never swings across the screen.
-      b.classList.add('chat-sliding-out');
-      let settled = false;
-      const done = () => {
-        if (settled) return;
-        settled = true;
-        b.classList.add('no-slide');
-        if (!currentPeer) setChatOpen(false);
-        b.classList.remove('chat-sliding-out');
-        void b.offsetWidth; // commit the transition-free reset
-        b.classList.remove('no-slide');
-        if (currentPeer) return;
+      // MOBILE CAROUSEL EXIT: dropping chat-open IS the ride — the pane
+      // travels right back to its off-stage rest and the menu returns from
+      // the left (the CSS visibility delay keeps it painted for the trip).
+      // Only the after-rides bookkeeping (hide the pane, show the empty
+      // state) waits for the .28s transition; a chat re-opened mid-ride
+      // cancels it via currentPeer.
+      setChatOpen(false);
+      setTimeout(() => {
+        if (currentPeer) return; // a chat opened mid-ride owns the pane now
         view.hidden = true;
         $('chat-empty').hidden = false;
-      };
-      setTimeout(done, 320); // the .28s ride + slack; tab stalls land the same
+      }, 300);
     } else if (anim && !view.hidden) {
       let settled = false;
       const done = () => { if (!settled) { settled = true; finish(); } };
