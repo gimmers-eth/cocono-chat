@@ -390,9 +390,11 @@ img.own-avatar { border-radius: 50%; }
 }
 /* class-driven (JS adds .entering) so SWITCHING chats — where the pane is
    never display-toggled and a selector-based animation could not restart —
-   animates the new conversation in too */
+   animates the new conversation in too. Durations MATCH the settings panel
+   (.side-menu: in .22s / out .2s) — one open/close rhythm for the whole
+   app (P1 review: chat felt abrupt next to settings). */
 @media (prefers-reduced-motion: no-preference) {
-  .chat-view.entering { animation: chat-slide-in .185s cubic-bezier(.22, .9, .3, 1) both; }
+  .chat-view.entering { animation: chat-slide-in .22s cubic-bezier(.22, .9, .3, 1) both; }
 }
 /* swipe/back close: the reverse hop — accelerated ease-IN so it leaves
    quickly and never feels like it's being dragged away */
@@ -401,7 +403,7 @@ img.own-avatar { border-radius: 50%; }
   to   { transform: translateX(-18%); opacity: .55; }
 }
 @media (prefers-reduced-motion: no-preference) {
-  .chat-view.closing { animation: chat-slide-out .16s cubic-bezier(.4, 0, .85, .35) both; }
+  .chat-view.closing { animation: chat-slide-out .2s cubic-bezier(.4, 0, .85, .35) both; }
 }
 
 /* Mobile: 18% travel on a narrow pane covers few physical pixels, so the
@@ -416,8 +418,8 @@ img.own-avatar { border-radius: 50%; }
     from { transform: none; opacity: 1; }
     to   { transform: translateX(-26%); opacity: .45; }
   }
-  .chat-view.entering { animation-duration: .33s; }
-  .chat-view.closing { animation-duration: .285s; }
+  .chat-view.entering, .group-view.entering { animation-duration: .33s; }
+  .chat-view.closing, .group-view.closing { animation-duration: .285s; }
 }
 
 .chat-head {
@@ -1843,6 +1845,12 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
 .room-open:hover { background: var(--panel); }
 .room-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .room-lock { font-size: .7rem; color: var(--muted); flex: none; }
+/* room tags (req 15): the same glyphs as the chat tag strip, quiet grey,
+   and what the pinned sidebar filter matches on */
+.room-tag-ic { font-size: .7rem; color: var(--muted); flex: none; margin-left: .15rem; }
+/* mute mirrors the DM speaker's alarm rules: muted = red, not invisible */
+.room-mute.muted-on { color: var(--danger); }
+.room-mute.muted-on:hover { color: var(--danger); }
 .room-unread {
   margin-left: auto; flex: none; min-width: 1.3rem; text-align: center;
   background: var(--accent); color: var(--on-accent); border-radius: 999px;
@@ -1856,6 +1864,13 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
   position: absolute; inset: 0; z-index: 12; background: var(--bg);
   display: flex; flex-direction: column; min-width: 0;
 }
+/* open/close: the chat pane's exact slide, at the settings-matched pacing
+   (.22 in / .2 out) — groups.js drives the .entering/.closing classes the
+   same way playChatEnter/closeChatPane drive the DM pane's */
+@media (prefers-reduced-motion: no-preference) {
+  .group-view.entering { animation: chat-slide-in .22s cubic-bezier(.22, .9, .3, 1) both; }
+  .group-view.closing { animation: chat-slide-out .2s cubic-bezier(.4, 0, .85, .35) both; }
+}
 .group-head {
   flex: none; display: flex; align-items: center; gap: .6rem;
   padding: .6rem .9rem .4rem; border-bottom: 1px solid var(--border);
@@ -1864,6 +1879,10 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
 .group-head-name { display: inline-flex; align-items: center; gap: .45rem; font-weight: 700; min-width: 0; }
 .group-head-name .gh-ic { color: var(--accent); font-size: .9rem; }
 .group-head-room { color: var(--muted); font-size: .85rem; }
+/* the header speaker hugs the right edge (same rhythm as the profile
+   hero's chat button); muted turns it red like #btn-chat-mute */
+.group-head-mute { margin-left: auto; flex: none; color: var(--muted); }
+.group-head-mute.muted-on { color: var(--danger); }
 .group-head-note { flex: none; margin: .35rem .9rem 0; }
 .group-messages { flex: 1; }
 /* sender chip ABOVE the text (req 19): the bubble owns the person line */

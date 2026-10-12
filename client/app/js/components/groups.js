@@ -20,6 +20,7 @@ import { iconEl } from '../icons.js';
 import { mountLine } from './userline.js';
 import { PS } from './peername.js';
 import { nameChipEl } from '../badges.js';
+import { tagIconEl, TAG_LABELS, currentFilter } from '../tags.js';
 
 // ---------------------------------------------------------------- fixtures
 
@@ -48,11 +49,11 @@ const FAKE_GROUPS = [
         { from: 'marlene', text: 'Always. I found a new example.com/jambook to work through.', t: '09:20' },
         { from: 'mads', text: 'Can I bring the kids? No homework room this weekend.', t: '09:31' },
       ] },
-      { name: 'weekend-house', unread: 2, msgs: [
+      { name: 'weekend-house', unread: 2, tags: ['family'], msgs: [
         { from: 'ida', text: 'The roof patch held through the storm. Firewood stacked.', t: '08:02' },
         { from: 'karl', text: 'Taking the dog up Saturday — anyone around?', t: '08:40' },
       ] },
-      { name: 'adults-only', ro: true, msgs: [
+      { name: 'adults-only', ro: true, tags: ['family'], msgs: [
         { from: 'sofie', text: 'Gift list for mom’s 70th — kids, you cannot see this room. (This is the pass demo.)', t: 'Yest' },
       ] },
     ],
@@ -60,14 +61,14 @@ const FAKE_GROUPS = [
   {
     name: 'Team Aurora', role: 'admin', open: true,
     rooms: [
-      { name: 'general', starred: true, msgs: [
+      { name: 'general', starred: true, tags: ['work'], msgs: [
         { from: 'jens', text: 'Deploy window moved to Thursday. @karl owns the runbook.', t: '10:15' },
         { from: 'karl', text: 'Acknowledged. Staging is green: aurora.example.com/status', t: '10:22' },
       ] },
-      { name: 'design', msgs: [
+      { name: 'design', tags: ['work'], msgs: [
         { from: 'ida', text: 'New spacing scale is in the mock — one rhythm, every surface.', t: 'Mon' },
       ] },
-      { name: 'ops-alerts', ro: true, unread: 5, msgs: [
+      { name: 'ops-alerts', ro: true, unread: 5, tags: ['work'], msgs: [
         { from: 'mads', text: 'CPU spike on node-3, self-healed. Journal clean.', t: '07:55' },
       ] },
     ],
@@ -79,7 +80,7 @@ const FAKE_GROUPS = [
         { from: 'petter', text: 'See you all at the trailhead 7am…', t: 'June' },
         { from: 'sofie', text: 'RIP the boots I ruined for that ridge photo.', t: '06:45' },
       ] },
-      { name: 'gear-talk', starred: true, msgs: [
+      { name: 'gear-talk', starred: true, tags: ['personal'], msgs: [
         { from: 'mads', text: 'The new ultralight tent is example.com/tent-x — worth it.', t: 'Tues' },
       ] },
     ],
@@ -90,7 +91,7 @@ const FAKE_GROUPS = [
   ] },
   { name: 'Block Watch', role: 'admin', rooms: [
     { name: 'general', msgs: [{ from: 'karl', text: 'Gate code reminder: it changed Monday, see the notice board.', t: '17:03' }] },
-    { name: 'alerts', ro: true, unread: 1, msgs: [{ from: 'marlene', text: 'Tool van on Birch St — logged, no action needed.', t: '21:41' }] },
+    { name: 'alerts', ro: true, unread: 1, tags: ['personal'], msgs: [{ from: 'marlene', text: 'Tool van on Birch St — logged, no action needed.', t: '21:41' }] },
   ] },
   { name: 'Old Jazz Vinyl', role: 'member', rooms: [
     { name: 'general', starred: true, msgs: [{ from: 'petter', text: 'Blue Note reissue pressing question…', t: 'May' }] },
@@ -101,7 +102,7 @@ const FAKE_GROUPS = [
   ] },
   { name: 'Night-Shift Nurses', role: 'admin', rooms: [
     { name: 'general', msgs: [{ from: 'mads', text: 'Ward 4 short-staffed tomorrow — anyone swap?', t: '23:50' }] },
-    { name: 'handover', ro: true, unread: 3, msgs: [{ from: 'karl', text: 'Handover log template updated. Read-only for students.', t: '22:07' }] },
+    { name: 'handover', ro: true, unread: 3, tags: ['work'], msgs: [{ from: 'karl', text: 'Handover log template updated. Read-only for students.', t: '22:07' }] },
   ] },
   { name: 'Code Guild', role: 'owner', rooms: [
     { name: 'general', msgs: [{ from: 'jens', text: 'Monthly challenge: build a GC. Submissions due the 28th.', t: '09:00' }] },
@@ -198,9 +199,20 @@ function buildPanes(sidebar) {
   tabs.after(panes);
 }
 
+// The pinned sidebar tag filter drives the group list too (req 15) — the
+// SAME shared state the DM list filters by (tags.js currentFilter), so the
+// two panes can never disagree. 'starred' rides the room star itself.
+function roomMatches(r) {
+  const f = currentFilter();
+  if (f === 'all') return true;
+  if (f === 'starred') return !!r.starred;
+  return (r.tags ?? []).includes(f);
+}
+
 function renderGroups() {
   listHost.replaceChildren();
   for (const g of FAKE_GROUPS) {
+    if (!g.rooms.some(roomMatches)) continue; // filtered out entirely
     const li = el('li', 'group-item');
     li.append(groupRow(g));
     const rooms = el('ul', 'room-list');
@@ -259,8 +271,10 @@ function groupRow(g) {
 
 function paintRooms(li, host, g) {
   host.replaceChildren();
-  // collapsed: only STARRED rooms stay (req 13)
+  // collapsed: only STARRED rooms stay (req 13); the tag filter narrows
+  // every state further (req 15)
   for (const r of g.rooms) {
+    if (!roomMatches(r)) continue;
     if (!g.open && !r.starred) continue;
     const rr = el('li', 'room-row');
     const star = el('button', 'room-star');
@@ -277,9 +291,28 @@ function paintRooms(li, host, g) {
       lock.title = 'Read-only for you with your current passes';
       open.append(lock);
     }
+    // the room's OWN tags (req 15) — quiet glyphs, same family as the
+    // chat tag strip; they are what the sidebar filter matches on
+    for (const t of r.tags ?? []) {
+      const ic = tagIconEl(t);
+      ic.classList.add('room-tag-ic');
+      ic.title = `${TAG_LABELS[t] ?? t} room`;
+      open.append(ic);
+    }
     if (r.unread) open.append(el('span', 'room-unread', String(r.unread)));
     open.addEventListener('click', () => openRoom(g, r));
-    rr.append(star, open);
+    // mute/unmute (the DM tagbar speaker's sibling): a quiet grey glyph
+    // that turns red while MUTED — same alarm rule as #btn-chat-mute
+    const mute = el('button', `room-star room-mute${r.muted ? ' muted-on' : ''}`);
+    mute.type = 'button';
+    mute.title = r.muted ? `Unmute #${r.name}` : `Mute #${r.name} (mock — alerts hush, the room stays listed)`;
+    mute.append(iconEl(r.muted ? 'volumeXmark' : 'volume'));
+    mute.addEventListener('click', () => {
+      r.muted = !r.muted;
+      paintRooms(li, host, g);
+      paintHeadMute(); // the open room's header mirrors the state
+    });
+    rr.append(star, open, mute);
     host.append(rr);
   }
   // visible whenever anything would render: open rooms OR kept stars
@@ -292,8 +325,32 @@ let view = null;
 let msgHost = null;
 let headName = null;
 let headRoom = null;
+let headMuteBtn = null;
 let tabPanel = null;
+let activeCtx = null; // { g, r } of the open room (header mute mirrors it)
 const TAB_NAMES = ['chat', 'images', 'videos', 'files', 'links'];
+
+const reducedMotion = () => !window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches;
+
+// Open hop: class-driven with a forced-reflow restart — the playChatEnter
+// mechanism, so SWITCHING rooms (pane already visible) re-animates too.
+function playEnter(v) {
+  if (reducedMotion()) return;
+  v.classList.remove('entering');
+  void v.offsetWidth;
+  v.classList.add('entering');
+  v.addEventListener('animationend', () => v.classList.remove('entering'), { once: true });
+}
+
+function paintHeadMute() {
+  if (!headMuteBtn) return;
+  const r = activeCtx?.r;
+  headMuteBtn.hidden = !r;
+  if (!r) return;
+  headMuteBtn.classList.toggle('muted-on', !!r.muted);
+  headMuteBtn.title = r.muted ? `Unmute #${r.name}` : `Mute #${r.name} (mock — alerts hush, the room stays listed)`;
+  headMuteBtn.replaceChildren(iconEl(r.muted ? 'volumeXmark' : 'volume'));
+}
 
 function buildGroupView(client) {
   const main = document.querySelector('main.chat-pane');
@@ -309,6 +366,19 @@ function buildGroupView(client) {
   headName = el('span', 'group-head-name');
   headRoom = el('span', 'group-head-room');
   head.append(back, headName, headRoom);
+  // the room's speaker, hugging the header's right edge — the DM chat
+  // header's mute button in a different dress (same glyphs, same red
+  // muted alarm)
+  headMuteBtn = el('button', 'icon-btn group-head-mute');
+  headMuteBtn.type = 'button';
+  headMuteBtn.hidden = true;
+  headMuteBtn.addEventListener('click', () => {
+    if (!activeCtx) return;
+    activeCtx.r.muted = !activeCtx.r.muted;
+    paintHeadMute();
+    renderGroups(); // the sidebar row mirrors it
+  });
+  head.append(headMuteBtn);
   const msg = document.createElement('p');
   msg.className = 'group-head-note muted small';
   msg.textContent = 'Mock data — the room list, roles and messages are fixtures (docs/features/groups.md, P1).';
@@ -404,18 +474,39 @@ function appendMessage(m) {
 function openRoom(g, r) {
   r.unread = 0; // the mock marks read on open
   renderGroups();
+  activeCtx = { g, r };
   headName.replaceChildren(iconEl('users', 'gh-ic'), el('span', 'gh-group', g.name));
   headRoom.textContent = `#${r.name}${r.ro ? ' — read-only (pass)' : ''}`;
+  paintHeadMute();
   msgHost.hidden = false;
   tabPanel.hidden = true;
   view.hidden = false;
   document.body.classList.add('group-open');
+  playEnter(view); // the chat pane's slide in/out, settings-matched pacing
   bubble(r.msgs ?? []);
 }
 
 function closeRoom() {
-  view.hidden = true;
-  document.body.classList.remove('group-open');
+  activeCtx = null;
+  if (reducedMotion() || view.hidden) {
+    view.hidden = true;
+    document.body.classList.remove('group-open');
+    return;
+  }
+  // exit hop, then hide — the closeChatPane discipline: body class and
+  // hidden flip ONLY when the animation settles (a failsafe timer covers
+  // hidden-tab animation stalls)
+  let settled = false;
+  const done = () => {
+    if (settled) return;
+    settled = true;
+    view.hidden = true;
+    view.classList.remove('closing');
+    document.body.classList.remove('group-open');
+  };
+  view.addEventListener('animationend', done, { once: true });
+  setTimeout(done, 300);
+  view.classList.add('closing');
 }
 
 // ---------------------------------------------------------------- mount
@@ -427,4 +518,9 @@ export function mountGroups({ client }) {
   renderGroups();
   buildGroupView(client);
   setTab(0);
+  // the pinned tag filter also drives the group pane (req 15). home.js's
+  // wireFilterBar handler runs FIRST (wired before this mount) and updates
+  // the shared state — here we only RE-PAINT from it, so one click filters
+  // both panes and the buttons' aria stays exactly as tags.js set it.
+  sidebar.querySelector('.convo-filter')?.addEventListener('click', () => renderGroups());
 }

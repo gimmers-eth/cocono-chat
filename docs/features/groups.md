@@ -121,4 +121,9 @@ BEFORE the name; clicking the chevron OR the group name hides/shows rooms
 are read-only; opening a room shows the chat with sender chips (trust icon
 + badge per sender, viewer-side state), conversation tab strip, and a
 composer that echoes locally. Settings/members icons are honest stubs
-(toasts) until their phases.
+(toasts) until their phases. Rooms carry TAGS (family/work/personal) rendered
+as quiet glyphs and matched by the PINNED sidebar filter (the shared
+tags.js state — one click filters DMs and rooms together, req 15); room
+rows and the room header share a MUTE speaker (muted = red, mirrored
+between panes); opening/closing a room plays the chat pane's slide, whose
+pacing now MATCHES the settings panel (.22s in / .2s out).
