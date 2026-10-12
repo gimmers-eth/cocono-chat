@@ -36,7 +36,7 @@ import {
 // like and what its buttons do.
 import {
   prepareMedia, mediaRow, mediaLabel, parseMediaPayload, applyArrivalPolicy,
-  retryFailedDownloads, pruneLocalMedia, releaseScope,
+  retryFailedDownloads, pruneLocalMedia, releaseScope, buildPoster, hasLocalBytes,
 } from '../media.js';
 import { bubbleNodes } from './mediabubble.js';
 import {
@@ -59,6 +59,11 @@ function showBanner(text, peer) {
 }
 
 const STATE_MARK = { sending: 'stateSending', sent: 'stateSent', delivered: 'stateDelivered', failed: 'stateFailed' };
+
+// Video rows this session has already been asked to build a poster for. Without
+// the guard the paint → poster → paint loop would ask again on every event, and
+// a decoder refusal is not something to retry 40 times a minute.
+const posterAsked = new Set();
 
 // Timeline notices: when a security heads-up happens it must not be a
 // fleeting toast — it lands in the conversation timeline (dir:'sys') AND
@@ -519,13 +524,25 @@ export function createChat({ client, onHomeRefresh }) {
   async function pickAndSend(file) {
     if (!currentPeer || peerGone) return;
     let prepared;
+    let lastPrepPct = -1;
     try {
       // announced, because re-encoding a clip runs at about real time: without a
       // word, a 6-second video looks like a frozen app on a phone
       prepared = await prepareMedia(file, {
-        onPhase: (phase) => {
+        onPhase: (phase, frac) => {
           if (phase === 'preparing' && String(file.type ?? '').startsWith('video/')) {
             toast('Preparing video so every device can play it…');
+          }
+          // Re-encoding runs at about real time, and a toast that expires after
+          // 4.5 s leaves a 30-second wait looking like a frozen app. Re-issuing
+          // it with a percentage both restarts the timer and says how far along
+          // the phone is. Throttled to whole tens: this fires every 250 ms.
+          if (phase === 'transcoding' && Number.isFinite(frac)) {
+            const pct = Math.round(Math.min(1, Math.max(0, frac)) * 10) * 10;
+            if (pct !== lastPrepPct) {
+              lastPrepPct = pct;
+              toast(pct >= 100 ? 'Preparing video…' : `Preparing video so every device can play it… ${pct}%`);
+            }
           }
         },
       });
@@ -621,6 +638,19 @@ export function createChat({ client, onHomeRefresh }) {
     list.replaceChildren(frag);
     list.scrollTop = list.scrollHeight;
     settleAtBottom(list); // hold the pin through the late-landing chrome
+    // A clip whose bytes are on this device but which has no poster: cut one
+    // now. The sender's browser may have refused at send time (a detached
+    // <video> yields no frames on WebKit) and `buildPoster` decodes HERE, so the
+    // bubble and the wall go from a grey tile to a real frame with no
+    // re-download. Once per row per session; never awaited by the paint.
+    for (const row of mediaById.values()) {
+      if (!row || row.kind !== 'video' || row.state !== 'stored') continue;
+      if (row.thumb?.size || !hasLocalBytes(row) || posterAsked.has(row.id)) continue;
+      posterAsked.add(row.id);
+      buildPoster(row)
+        .then((thumb) => { if (thumb) render().catch(() => {}); })
+        .catch(() => null);
+    }
     // The tab strip swaps the CONTENT area only — the composer stays put in
     // every tab, because an attachment belongs to the conversation.
     await paintTab();

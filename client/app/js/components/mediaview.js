@@ -84,6 +84,33 @@ function tile(row, { blur, caption, onOpen }) {
     img.decoding = 'async';
     img.src = objectUrl(pic, 'bubbles');
     t.append(img);
+  } else if (row.kind === 'video' && hasLocalBytes(row)) {
+    // No poster, but the bytes are on this device: let the engine paint frame
+    // one itself (`#t=0.1` is what makes it seek instead of showing black). The
+    // wall would otherwise be a grid of film glyphs for every clip whose sender
+    // could not cut a preview.
+    const v = mk('video', 'media-tile-img media-tile-video');
+    v.muted = true;
+    v.setAttribute?.('muted', '');
+    v.playsInline = true;
+    v.setAttribute?.('playsinline', '');
+    v.controls = false;
+    v.autoplay = false;
+    v.loop = false;
+    v.preload = 'metadata';
+    v.setAttribute?.('tabindex', '-1');
+    v.src = `${objectUrl(row.data, 'bubbles')}#t=0.1`;
+    // an engine that cannot decode it (HEVC on Chromium) must not leave a black
+    // square: fall back to the glyph the tile would have had
+    v.addEventListener?.('error', () => {
+      const parent = v.parentNode;
+      if (!parent) return;
+      const ic = mk('span', 'media-tile-icon');
+      ic.append(iconEl('tabVideos'));
+      parent.insertBefore(ic, v);
+      v.remove?.();
+    }, { once: true });
+    t.append(v);
   } else {
     const ic = mk('span', 'media-tile-icon');
     ic.append(iconEl(row.kind === 'video' ? 'tabVideos' : 'attachFile'));
@@ -313,9 +340,13 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
     } else {
       const url = objectUrl(full, 'viewer');
       const video = mk('video', 'viewer-video');
-      video.src = url;
+      // `#t=0.1` makes the engine seek (and therefore DECODE) a frame instead of
+      // leaving a black rectangle until Play is pressed — a modal that opens on
+      // black reads as 'the video is broken'. The bytes are already local, so
+      // 'auto' costs no network.
+      video.src = `${url}#t=0.1`;
       video.playsInline = true;   // NO native controls: the row below is ours
-      video.preload = 'metadata';
+      video.preload = 'auto';
       // Stated explicitly because a video that 'constantly loops' was the
       // report: nothing in here may start by itself. A phone that just spent
       // mobile data fetching this file does not want it playing on open, and
@@ -351,6 +382,11 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
       });
       video.muted = true; // a video that starts itself with sound is a hostile default
       sound.replaceChildren(iconEl('mediaMute'), document.createTextNode(' Unmute'));
+      // Say it BEFORE the user presses Play and gets nothing: an engine that
+      // cannot decode this codec (HEVC/.mov on Chromium) fires `error` on load.
+      video.addEventListener('error', () => {
+        status('This browser cannot decode that video (phone cameras often record HEVC/.mov). It is intact — Save to device and open it in your video app.', true);
+      }, { once: true });
       pane.append(video, play, sound);
     }
   } else {

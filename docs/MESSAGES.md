@@ -435,8 +435,27 @@ offline replay therefore work untouched: a media message IS a message.
   re-encodes such clips to H.264/AAC in MP4 before upload (real-time,
   capability-gated, ≤90 s and ≤1920 px, and ANY failure — including an engine
   with no MP4 recorder — sends the original file rather than losing the clip).
+  There are TWO capture engines, because the obvious one is missing exactly
+  where it is needed: `HTMLMediaElement.captureStream()` (Chromium/Firefox),
+  and — for WebKit, which does not implement it, i.e. for every iPhone — a
+  canvas the presented frames are painted into (`requestVideoFrameCallback`)
+  and recorded via `canvas.captureStream()`, with the soundtrack taken from a
+  Web Audio graph on the same element. **A clip whose audio cannot be carried
+  is sent as recorded**: a silent re-encode is a worse loss than a `.mov`. The
+  decoder element is ATTACHED to the document while it runs
+  (`client/app/js/vidstage.js`) — WebKit delivers no frames to a detached
+  `<video>`, which is why no poster had ever been captured from a phone. Every
+  outcome, skips included, is journalled (`transcode: ok 6s 12MB->3MB via
+  canvas`, `skipped (no-capture-engine)`) so a report says what the device did.
   The `mime` in the descriptor is the container's truth, because a recipient's
   `<video>` refuses a typeless Blob and mislabels a `.mov` full of H.264.
+- **A video is visible in the thread even without a poster**: the bubble and
+  the wall tile show a paused, muted, control-less `<video>` over the local
+  bytes with a `#t=0.1` media fragment (which is what makes an engine decode a
+  frame instead of painting a black box); the message modal does the same.
+  Bytes not on this device → the labelled tile plus its Download button. An
+  engine that cannot decode the codec fires `error` and gets the tile back,
+  never a black rectangle.
 - **Outgoing sync** (§2.7) mirrors media the same way as text: payload
   `{"sync":1, id, peer, ts, media:{…}}` plus the same plaintext `att`, so the
   sender's other devices enter `pending` and the bytes cannot be deleted before

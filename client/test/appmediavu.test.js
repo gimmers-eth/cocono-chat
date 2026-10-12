@@ -67,6 +67,16 @@ const classesOf = (nodes) => nodes.flatMap((node) => {
 
 const has = (nodes, re) => classesOf(nodes).some((c) => re.test(c));
 
+const walkTags = (nodes, out = []) => {
+  for (const node of nodes) {
+    if (node?.tagName) out.push(node);
+    if (node?.childNodes) walkTags(node.childNodes, out);
+  }
+  return out;
+};
+const tagsOf = (nodes) => walkTags(nodes).map((el) => el.tagName);
+const findTag = (nodes, tag) => walkTags(nodes).find((el) => el.tagName === String(tag).toUpperCase()) ?? null;
+
 // ---------------- bubbles ----------------
 
 test('bubble: an unverified sender\'s photo is blurred, a verified one is not', async () => {
@@ -659,12 +669,45 @@ test('bubble: a video is never painted as an <img> over its own video bytes', as
   const v = { ...row({ id: 'vImg', kind: 'video' }), state: 'stored', data: mp4, thumb: null };
   await store.saveMedia(v);
   const nodes = bubbleNodes({ dir: 'in', kind: 'video', state: 'delivered' }, v, {});
-  const classes = classesOf(nodes);
-  assert.ok(!classes.some((c) => /media-thumb/.test(c)),
+  const tags = tagsOf(nodes);
+  assert.ok(!tags.includes('IMG'),
     'no <img> pointed at video bytes (that is the looping mess in the chat)');
-  assert.ok(classes.some((c) => /media-plain/.test(c)), 'a tile says video until a poster exists');
-  const text = nodes.map((x) => x.textContent).join(' ');
-  assert.match(text, /a\.mp4/, 'and the tile names the file it stands for');
+  const clip = findTag(nodes, 'VIDEO');
+  assert.ok(clip, 'the bytes this device holds are shown as a paused <video>, not a grey tile');
+  assert.match(clip.src, /#t=0\.1$/, 'with a media fragment, or the box stays black until Play');
+  assert.equal(clip.muted, true, 'a bubble never makes a sound by itself');
+  assert.equal(clip.autoplay, false);
+  assert.equal(clip.loop, false);
+  assert.equal(clip.controls, false);
+  assert.ok(has(nodes, /media-play-badge/), 'and it still says "tap me"');
+
+  // an engine that cannot decode it (HEVC/.mov on Chromium) must not leave a
+  // black rectangle: the labelled tile takes over, in place, on `error`
+  clip.fire('error');
+  assert.ok(has([nodes[0]], /media-plain/), 'undecodable → the tile, with the name and size');
+  assert.match(nodes.map((x) => x.textContent).join(' '), /a\.mp4/);
+});
+
+test('bubble: a video this device does NOT hold is a labelled tile with a download', async () => {
+  await fresh();
+  const v = { ...row({ id: 'vFar', kind: 'video', size: 40 * 1024 * 1024 }), state: 'pending', data: null, thumb: null };
+  await store.saveMedia(v);
+  const nodes = bubbleNodes({ dir: 'in', kind: 'video', state: 'delivered' }, v, {});
+  assert.equal(findTag(nodes, 'VIDEO'), null, 'nothing to decode here yet');
+  assert.ok(has(nodes, /media-plain/), 'a tile says video until the bytes arrive');
+  assert.match(nodes.map((x) => x.textContent).join(' '), /a\.mp4/, 'and names the file it stands for');
+  assert.match(nodes.map((x) => x.textContent).join(' '), /Download/, 'with the tap that fetches it');
+});
+
+test('bubble: a poster wins over a <video> element (cheaper, and it survives a re-paint)', async () => {
+  await fresh();
+  const mp4 = new Blob([new Uint8Array([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70])], { type: 'video/mp4' });
+  const poster = new Blob(['JPEG'], { type: 'image/jpeg' });
+  const v = { ...row({ id: 'vPosterBubble', kind: 'video' }), state: 'stored', data: mp4, thumb: poster };
+  await store.saveMedia(v);
+  const nodes = bubbleNodes({ dir: 'in', kind: 'video', state: 'delivered' }, v, {});
+  assert.equal(findTag(nodes, 'VIDEO'), null);
+  assert.ok(has(nodes, /media-thumb/), 'the JPEG poster is the preview');
 });
 
 test('poster: the recipient draws its own frame once the bytes land, typed correctly', async () => {
@@ -703,6 +746,42 @@ test('poster: the recipient draws its own frame once the bytes land, typed corre
   assert.equal(await M.buildPoster(await store.getMedia('vPoster2')), null,
     'no poster, no crash, no harm to the download');
   assert.equal((await store.getMedia('vPoster2')).thumb, null);
+});
+
+test('poster: the decoder element is IN THE DOCUMENT while it runs', async () => {
+  // WebKit hands no decoded frames to a detached <video>, which is why every
+  // poster from an iPhone came back empty (thumbCtSize: null on all of them).
+  // Staging is the fix; this asserts it happened, and that it is undone.
+  const mp4 = new Blob([new Uint8Array([0, 0, 0, 0x18])], { type: 'video/mp4' });
+  const seen = { attachedAtPlay: null, attachedAtEnd: null, el: null };
+  const realCreate = document.createElement.bind(document);
+  document.createElement = (tag) => {
+    const el = realCreate(tag);
+    if (el.tagName === 'VIDEO') {
+      el.videoWidth = 640; el.videoHeight = 480; el.duration = 4; el.readyState = 4; el.currentTime = 0.1;
+      el.requestVideoFrameCallback = (cb) => { cb(); return 1; };
+      el.play = async () => { seen.attachedAtPlay = el.parentNode === document.body; };
+      Object.defineProperty(el, 'src', {
+        configurable: true,
+        get: () => el._src ?? '',
+        set(v) { el._src = v; setTimeout(() => el.fire('loadedmetadata'), 0); },
+      });
+      seen.el = el;
+    }
+    if (el.tagName === 'CANVAS') {
+      el.getContext = () => ({ drawImage() {}, getImageData: () => ({ data: new Uint8Array([200, 120, 40, 255]) }) });
+      el.toBlob = (cb) => cb(new Blob(['poster'], { type: 'image/jpeg' }));
+    }
+    return el;
+  };
+  const out = await M.grabVideoFrame(mp4);
+  document.createElement = realCreate;
+  seen.attachedAtEnd = seen.el?.parentNode === document.body;
+  assert.ok(out.thumb, 'a poster came back');
+  assert.equal(out.w, 640);
+  assert.equal(out.dur, 4);
+  assert.equal(seen.attachedAtPlay, true, 'play() ran on an attached element, so frames are delivered');
+  assert.equal(seen.attachedAtEnd, false, 'and it is taken back off the page afterwards');
 });
 test('bubble: a video with no poster is a labelled tile, not a lone glyph', async () => {
   const row = {

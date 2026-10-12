@@ -71,6 +71,10 @@ test('app shell and assets are served', async (t) => {
     ['/js/components/auth.js', 'javascript'],
     ['/js/components/home.js', 'javascript'],
     ['/js/components/chat.js', 'javascript'],
+    // both are imported by modules that MUST load: a missing file here is a
+    // blank app on the phone, not a missing feature
+    ['/js/transcode.js', 'javascript'],
+    ['/js/vidstage.js', 'javascript'],
   ]) {
     const res = await fetch(`${srv.base}${asset}`);
     assert.equal(res.status, 200, `${asset} should be served`);

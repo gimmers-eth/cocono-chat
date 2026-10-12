@@ -429,13 +429,33 @@ replay dedup · envelope HMAC/sender-mismatch/unknown-recipient · auth flow hap
 - **Video that actually plays anywhere**: `client/app/js/transcode.js`
   normalises a sender's clip to H.264/AAC MP4 before upload when it is HEVC or
   QuickTime (the reason a recipient saw 'could not be played here': iPhone
-  cameras write HEVC and Chromium generally cannot decode it). Real-time via
-  `captureStream()` + `MediaRecorder` — chosen over a WebCodecs pipeline because
-  audio has to survive, and WebCodecs alone means adding a demuxer + sample-remux
-  to get it. Capability-gated, ≤90 s / ≤1920 px / ≤100 MB, and EVERY failure
+  cameras write HEVC and Chromium generally cannot decode it). Real-time, with
+  TWO capture engines: `captureStream()` + `MediaRecorder` where the element
+  supports it, and — because **WebKit does not implement
+  `HTMLMediaElement.captureStream()`**, i.e. on every iPhone, the one platform
+  that produces the `.mov`s — a canvas painted from `requestVideoFrameCallback`
+  and recorded via `canvas.captureStream()`, its soundtrack taken from a Web
+  Audio graph (`createMediaElementSource` → `MediaStreamDestination`). Chosen
+  over a WebCodecs pipeline because audio has to survive and WebCodecs alone
+  means adding a demuxer + sample-remux to get it. A clip whose audio cannot be
+  carried (no graph, or a context that stays suspended — that records silence)
+  is sent AS RECORDED: a silent re-encode is a worse loss than a `.mov`.
+  Capability-gated, ≤90 s / ≤1920 px / ≤100 MB, the output is sniffed to prove
+  it really is a playable MP4 before it replaces the source, and EVERY failure
   path sends the original file; each outcome is journalled (`transcode: ok 6s
-  12MB->3MB`, `skipped (no-mp4-recorder)`) so a phone report says what the
-  device actually did.
+  12MB->3MB via canvas`, `skipped (no-capture-engine)`) so a phone report says
+  what the device actually did.
+- **A video is visible in the thread even when nobody could cut a poster.**
+  `client/app/js/vidstage.js` puts the decoder element IN THE DOCUMENT while it
+  works and takes it back off afterwards: WebKit hands no decoded frames to a
+  detached `<video>`, which is why `thumbCtSize` was null on every video in the
+  dev database and why the poster ladder looked like an iOS codec problem. Where
+  there is still no poster but the bytes are local, the bubble and the wall tile
+  paint a paused, muted, control-less `<video>` whose src carries `#t=0.1` (the
+  media fragment is what makes an engine decode a frame instead of showing a
+  black box); `error` — an engine that cannot decode the codec — swaps the
+  labelled tile back in, and a stored clip with no poster gets one built on this
+  device (`buildPoster`, once per row per session).
 - **Getting the bytes ONTO the phone, and releasing the app's copy.** Save is a
   real DOWNLOAD (`<a download>` on the Blob URL, filename always carrying an
   extension via `deviceFileName`); the Web Share sheet, which on a phone is a
@@ -482,10 +502,29 @@ replay dedup · envelope HMAC/sender-mismatch/unknown-recipient · auth flow hap
 
 - **Known accepted gaps** (documented in the plan §9): no media backfill for
   newly paired devices; once all devices ack the blob is gone (a reinstall
-  shows "no longer available"); no range/streaming downloads; no video
-  transcoding — a 10 MB video cap is short and deliberate for M4.
+  shows "no longer available"). ~~No range/streaming downloads; no video
+  transcoding; a 10 MB video cap~~ — all three CLOSED: Range-resumable
+  downloads, sender-side re-encoding to H.264/AAC MP4, and a 100 MB cap.
 
 ## Test-maintenance lessons (baked into the suites)
+
+- **A capability gate must be checked against the platform that PRODUCES the
+  data.** The video transcode was written around `captureStream()` and gated on
+  it — and WebKit, the engine on every iPhone that records the HEVC `.mov` the
+  feature exists for, does not implement it. The gate was correct, the fallback
+  was correct, and the feature could never run where it was needed. The
+  capability probe is now a pure function (`captureEngine`) whose mapping is
+  asserted for the WebKit shape (no element capture, canvas capture present),
+  and the whole canvas recording path runs headlessly against that shape.
+  Same class of bug, same week: poster capture drew from a DETACHED `<video>`,
+  which WebKit hands no frames — so `thumbCtSize` was null on every video in
+  the database while the tests, which stub the decoder, stayed green.
+- **A failure path that only `console.warn`s is invisible.** The transcode's
+  skip reasons (`no-mp4-recorder`, `metadata never arrived`, …) went to the
+  console and nowhere else, so three rounds of "it still sent a .mov" had no
+  evidence. Every branch now journals through one `note()` — asserted by a test
+  that reads the function body, because the whole point is that no branch is
+  silent.
 
 - **WS connect race**: clients may answer `hello` before the connect handler
   finishes async setup — frames were dropped by the listenerless emitter.

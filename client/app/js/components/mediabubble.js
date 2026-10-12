@@ -62,16 +62,43 @@ function previewEl(row, blur) {
   // A picture, or nothing. The fallback used to reach for `row.data` on any
   // stored row, which for a VIDEO meant handing MP4 bytes to an <img> — the
   // engine paints a broken/looping frame instead of a preview. A video with no
-  // poster shows the film icon (and the recipient side generates its own
-  // first-frame poster, media.js buildPoster, once the bytes land).
+  // poster gets a real <video> below (videoPreviewEl), never an <img>.
   const blob = row.thumb ?? (renderableAsImage(row) && row.state === 'stored' ? row.data : null);
-  if (!blob || !blob.size) return null;
-  if (blob.type && !blob.type.startsWith('image/')) return null;
-  const img = mk('img', `media-thumb media-${row.kind}${blur ? ' is-blurred' : ''}`);
-  img.alt = '';
-  img.decoding = 'async';
-  img.src = objectUrl(blob, 'bubbles');
-  return img;
+  if (blob && blob.size && (!blob.type || blob.type.startsWith('image/'))) {
+    const img = mk('img', `media-thumb media-${row.kind}${blur ? ' is-blurred' : ''}`);
+    img.alt = '';
+    img.decoding = 'async';
+    img.src = objectUrl(blob, 'bubbles');
+    return img;
+  }
+  // A clip this device HOLDS but has no poster for (the sender's browser could
+  // not cut one, or the poster aged out): let the engine paint its own first
+  // frame instead of showing a grey tile that reads as 'never arrived'.
+  if (row.kind === 'video' && hasLocalBytes(row)) return videoPreviewEl(row);
+  return null;
+}
+
+/**
+ * A paused, muted, control-less <video> used AS A PICTURE. The `#t=0.1` media
+ * fragment is the whole trick: without it `preload='metadata'` leaves the box
+ * black until someone presses play, and a black box in a transcript is
+ * indistinguishable from a broken attachment. Nothing here may start playing
+ * (no autoplay, no loop, no controls) — the tap opens the message modal, which
+ * owns playback.
+ */
+function videoPreviewEl(row) {
+  const v = mk('video', 'media-thumb media-video');
+  v.muted = true;
+  v.setAttribute?.('muted', '');
+  v.playsInline = true;
+  v.setAttribute?.('playsinline', '');
+  v.controls = false;
+  v.autoplay = false;
+  v.loop = false;
+  v.preload = 'metadata';
+  v.setAttribute?.('tabindex', '-1');
+  v.src = `${objectUrl(row.data, 'bubbles')}#t=0.1`;
+  return v;
 }
 
 /** Wrap the shot + its overlays in one positioned box (the bubble itself must
@@ -92,7 +119,30 @@ function shot(row, blur) {
     hint.append(iconEl('mediaUnblur'), document.createTextNode(' tap to view'));
     box.append(hint);
   }
+  // A clip THIS ENGINE cannot decode (HEVC/.mov on Chromium is the common case)
+  // fires `error` on the element and would otherwise sit there as a black box.
+  // Swap in the labelled tile: the honest 'a video, N MB, not playable here'.
+  if (pic.tagName === 'VIDEO') {
+    pic.addEventListener?.('error', () => { box.replaceChildren(plainTile(row, 'mediaUndecodable')); }, { once: true });
+  }
   return box;
+}
+
+/** The labelled tile: what a bubble shows when there are no pixels to show.
+ *  A name, a size and (for a clip) a duration read as 'a video, not fetched
+ *  yet'; a bare glyph reads as 'broken'. */
+function plainTile(row, icon = null) {
+  const tile = mk('span', 'media-plain');
+  tile.append(iconEl(icon ?? (row.state === 'expired' ? 'mediaExpired' : (KIND_ICON[row.kind] ?? 'attachFile'))));
+  const meta = mk('span', 'media-plain-meta');
+  meta.append(mk('span', 'media-plain-name', row.name || (row.kind === 'video' ? 'Video' : 'Attachment')));
+  const sub = [
+    row.size ? formatSize(row.size) : null,
+    row.kind === 'video' && row.dur ? durationText(row.dur) : null,
+  ].filter(Boolean).join(' · ');
+  if (sub) meta.append(mk('span', 'media-plain-sub', sub));
+  tile.append(meta);
+  return tile;
 }
 
 /**
@@ -133,21 +183,10 @@ export function bubbleNodes(msg, row, { verified = false } = {}) {
       nodes.push(box);
       if (row.name) nodes.push(mk('span', 'media-name', row.name));
     } else {
-      // Nothing to preview — the sender's browser could not capture a frame, or
-      // the poster aged out. Say WHAT it is rather than dropping a lone glyph in
-      // the thread: a labelled tile with a size and (for a clip) a duration reads
-      // as 'a video, not fetched yet', while a bare icon reads as 'broken'.
-      const tile = mk('span', 'media-plain');
-      tile.append(iconEl(row.state === 'expired' ? 'mediaExpired' : (KIND_ICON[row.kind] ?? 'attachFile')));
-      const meta = mk('span', 'media-plain-meta');
-      meta.append(mk('span', 'media-plain-name', row.name || (row.kind === 'video' ? 'Video' : 'Attachment')));
-      const sub = [
-        row.size ? formatSize(row.size) : null,
-        row.kind === 'video' && row.dur ? durationText(row.dur) : null,
-      ].filter(Boolean).join(' · ');
-      if (sub) meta.append(mk('span', 'media-plain-sub', sub));
-      tile.append(meta);
-      nodes.push(tile);
+      // Nothing to preview — the sender's browser could not capture a frame and
+      // this device does not hold the bytes (or cannot decode them). Say WHAT it
+      // is rather than dropping a lone glyph in the thread.
+      nodes.push(plainTile(row));
     }
   }
 

@@ -53,6 +53,9 @@ export const ICONS = {
   mediaUnmute: 'fa-volume',
   mediaShare: 'fa-share-nodes',        // the download-refused fallback only
   mediaExpired: 'fa-circle-question',
+  // a clip THIS engine cannot decode (HEVC/.mov on Chromium): the file is
+  // intact, the browser is not able — the tile says so with its glyph
+  mediaUndecodable: 'fa-video-slash',
 
   // friendship (one-way trust) — sidebar + menu identity marks
   userSolid: 'fa-user',              // you (solid)

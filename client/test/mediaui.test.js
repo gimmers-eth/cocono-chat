@@ -105,6 +105,34 @@ test('media: chat.js is wired to the modules, not to its own copies', () => {
   assert.match(home, /setLocalRetentionDays/, 'the retention window is a setting');
 });
 
+test('media: the video preview path is wired end to end', () => {
+  // A detached <video> is the reason no poster was ever captured from an iPhone
+  // (thumbCtSize: null on every video in the dev database) and a missing
+  // import here would put that bug straight back.
+  assert.match(read('js/vidstage.js'), /export function stageMedia/);
+  for (const f of ['js/media.js', 'js/transcode.js']) {
+    const src = read(f);
+    assert.match(src, /from '\.\/vidstage\.js'/, `${f} imports the staging helper`);
+    assert.match(src, /stageMedia\(video\)/, `${f} attaches its <video> to the page`);
+    assert.match(src, /unstageMedia\(video\)/, `${f} takes it back off again`);
+    const at = src.indexOf('stageMedia(video');
+    const srcAt = src.indexOf('video.src = url');
+    assert.ok(at > -1 && srcAt > -1 && at < srcAt,
+      `${f} stages BEFORE assigning src (WebKit decides whether to decode from the element being rendered)`);
+  }
+  // every transcode outcome is journalled, not just the two that were: the skip
+  // reasons are exactly what a phone report needs
+  const tc = read('js/transcode.js');
+  assert.match(tc, /logEvent\('transcode'/, 'the journal hears about transcodes');
+  const noteBody = tc.match(/const note = \(m\) => \{[\s\S]*?\n  \};/)?.[0] ?? '';
+  assert.match(noteBody, /logEvent/, 'through the ONE note() every branch uses, so no path is silent');
+  // progress reaches the user: a real-time re-encode with no number is a hang
+  assert.match(read('js/media.js'), /onPhase\?\.\('transcoding', frac\)/, 'prepareMedia forwards transcode progress');
+  assert.match(read('js/components/chat.js'), /phase === 'transcoding'/, 'and the composer turns it into a percentage');
+  // a clip already on this device with no poster gets one built here
+  assert.match(read('js/components/chat.js'), /buildPoster\(row\)/, 'chat.js asks for a poster it does not have');
+});
+
 test('media: all THREE notification emitters name an attachment, never its JSON', () => {
   // 1. the worker's silent-resume peek (sw-lib.js) — the closed-app path
   const sw = read('sw-lib.js');

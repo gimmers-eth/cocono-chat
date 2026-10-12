@@ -7,31 +7,42 @@
 // "This video could not be played here". A preview is a separate problem (the
 // poster ladder in media.js) — this is about the file itself.
 //
-// WHY MediaRecorder AND NOT the WebCodecs pipeline proposed earlier. The
-// requirement is H.264/AAC in an MP4 — universally playable — and a clip
-// WITHOUT its audio track is a broken clip. WebCodecs gives fast, random-access
-// transcoding of the VIDEO track only: carrying audio means demuxing the
-// container and remuxing AAC sample-by-sample (an mp4box dependency plus the
-// sample-table plumbing plus a muxer), i.e. three moving parts to get sound
-// where `captureStream()` hands the recorder both tracks and the browser muxes
-// one file. Same output container, no new dependency, correct audio, today.
-// The cost is real time (a 6 s clip takes ~6 s), which is why the progress line
-// exists and why long clips are left alone. If speed ever matters more than the
-// dependency, the WebCodecs path is the upgrade — the gate below is written so
-// that is a swap of `transcodeVideo`, not of its callers.
+// TWO CAPTURE ENGINES, because the obvious one is missing exactly where it is
+// needed. `HTMLMediaElement.captureStream()` hands a recorder both tracks in one
+// line of code — and WebKit does not implement it, i.e. the iPhone that produces
+// every `.mov` we care about cannot use it. So the second engine draws the
+// element into a <canvas> (requestVideoFrameCallback where it exists) and records
+// `canvas.captureStream()`, which WebKit DOES implement, adding the audio track
+// from a Web Audio graph. Same container out (H.264/AAC in MP4), one extra
+// moving part.
+//
+// WHY MediaRecorder AND NOT the WebCodecs pipeline proposed earlier. WebCodecs
+// gives fast, random-access transcoding of the VIDEO track only: carrying audio
+// means demuxing the container and remuxing AAC sample-by-sample (an mp4box
+// dependency plus the sample-table plumbing plus a muxer). The recorder gets
+// sound in one pass and needs no dependency; the cost is wall-clock time, which
+// is why the progress line exists and why long clips are left alone.
 //
 // EVERY path through this file falls back to the original file. A failed or
-// unsupported transcode must never cost the user their video, and each outcome
-// is journalled (applog) so a phone report says which path ran and why not.
+// unsupported transcode must never cost the user their video — and it must never
+// quietly cost them the AUDIO either, so a clip that has a soundtrack we cannot
+// capture is sent as recorded. Each outcome is journalled (applog) so a phone
+// report says which path ran and why not: the skip reasons used to go only to
+// console.warn, which is a voice nobody outside the room can hear.
 
 import { logEvent } from './applog.js';
+import { stageMedia, unstageMedia } from './vidstage.js';
 
 /** Max seconds we will re-encode at send time (real-time cost, battery). */
 export const TRANSCODE_MAX_SECONDS = 90;
 /** Max payload after resizing — the app cap is the other gate, this is politeness. */
 export const TRANSCODE_MAX_BYTES = 100 * 1024 * 1024;
 /** Only transcode clips up to this resolution; beyond it a phone is doing more harm than the codec. */
-const TRANSCODE_MAX_EDGE = 1920;
+export const TRANSCODE_MAX_EDGE = 1920;
+/** Frames per second the canvas engine paints at (a phone clip is 30 fps). */
+const CANVAS_FPS = 30;
+const VIDEO_BITRATE = 6_000_000;
+const AUDIO_BITRATE = 128_000;
 
 /** Container/codec preference order: H.264+AAC in MP4 first, nothing else wins. */
 const TARGET_TYPES = [
@@ -68,10 +79,14 @@ export function sniffVideoFormat(bytes) {
   return { container: brands[0] === 'qt  ' ? 'mov' : 'mp4', brands };
 }
 
+/** HEVC brand list? (shared by 'does it need work' and 'is the OUTPUT right') */
+const hevcBrands = (brands) => (brands ?? []).map((x) => String(x).toLowerCase())
+  .some((x) => /^h(e|v)c[0-9]|hev[1c]|hevc|hvc1|hsxq|h265/.test(x));
+
 /** HEVC in any clothing, or a QuickTime container: not safe to hand a stranger. */
 export function needsTranscode({ mime, brands, container }) {
   const b = (brands ?? []).map((x) => x.toLowerCase());
-  const hevc = b.some((x) => /^h(e|v)c[0-9]|hev[1c]|hevc|hvc1|hsxq|h265/.test(x));
+  const hevc = hevcBrands(brands);
   const avc = b.some((x) => /^avc[0-9]|avc1|isom|mp4v|mp42|m4v |dash/.test(x)) && !hevc;
   if (hevc) return true;
   if (container === 'mov') return true;                     // QuickTime: Chromium plays almost none of them
@@ -81,9 +96,54 @@ export function needsTranscode({ mime, brands, container }) {
   return true;                              // unknown: normalise it rather than gamble
 }
 
+/**
+ * Is this blob H.264/AVC in an MP4 — the thing we PROMISED the recipient?
+ * Stricter than `!needsTranscode` on purpose: a recorder is free to hand back
+ * WebM whatever we asked for, and uploading that under a `.mp4` name is a lie
+ * the recipient's player discovers.
+ */
+export function isPlayableMp4(bytes) {
+  const info = sniffVideoFormat(bytes);
+  return info.container === 'mp4' && !hevcBrands(info.brands);
+}
+
 /** Can this engine record the target at all? (pure so the gate is testable) */
 export function pickRecorderType(isSupported) {
   return TARGET_TYPES.find((t) => { try { return isSupported(t); } catch { return false; } }) ?? null;
+}
+
+/**
+ * What this engine can actually record with (a probe, not a decision — pure so a
+ * test can pin the mapping without a browser).
+ */
+export function captureSupport(env = {}) {
+  const g = env.globalThis ?? globalThis;
+  const video = g.HTMLVideoElement?.prototype;
+  const canvas = g.HTMLCanvasElement?.prototype;
+  return {
+    recorder: typeof g.MediaRecorder === 'function',
+    // Chrome/Firefox: the element itself yields both tracks in one call.
+    // WebKit: undefined — the reason the canvas engine exists.
+    videoCapture: typeof video?.captureStream === 'function',
+    canvasCapture: typeof canvas?.captureStream === 'function',
+    videoFrames: typeof video?.requestVideoFrameCallback === 'function',
+    mp4Type: typeof g.MediaRecorder?.isTypeSupported === 'function'
+      ? pickRecorderType((t) => { try { return g.MediaRecorder.isTypeSupported(t); } catch { return false; } })
+      : null,
+  };
+}
+
+/**
+ * Which engine to record with, or why there is none. Pure: this is the exact
+ * sentence a phone report needs when a clip arrives as `.mov` again.
+ */
+export function captureEngine(support) {
+  if (!support?.recorder) return { engine: null, why: 'no-mediarecorder' };
+  if (!support?.mp4Type) return { engine: null, why: 'no-mp4-recorder' };
+  if (support.videoCapture) return { engine: 'element', why: 'captureStream' };
+  // Safari: paint frames into a canvas and record the canvas.
+  if (support.canvasCapture) return { engine: 'canvas', why: 'canvas-capture' };
+  return { engine: null, why: 'no-capture-engine' };
 }
 
 /**
@@ -107,16 +167,18 @@ export function transcodeDecision({ file, mime, info, dur, width, height, hasRec
 /**
  * Re-encode one video to H.264/AAC MP4. Resolves `null` on ANY problem — every
  * caller falls back to the original file — and journals the reason.
- *
- * `video.captureStream()` is what makes this one pass: the element decodes the
- * HEVC (Safari can), and the recorder re-encodes BOTH tracks. We play muted at
- * up to 4× playbackRate where the engine allows it, because the cost of this
- * approach is wall-clock time.
  */
-export async function transcodeVideo(file, { onProgress = null, log = null } = {}) {
-  const note = (m) => { try { (log ?? ((x) => console.warn(x)))(`[media] transcode: ${m}`); } catch { /* never fatal */ } };
+export async function transcodeVideo(file, { onProgress = null, log = null, audioCtx = null } = {}) {
+  // EVERY branch journals: the reason a phone kept sending `.mov` was invisible
+  // because the skip paths only warned to a console nobody was watching.
+  const note = (m) => {
+    try { (log ?? ((x) => console.warn(x)))(`[media] transcode: ${m}`); } catch { /* never fatal */ }
+    try { logEvent('transcode', String(m).slice(0, 150)); } catch { /* never fatal */ }
+  };
   let video = null;
   let url = '';
+  let audio = null;
+  let actx = audioCtx ?? null;      // may have been opened INSIDE the user gesture
   try {
     const mime = String(file?.type ?? '');
     const head = new Uint8Array(await file.slice(0, 64).arrayBuffer());
@@ -124,28 +186,28 @@ export async function transcodeVideo(file, { onProgress = null, log = null } = {
     // decide on the CONTAINER first: an already-H.264 MP4 costs nothing, and a
     // phone that could not record mp4 costs nothing either — no element, no
     // decode, no battery. Only then is it worth loading a decoder.
-    if (!needsTranscode({ mime, ...info })) { note('not needed (already universally playable)'); return null; }
-    if (typeof MediaRecorder === 'undefined' || typeof HTMLVideoElement === 'undefined'
-      || !HTMLVideoElement.prototype?.captureStream) {
-      note('no captureStream here, sending the original');
-      return null;
-    }
-    const type = pickRecorderType((t) => { try { return MediaRecorder.isTypeSupported(t); } catch { return false; } });
-    if (!type) { note('no mp4 recorder in this engine, sending the original'); return null; }
+    if (!needsTranscode({ mime, ...info })) { note('skipped (already universally playable)'); return null; }
+
+    const support = captureSupport();
+    const eng = captureEngine(support);
+    if (!eng.engine) { note(`skipped (${eng.why})`); return null; }
+    const type = support.mp4Type;
 
     url = URL.createObjectURL(file);
     video = document.createElement('video');
-    video.muted = true;
-    video.playsInline = true;
     video.preload = 'auto';
+    // IN THE DOCUMENT BEFORE src IS ASSIGNED, or WebKit delivers no frames and
+    // play() may refuse: that is the iPhone, i.e. the reason this file exists.
+    stageMedia(video);
     video.src = url;
+
     const meta = await new Promise((resolve) => {
       const done = (v) => resolve(v);
       video.addEventListener('loadedmetadata', () => done(true), { once: true });
       video.addEventListener('error', () => done(false), { once: true });
       setTimeout(() => done(false), 12000);
     });
-    if (!meta) { note('metadata never arrived'); return null; }
+    if (!meta) { note('skipped (metadata never arrived)'); return null; }
 
     const dec = transcodeDecision({
       file, mime, info, dur: video.duration, width: video.videoWidth, height: video.videoHeight,
@@ -153,56 +215,252 @@ export async function transcodeVideo(file, { onProgress = null, log = null } = {
     });
     if (!dec.go) { note(`skipped (${dec.why})`); return null; }
 
-    const stream = video.captureStream();
-    if (!stream.getVideoTracks().length) { note('no captured video track'); return null; }
-    const rec = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 6_000_000 });
-    const parts = [];
-    const stopped = new Promise((resolve) => { rec.onstop = resolve; });
-    rec.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
-    rec.onerror = () => { /* the size/type check below catches a broken output */ };
+    // Wall clock is the recorder's clock on BOTH engines, so playbackRate is not
+    // a speed-up: at 2× it records a 2× clip half as long. Real time it is.
+    const rec = eng.engine === 'element'
+      ? await recordElement(video, type, onProgress)
+      : await recordCanvas(video, type, onProgress, note, (a) => { audio = a; actx = a?.ctx ?? actx; }, actx);
+    if (!rec.blob) { note(`skipped (${rec.why})`); return null; }
 
-    const target = video.duration;
-    // Faster than real time where the engine lets us; playbackRate with audio
-    // can desync some recorders, so this is capped conservatively and the
-    // fallback (original file) covers a bad output.
-    try { video.playbackRate = target > 30 ? 2 : 1; } catch { /* not all engines */ }
-    const tick = setInterval(() => {
-      try { onProgress?.(Math.min(1, (video.currentTime || 0) / (target || 1))); } catch { /* ui hook */ }
-    }, 250);
-    const timeout = setTimeout(() => { try { video.pause(); rec.stop(); } catch { /* done */ } }, (target * 1000) / 1 + 15_000);
-
-    rec.start(1000);
-    try { await video.play(); } catch { note('play refused (autoplay policy)'); clearInterval(tick); clearTimeout(timeout); return null; }
-    await new Promise((resolve) => {
-      video.addEventListener('ended', resolve, { once: true });
-      const chk = setInterval(() => { if (video.ended) { clearInterval(chk); resolve(); } }, 250);
-      setTimeout(() => { clearInterval(chk); resolve(); }, (target * 1000) + 15_000);
-    });
-    clearInterval(tick);
-    clearTimeout(timeout);
-    try { rec.stop(); } catch { /* already stopped */ }
-    await stopped;
-
-    const out = new Blob(parts, { type: 'video/mp4' });
-    if (!out.size || out.size < 1024) { note('empty output'); return null; }
+    const out = rec.blob;
+    if (!out.size || out.size < 1024) { note('skipped (empty output)'); return null; }
+    // A recorder is free to hand back WebM whatever we asked for; uploading that
+    // as `.mp4` would be a lie the recipient's player discovers.
+    const outHead = new Uint8Array(await out.slice(0, 64).arrayBuffer());
+    if (!isPlayableMp4(outHead)) { note('skipped (output is not a playable mp4)'); return null; }
     if (out.size >= file.size) {
       // a transcode bigger than the original is a pure loss (short clips with
       // fixed 6 Mbit overhead do this) — keep the original
-      note(`output larger than the source (${out.size} >= ${file.size}), keeping the original`);
+      note(`skipped (output ${out.size} >= source ${file.size}), keeping the original`);
       return null;
     }
     onProgress?.(1, 1);
-    note(`re-encoded to mp4/h264: ${file.size} -> ${out.size} bytes`);
-    logEvent('transcode', `ok ${Math.round(target)}s ${file.size}->${out.size}`);
+    const secs = Math.round(Number(video.duration) || 0);
+    note(`ok ${secs}s ${file.size}->${out.size} via ${eng.engine}${rec.hadAudio === false ? ' (video only: no audio track in the source)' : ''}`);
     return out;
   } catch (err) {
-    note(`failed: ${String(err?.message ?? err).slice(0, 90)}`);
-    logEvent('transcode', `failed ${err?.name ?? 'Error'} ${String(err?.message ?? '').slice(0, 70)}`);
+    note(`failed ${err?.name ?? 'Error'} ${String(err?.message ?? err).slice(0, 90)}`);
     return null;
   } finally {
-    try { video?.pause?.(); video?.removeAttribute?.('src'); video?.srcObject?.getTracks?.().forEach((t) => t.stop()); } catch { /* release */ }
+    try { actx?.close?.(); } catch { /* release */ }
+    try { audio?.track?.stop?.(); } catch { /* release */ }
+    unstageMedia(video);
     if (url) setTimeout(() => { try { URL.revokeObjectURL(url); } catch { /* gone */ } }, 1000);
   }
+}
+
+// ---------------- the two recording engines ----------------
+
+/**
+ * ENGINE 1 (Chrome/Firefox): the element's own captureStream, both tracks, no
+ * canvas. `ondataavailable` every second so a long clip is never held in one
+ * unbounded buffer.
+ */
+async function recordElement(video, type, onProgress) {
+  let stream;
+  try { stream = video.captureStream(); } catch { return { blob: null, why: 'captureStream threw' }; }
+  if (!stream?.getVideoTracks?.().length) return { blob: null, why: 'no captured video track' };
+  const rec = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: VIDEO_BITRATE, audioBitsPerSecond: AUDIO_BITRATE });
+  const parts = [];
+  const stopped = new Promise((resolve) => { rec.onstop = resolve; });
+  rec.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
+  rec.onerror = () => { /* the size/format checks in the caller catch a broken output */ };
+  rec.start(1000);
+  const played = await playThrough(video, onProgress);
+  if (!played) { try { rec.stop(); } catch { /* already stopped */ } await stopped; return { blob: null, why: 'playback never started' }; }
+  try { rec.stop(); } catch { /* already stopped */ }
+  await stopped;
+  return { blob: new Blob(parts, { type: 'video/mp4' }), hadAudio: stream.getAudioTracks?.().length > 0 };
+}
+
+/**
+ * ENGINE 2 (WebKit, which has no element captureStream): paint each presented
+ * frame into a canvas, record `canvas.captureStream()`, and take the soundtrack
+ * from a Web Audio graph on the same element.
+ *
+ * A clip that HAS audio but whose audio we cannot capture is refused here
+ * (`why: 'no audio capture'`) — the caller then sends the original. A silent
+ * re-encode of someone's video is a worse loss than a `.mov`.
+ */
+async function recordCanvas(video, type, onProgress, note, giveAudio, ctxIn = null) {
+  const w = video.videoWidth || 0, h = video.videoHeight || 0;
+  if (!w || !h) return { blob: null, why: 'no dimensions' };
+  const scale = Math.min(1, TRANSCODE_MAX_EDGE / Math.max(w, h));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(2, Math.round(w * scale));
+  canvas.height = Math.max(2, Math.round(h * scale));
+  const g = canvas.getContext?.('2d');
+  if (!g) return { blob: null, why: 'no-2d-context' };
+
+  let stream;
+  try { stream = canvas.captureStream(CANVAS_FPS); } catch { return { blob: null, why: 'canvas.captureStream threw' }; }
+  if (!stream?.getVideoTracks?.().length) return { blob: null, why: 'canvas produced no video track' };
+
+  const audio = await audioGraph(video, note, ctxIn);
+  giveAudio?.(audio);
+  if (audio.track) {
+    try { stream.addTrack(audio.track); } catch { audio.track = null; }
+  }
+
+  const rec = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: VIDEO_BITRATE, audioBitsPerSecond: AUDIO_BITRATE });
+  const parts = [];
+  const stopped = new Promise((resolve) => { rec.onstop = resolve; });
+  rec.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
+  rec.onerror = () => { /* checked below */ };
+
+  const draw = () => { try { g.drawImage(video, 0, 0, canvas.width, canvas.height); } catch { /* a frame the decoder withheld */ } };
+  const painter = startPainter(video, draw);
+  rec.start(250);
+  const played = await playThrough(video, onProgress, async () => {
+    // A suspended AudioContext records SILENCE, and a silent re-encode of
+    // someone's video is worse than the .mov we would otherwise send. Contexts
+    // are often handed over suspended until something plays, so ask again now
+    // that playback has started — and remember the answer.
+    if (audio.ctx && audio.ctx.state !== 'running' && audio.ctx.state !== undefined) {
+      try { await audio.ctx.resume?.(); } catch { /* refused */ }
+      note(`audio context: ${audio.ctx.state}`);
+    }
+    audio.ran = audioRan(audio.ctx);
+  });
+  // the last presented frame, then a beat for the recorder to flush it
+  draw();
+  await new Promise((r) => setTimeout(r, 250));
+  painter.stop();
+  if (!played) { try { rec.stop(); } catch { /* already stopped */ } await stopped; return { blob: null, why: 'playback never started' }; }
+  try { rec.stop(); } catch { /* already stopped */ }
+  await stopped;
+
+  // A source WITH sound that we could not carry is not a transcode, it is an
+  // edit.
+  if (sourceHasAudio(video) && (!stream.getAudioTracks?.().length || audio.ran === false)) {
+    return { blob: null, why: stream.getAudioTracks?.().length ? 'audio context stayed suspended' : 'source has audio, no audio capture' };
+  }
+  return { blob: new Blob(parts, { type: 'video/mp4' }), hadAudio: !!stream.getAudioTracks?.().length };
+}
+
+/**
+ * Did the source clip have a soundtrack? Three signals, because none is
+ * universal: WebKit and Blink expose `webkitAudioDecodedByteCount`, Gecko
+ * `mozHasAudio`, and some builds an `audioTracks` list.
+ */
+export function sourceHasAudio(video) {
+  if (Number(video?.webkitAudioDecodedByteCount ?? 0) > 0) return true;
+  if (video?.mozHasAudio === true) return true;
+  const tracks = video?.audioTracks;
+  if (tracks && typeof tracks.length === 'number') return tracks.length > 0;
+  return false;
+}
+
+/** Paint on every presented frame where the engine offers that (rvfc), else on
+ *  a timer. Returns a handle whose `stop()` ends the loop. */
+function startPainter(video, draw) {
+  if (typeof video.requestVideoFrameCallback === 'function') {
+    let live = true;
+    const cb = () => {
+      if (!live) return;
+      draw();
+      try { video.requestVideoFrameCallback(cb); } catch { live = false; }
+    };
+    try { video.requestVideoFrameCallback(cb); } catch { live = false; }
+    if (live) return { stop: () => { live = false; } };
+  }
+  draw();
+  const id = setInterval(draw, Math.round(1000 / CANVAS_FPS));
+  return { stop: () => clearInterval(id) };
+}
+
+/**
+ * Did the audio graph actually RUN? A suspended context records silence, and
+ * silence over someone's clip is a worse outcome than the .mov we would
+ * otherwise send. An engine that exposes no `state` at all is given the benefit
+ * of the doubt — it is not telling us it is suspended.
+ */
+export function audioRan(ctx) {
+  if (!ctx) return true;                        // no graph at all: the caller decides
+  return ctx.state === undefined || ctx.state === 'running';
+}
+
+/**
+ * Open (and try to unsuspend) an AudioContext NOW, while the user's tap still
+ * counts. Engines are entitled to refuse a context created later, deep inside
+ * an awaited transcode, and a suspended context records SILENCE — so the caller
+ * that is still inside the gesture opens one and hands it down.
+ * Returns null when this engine has no Web Audio at all.
+ */
+export function primeAudioContext() {
+  try {
+    const AC = globalThis.AudioContext ?? globalThis.webkitAudioContext;
+    if (!AC) return null;
+    const ctx = new AC();
+    try { ctx.resume?.()?.catch?.(() => {}); } catch { /* refused: audioGraph asks again */ }
+    return ctx;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The soundtrack, via Web Audio: `createMediaElementSource` reroutes the element
+ * into a graph, and a MediaStreamDestination turns that back into a track the
+ * recorder can take. Never fatal — `track: null` means "video only", and the
+ * caller decides whether that is acceptable.
+ */
+async function audioGraph(video, note, ctxIn = null) {
+  try {
+    let ctx = ctxIn ?? null;
+    if (!ctx) {
+      const AC = globalThis.AudioContext ?? globalThis.webkitAudioContext;
+      if (!AC) { note('no AudioContext here: this engine cannot carry the audio'); return { track: null, ctx: null, ran: true }; }
+      ctx = new AC();
+      // A phone may hand us a suspended context; a suspended graph records silence.
+      try { await ctx.resume?.(); } catch { /* some engines refuse without a gesture */ }
+    }
+    const src = ctx.createMediaElementSource(video);
+    const dest = ctx.createMediaStreamDestination();
+    src.connect(dest);                     // NOT to ctx.destination: no double audio
+    const track = dest.stream?.getAudioTracks?.()[0] ?? null;
+    if (!track) { note('audio graph produced no track'); return { track: null, ctx, ran: audioRan(ctx) }; }
+    return { track, ctx, ran: audioRan(ctx) };
+  } catch (err) {
+    note(`audio capture unavailable: ${String(err?.message ?? err).slice(0, 60)}`);
+    return { track: null, ctx: ctxIn ?? null, ran: false };
+  }
+}
+
+/**
+ * Play the clip to its end and say whether playback really started. `play()`
+ * rejecting (autoplay policy, locked screen) is a SKIP, not a failure: the
+ * original file goes, unchanged.
+ */
+async function playThrough(video, onProgress, onStarted = null) {
+  const target = Number(video.duration) || 0;
+  const tick = setInterval(() => {
+    try { onProgress?.(Math.min(1, (video.currentTime || 0) / (target || 1))); } catch { /* ui hook */ }
+  }, 250);
+  // the recorder is wall-clock, so this is the clip's own length plus slack for
+  // a phone that decodes slower than it plays
+  const deadline = (target * 1000) + 20_000;
+  try {
+    await video.play();
+  } catch {
+    clearInterval(tick);
+    return false;
+  }
+  try { await onStarted?.(); } catch { /* a hook must never kill the recording */ }
+  try {
+    await new Promise((resolve) => {
+      video.addEventListener('ended', resolve, { once: true });
+      const chk = setInterval(() => {
+        if (video.ended || (target > 0 && (video.currentTime || 0) >= target - 0.05)) { clearInterval(chk); resolve(); }
+      }, 150);
+      setTimeout(() => { clearInterval(chk); resolve(); }, deadline);
+    });
+  } finally {
+    clearInterval(tick);
+    try { video.pause(); } catch { /* done */ }
+  }
+  onProgress?.(1, 1);
+  return true;
 }
 
 /** The name the recipient sees after a re-encode — a .mov on an mp4 lies. */

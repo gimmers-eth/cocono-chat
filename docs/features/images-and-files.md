@@ -460,6 +460,10 @@ bubbles by kind in chat.js:
   bubble width; blurred via CSS `filter: blur(...)` when the blur policy says
   so (§6.7).
 - video → poster thumb + centred play badge (+ duration chip).
+  **IMPLEMENTED, widened:** with no poster but local bytes the bubble paints a
+  paused, muted, control-less `<video>` (src carrying `#t=0.1` so the engine
+  decodes a frame instead of showing black); an engine that cannot decode the
+  codec swaps in the labelled tile on `error`. Nothing may autoplay.
 - file → icon + name + size + state row (Download / Decline buttons when
   `state: 'pending'`; progress/status otherwise).
 - outgoing media → thumb/icon + the normal state marks (sending ✓ ✗ ✓✓);
@@ -637,11 +641,19 @@ hands the server plaintext transcript. Extend it:
 - Video transcoding/compression is client-out-of-scope; a 10 MB cap on video
   is short — accepted for M4 (DESIGN.md keeps richer media post-MVP).
   **SUPERSEDED (2026-10):** the cap is 100 MB and video IS re-encoded on the
-  sender when it is HEVC/QuickTime (`client/app/js/transcode.js`,
-  `captureStream` + `MediaRecorder` to H.264/AAC MP4) — not for size but because
-  a clip the recipient's browser cannot decode is a clip that did not arrive.
-  Bounded to short clips (≤90 s, ≤1920 px) because the pass is real-time; the
-  fallback is the original file, always, and the reason is journalled.
+  sender when it is HEVC/QuickTime (`client/app/js/transcode.js`) — not for
+  size but because a clip the recipient's browser cannot decode is a clip that
+  did not arrive. TWO engines: `captureStream()` + `MediaRecorder` where the
+  element supports it, and a painted-into-canvas + `canvas.captureStream()`
+  recording where it does not (**WebKit/iPhone**: the platform that produces
+  every `.mov`, and the one engine without element capture). The soundtrack
+  rides a Web Audio graph in the canvas case, and a clip whose audio cannot be
+  carried is sent as recorded rather than re-encoded silent. Bounded to short
+  clips (≤90 s, ≤1920 px) because the pass is real-time; the fallback is the
+  original file, always, and the reason is journalled.
+  The decoder element is attached to the document for the duration
+  (`client/app/js/vidstage.js`) — a detached `<video>` yields no frames on
+  WebKit, which is why poster capture had never worked on a phone.
 
 ---
 

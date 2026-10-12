@@ -1466,6 +1466,17 @@ body[data-view="blocked"] .page-footer { display: none; }
   border-radius: 10px; cursor: pointer; color: inherit;
 }
 .media-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* A clip used AS A PICTURE (no poster on this device): the paused, muted,
+   control-less <video> paints its own frame one. It gets a floor of height so
+   the bubble does not collapse while the decoder works, `contain` so a phone's
+   portrait clip is never cropped, and pointer-events:none so the tap still
+   belongs to the bubble/tile that owns it. */
+.media-tile video, .media-shot video.media-thumb {
+  display: block; width: 100%; object-fit: contain; pointer-events: none;
+  background: rgb(0 0 0 / .55);
+}
+.media-tile video { height: 100%; }
+.media-shot video.media-thumb { max-height: 260px; min-height: 6rem; border-radius: 6px; }
 .media-tile-icon {
   display: flex; align-items: center; justify-content: center; height: 100%;
   color: var(--muted); font-size: 1.4rem;

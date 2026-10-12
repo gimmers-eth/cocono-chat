@@ -17,7 +17,8 @@
 
 import { getMedia, updateMedia, allMedia } from './store.js';
 import { logEvent } from './applog.js';
-import { transcodeVideo, transcodedName } from './transcode.js';
+import { transcodeVideo, transcodedName, primeAudioContext } from './transcode.js';
+import { stageMedia, unstageMedia } from './vidstage.js';
 
 // STARTING values only. The server advertises the real ones in
 // `/api/app-info.media` (setMediaLimits below) — a limit duplicated in two
@@ -277,19 +278,25 @@ export async function grabVideoFrame(blob, { maxEdge = THUMB_MAX_EDGE, quality =
   if (typeof document === 'undefined') return { thumb: null, why: 'no-dom' };
   let url = '';
   const video = document.createElement('video');
+  // Every failure below is SAYABLE: a poster that fails silently is the bug that
+  // cost three rounds of phone testing, and the reason is the only part of this
+  // function a report can carry home.
+  const fail = (why) => { note(`[media] video poster: no preview (${why})`); return { thumb: null, why }; };
   try {
     url = URL.createObjectURL(blob);
-    video.muted = true;
-    video.playsInline = true;
     video.preload = 'auto';                 // 'metadata' is the bug: iOS withholds dimensions
+    // ATTACHED, and attached BEFORE src is assigned, or WebKit hands back blank
+    // frames (and sometimes no metadata at all): a detached <video> is not a
+    // decoder iOS will feed. See vidstage.js.
+    stageMedia(video);
     video.src = url;
     video.load?.();                         // some engines only begin on an explicit load()
     const meta = await waitOnce(video, ['loadedmetadata', 'loadeddata', 'canplay', 'error'], 12000);
-    if (meta === 'error') return { thumb: null, why: 'decode-error' };
+    if (meta === 'error') return fail('decode-error');
     if (!video.videoWidth) {
       try { video.currentTime = 0.1; } catch { /* unseekable */ }
       await waitOnce(video, ['seeked', 'loadeddata', 'canplay'], 3000);
-      if (!video.videoWidth) return { thumb: null, why: 'no-dimensions' };
+      if (!video.videoWidth) return fail('no-dimensions');
     }
     const w = video.videoWidth, h = video.videoHeight;
     const dur = Number.isFinite(video.duration) ? video.duration : null;
@@ -298,7 +305,19 @@ export async function grabVideoFrame(blob, { maxEdge = THUMB_MAX_EDGE, quality =
     canvas.width = Math.max(1, Math.round(w * scale));
     canvas.height = Math.max(1, Math.round(h * scale));
     const g = canvas.getContext?.('2d');
-    if (!g) return { thumb: null, why: 'no-2d-context' };
+    if (!g) return fail('no-2d-context');
+
+    // WebKit will not hand a PAUSED element's frames to a canvas until its
+    // decoder has actually run once, so run it: muted + playsinline + attached
+    // is the combination iOS allows without a gesture. A refused play() is not
+    // fatal — the ladder below is what decides.
+    try {
+      await Promise.race([
+        video.play().then(() => waitOnce(video, ['playing', 'timeupdate'], 700)),
+        new Promise((resolve) => setTimeout(resolve, 800)),
+      ]);
+      video.pause();
+    } catch { /* autoplay policy: the ladder still tries */ }
 
     let fallback = null;
     for (const t of posterSeekTimes(dur)) {
@@ -313,14 +332,14 @@ export async function grabVideoFrame(blob, { maxEdge = THUMB_MAX_EDGE, quality =
       }
     }
     // every frame we could read was blank: no poster beats a black lie
-    return { thumb: null, why: fallback ? 'blank-frames' : 'undrawable' };
+    return fail(fallback ? 'blank-frames' : 'undrawable');
   } catch (err) {
     note(`[media] video poster threw: ${err?.message ?? err}`);
     return { thumb: null, why: 'threw' };
   } finally {
     // release the decoder promptly: a stranded <video> on a phone holds the
     // codec and the memory of the clip it just decoded
-    try { video.removeAttribute('src'); video.load?.(); } catch { /* gone */ }
+    unstageMedia(video);
     if (url) setTimeout(() => { try { URL.revokeObjectURL(url); } catch { /* gone */ } }, 1000);
   }
 }
@@ -423,7 +442,14 @@ export async function prepareMedia(file, { onPhase = null } = {}) {
     let outMime = mime;
     let outName = name;
     onPhase?.('preparing');
-    const re = await transcodeVideo(file);
+    // Opened HERE, as close to the user's tap as we can get: engines may refuse
+    // an AudioContext created later inside an awaited transcode, and a suspended
+    // context records silence (which we refuse to send).
+    const audioCtx = primeAudioContext();
+    // progress is forwarded: on WebKit the re-encode records the canvas in real
+    // time, so a 30-second clip is 30 seconds of "Preparing video…" — a number
+    // is the difference between a wait and a hang.
+    const re = await transcodeVideo(file, { audioCtx, onProgress: (frac) => onPhase?.('transcoding', frac) });
     if (re) {
       source = re;
       outMime = 'video/mp4';                  // the descriptor must not lie about
