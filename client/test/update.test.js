@@ -124,6 +124,25 @@ test('footer version is a plain number; sha when the server has no number', asyn
   ui2.stop();
 });
 
+test('update: a boot that lands on a server bounce FAST-RETRIES until the footer paints (desktop "version missing" regression)', async () => {
+  dom.reset();
+  dom.created.length = 0;
+  localStorage.removeItem(BOOT_VERSION_KEY);
+  localStorage.removeItem(TRIED_KEY);
+  let i = 0;
+  // two failed fetches (the restart window), then the server answers
+  const fetchAppInfo = async () => {
+    i += 1;
+    if (i < 3) return null;
+    return structuredClone(BOOT);
+  };
+  initUpdateNotice({ fetchAppInfo, getOwnBuild: () => 12, pollMs: 0, retryMs: 15 });
+  assert.equal(versionEl().textContent, '', 'blank while the server is down — honest, not fake');
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(versionEl().textContent, 'v12',
+    'seconds after the server is back, NOT five minutes (the old single-shot boot)');
+});
+
 test('markup declares the slots and the baked-build token', () => {
   assert.ok(dom.declaredIds.has('client-version'));
   assert.ok(dom.declaredIds.has('update-notice'));

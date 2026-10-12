@@ -58,6 +58,10 @@ badge, with the trust state resolved from **this device's** mirrors. The
 `@` sigil is parsing furniture: it lives in the wire text, never in the
 display. Consequences:
 
+* A mention of MY OWN name renders as the SELF component wearing MY badge:
+  the worn chip and premium come from `identity()` (loaded once per session,
+  refreshed on `cocono:badges-changed`) — the PEERS mirror caches only
+  record other people.
 * A user you have NOT added renders as a mention only for the people who
   HAVE added them (the receiver's known-users match) — you see plain text.
 * Names unknown to this device stay plain text, never a component: an

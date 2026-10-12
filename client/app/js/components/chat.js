@@ -841,6 +841,21 @@ export function createChat({ client, onHomeRefresh }) {
   }
   const EMPTY_MEN = new Set();
 
+  // My OWN chip facts, for rendering MY name wherever it appears (a
+  // mention of myself wears MY badge, like every other surface does):
+  // identity() once per session, refreshed when the worn badge changes
+  // ('cocono:badges-changed' — the wear button and the badge poll fire it).
+  let selfFacts = null; // { display, premium }
+  async function loadSelfFacts() {
+    try {
+      const me = await client.identity();
+      selfFacts = { display: me?.displayBadge ?? null, premium: !!me?.premium };
+      // late-landing facts must repaint the open chat (a SELF mention that
+      // first painted chip-less gets its badge)
+      if (currentPeer) render().catch(() => {});
+    } catch { /* offline: mentions of me render without a chip */ }
+  }
+
   // The single-line user component's options for a mention — same ladder
   // inputs as the forward list (fwdLineOpts), resolved per name.
   function mentionLineOpts(ul, ctx) {
@@ -852,7 +867,14 @@ export function createChat({ client, onHomeRefresh }) {
         gone: !!ent?.gone || !!pin?.gone,
         moderation: moderationOf(ctx.mods.get(ul)),
       });
-    return { peer: ul, state, chipEl: chipFor(ctx.chips.get(ul), ctx.premiums.get(ul)) };
+    // SELF has no friend-mirror row for the worn badge/premium — identity
+    // is its source (the PEERS caches only know people we LOOKED up)
+    const own = ul === ctx.self && selfFacts;
+    const chip = chipFor(
+      own ? selfFacts.display : ctx.chips.get(ul),
+      own ? selfFacts.premium : ctx.premiums.get(ul),
+    );
+    return { peer: ul, state, chipEl: chip };
   }
 
   /** Paint message text into `host` (REPLACES its children — the message
@@ -2876,6 +2898,10 @@ export function createChat({ client, onHomeRefresh }) {
   function wire() {
     // the conversation tab strip — five icons, one row, under the composer
     buildTabStrip($('chat-tabs'), { onChange: (tab) => setTab(tab).catch(() => {}) });
+
+    // own badge facts for SELF name rendering (mention chips)
+    loadSelfFacts();
+    window.addEventListener('cocono:badges-changed', () => loadSelfFacts());
 
     // LOCAL RETENTION (plan §4.5): decrypted bytes age out on this device
     // unless pinned with Keep; records and transcript rows always stay. Run at

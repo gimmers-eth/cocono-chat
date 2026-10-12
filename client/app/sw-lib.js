@@ -207,6 +207,17 @@ self.SwLib = (function () {
           // notification snippets, and an all-sync queue makes peek return
           // null → the worker stays silent (existing empty-queue contract).
           if (/^\{"(?:sync|sys)":/.test(text)) return;
+          // {"men":…, "text":…} is the search-mention envelope (js/rich.js
+          // unpackRich — this CLASSIC worker script cannot import the
+          // module, so the unwrap is mirrored here, minimally): the snippet
+          // shows the INNER text, never the JSON. An unparsable envelope
+          // shows as itself, like any other odd message.
+          if (text.startsWith('{"men":')) {
+            try {
+              const j = JSON.parse(text);
+              if (typeof j?.text === 'string') text = j.text;
+            } catch { /* not a trusted envelope: show as-is */ }
+          }
           // A MEDIA message is a JSON descriptor, and a banner full of
           // {"media":{"id":… is not information. Say what arrived instead —
           // the same three labels js/media.js mediaLabel() gives in the

@@ -45,7 +45,7 @@ const shortLabel = (info) => (info.build ? `v${info.build}` : `v${String(info.ve
  * `fetchAppInfo` injects the wire, `getOwnBuild` injects the baked marker,
  * `pollMs: 0` disables the interval. Returns { refresh, stop }.
  */
-export function initUpdateNotice({ fetchAppInfo, getOwnBuild = ownBuild, pollMs = DEFAULT_POLL_MS } = {}) {
+export function initUpdateNotice({ fetchAppInfo, getOwnBuild = ownBuild, pollMs = DEFAULT_POLL_MS, retryMs = 10_000 } = {}) {
   fetchAppInfo ??= async () => {
     try {
       const r = await fetch('/api/app-info');
@@ -73,6 +73,7 @@ export function initUpdateNotice({ fetchAppInfo, getOwnBuild = ownBuild, pollMs 
   };
 
   const render = (info) => {
+    painted = true;
     if (!bootRecorded) {
       localStorage.setItem(BOOT_VERSION_KEY, info.version);
       bootRecorded = true;
@@ -109,7 +110,21 @@ export function initUpdateNotice({ fetchAppInfo, getOwnBuild = ownBuild, pollMs 
   };
 
   const onInfo = (info) => { if (info?.version) render(info); };
-  const refresh = async () => onInfo(await fetchAppInfo());
+  // A boot that lands on a server BOUNCE (a restart, a blip) must not leave
+  // the footer BLANK until the next 5-minute poll: fast-retry (decaying,
+  // capped) until the FIRST answer paints the version. The desktop symptom
+  // this kills: "version is missing from the sidebar footer" after opening
+  // the app during a deploy.
+  let painted = false;
+  let retries = 0;
+  const refresh = async () => {
+    const info = await fetchAppInfo();
+    onInfo(info);
+    if (!painted && retryMs > 0 && retries < 30) {
+      retries += 1;
+      setTimeout(refresh, Math.min(retryMs * retries, DEFAULT_POLL_MS));
+    }
+  };
 
   refresh().catch(() => {});
   const timer = pollMs > 0 && setInterval(refresh, pollMs);
