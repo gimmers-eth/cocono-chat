@@ -430,6 +430,13 @@ offline replay therefore work untouched: a media message IS a message.
   `client/test/appmediaflow.test.js` against the real server.)
 - **The server reads nothing.** Moderation gets plaintext only because a
   reporter's own client hands over the file keys of its conversation (§2.12).
+- **Codecs are normalised on the sender**: a phone records HEVC/`.mov`, which
+  Safari plays and most other browsers cannot, so `client/app/js/transcode.js`
+  re-encodes such clips to H.264/AAC in MP4 before upload (real-time,
+  capability-gated, ≤90 s and ≤1920 px, and ANY failure — including an engine
+  with no MP4 recorder — sends the original file rather than losing the clip).
+  The `mime` in the descriptor is the container's truth, because a recipient's
+  `<video>` refuses a typeless Blob and mislabels a `.mov` full of H.264.
 - **Outgoing sync** (§2.7) mirrors media the same way as text: payload
   `{"sync":1, id, peer, ts, media:{…}}` plus the same plaintext `att`, so the
   sender's other devices enter `pending` and the bytes cannot be deleted before

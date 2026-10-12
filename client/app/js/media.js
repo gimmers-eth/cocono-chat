@@ -16,6 +16,8 @@
 // pick time.
 
 import { getMedia, updateMedia, allMedia } from './store.js';
+import { logEvent } from './applog.js';
+import { transcodeVideo, transcodedName } from './transcode.js';
 
 // STARTING values only. The server advertises the real ones in
 // `/api/app-info.media` (setMediaLimits below) — a limit duplicated in two
@@ -263,7 +265,13 @@ const canvasBlob = (canvas, quality) => new Promise((resolve) => {
  * failure had no voice.
  */
 export async function grabVideoFrame(blob, { maxEdge = THUMB_MAX_EDGE, quality = THUMB_QUALITY, log = null } = {}) {
-  const note = (m) => { try { (log ?? ((x) => console.warn(x)))(m); } catch { /* never fatal */ } };
+  // journalled as well as printed: a poster that fails SILENTLY is the bug that
+  // cost three rounds of phone testing, and the report a user sends is the only
+  // place a phone's failure can ever be read
+  const note = (m) => {
+    try { (log ?? ((x) => console.warn(x)))(m); } catch { /* no console */ }
+    try { logEvent('poster', String(m).replace('[media] ', '').replace('video poster: ', '')); } catch { /* never fatal */ }
+  };
   // no DOM, no decoder: this function IS a browser capability, and the pipeline
   // tests run the arrival policy headlessly
   if (typeof document === 'undefined') return { thumb: null, why: 'no-dom' };
@@ -363,7 +371,7 @@ async function paintFrame(video, canvas, g) {
  * transcoded (a poster frame is captured instead); everything else is bytes
  * as-is. Throws MediaReject with the sentence the user sees.
  */
-export async function prepareMedia(file) {
+export async function prepareMedia(file, { onPhase = null } = {}) {
   const name = sanitizeName(file?.name);
   const mime = String(file?.type ?? '');
   const kind = detectKind(mime);
@@ -405,15 +413,31 @@ export async function prepareMedia(file) {
   }
 
   if (kind === 'video') {
-    const bytes = await readBytes(file);
+    // NORMALISE THE CODEC BEFORE ANYTHING ELSE (transcode.js): a phone records
+    // HEVC/.mov, which Safari plays and most other browsers cannot, so the
+    // recipient's 'this video could not be played here' starts here. Doing it
+    // first also means the poster below is cut from a stream THIS engine chose.
+    // A null (unsupported, too long, no recorder, any failure) falls back to the
+    // original file — a clip must never be lost to make it compatible.
+    let source = file;
+    let outMime = mime;
+    let outName = name;
+    onPhase?.('preparing');
+    const re = await transcodeVideo(file);
+    if (re) {
+      source = re;
+      outMime = 'video/mp4';                  // the descriptor must not lie about
+      outName = transcodedName(name);         // what the recipient is being sent
+    }
+    const bytes = await readBytes(source);
     assertWithinLimits('video', bytes.length);
     // Worth a ladder: a video with no poster is invisible in the thread, and a
     // failed preview must never fail the SEND. If capture gives up, the payload
     // still goes and the recipient builds the poster from the bytes they now
-    // have (buildPoster) — a film icon meanwhile.
-    const poster = await grabVideoFrame(file);
+    // have (buildPoster) — a labelled tile meanwhile.
+    const poster = await grabVideoFrame(source);
     return {
-      kind, mime, name, bytes,
+      kind, mime: outMime, name: outName, bytes,
       thumb: poster.thumb ?? null,
       w: poster.w ?? null, h: poster.h ?? null, dur: poster.dur ?? null, animated: false,
       posterWhy: poster.thumb ? null : poster.why,
@@ -585,6 +609,7 @@ export async function saveToDevice(row) {
     await updateMedia(row.id, { savedAt: Date.now() });
     return { ok: true, how: 'saved', name };
   } catch (error) {
+    logEvent('save', `download refused: ${String(error?.message ?? error).slice(0, 80)}`);
     return { ok: false, how: 'failed', error };
   } finally {
     // Long enough for a big write to hand off, short enough that a failed save
@@ -851,6 +876,9 @@ export async function downloadMedia(client, row, { thumbOnly = false, onProgress
       progress: 0,
       ...(gone ? { partial: null, partialBytes: 0 } : {}),
     });
+    // the CODE is the useful part: 'download failed' tells a user nothing, while
+    // media_tampered vs unknown_media vs a plain network drop tells us everything
+    logEvent('media', `${row.kind} ${gone ? 'gone from server' : 'download failed'} code=${err?.code ?? err?.name ?? '?'}`);
     // a gone blob is settled: ack it so the server-side pending set can empty
     // (the copy is unrecoverable, holding it pending helps nobody)
     if (gone) await client.ackMedia(blob, true).catch(() => {});

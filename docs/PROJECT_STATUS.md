@@ -64,6 +64,17 @@ is the only FE (audits mentioning `fe/` are historical).
   (`graph` collection); the settled layout is saved back so a reload shows the
   same picture. Physics: vendored d3-force (`be/admin/vendor/d3/`). Model,
   trust level and honest limits: [SHARES.md](./SHARES.md).
+- **Diagnostics — the client-data channel** (documented for agents in the
+  cocono-ops skill): page-side error journal `client/app/js/applog.js`
+  (`logEvent`/`logError`, persisted ring, `installErrorCapture` for uncaught
+  errors + rejections, deduped) folded into `collectDiagnostics()` beside the
+  service-worker ring, storage snapshot, identity records and the
+  running-vs-served build check. Entry points: the icon **right of the version
+  number** in the sidebar footer, Settings → Diagnostics, and the login-screen
+  footer — all preview-first, upload only on confirm. Media failures are
+  journalled by code (`poster: no-dimensions`, `media: video download failed
+  code=media_tampered`, `save: ...`), which is what the video-preview work
+  needed three rounds to learn.
 - **Diagnostics**: in-app ring buffer (`cocono-sw` IDB) + server-stored
   reports (`diagnostics` collection, 30-day TTL) + admin panel section with
   copy/delete/'un-limit IP'. Admin 'clear limits for IP' sweeps all
@@ -415,6 +426,16 @@ replay dedup · envelope HMAC/sender-mismatch/unknown-recipient · auth flow hap
   (chat · images · videos · files · links) with sent-vs-received borders and a
   searchable file list, the message-modal viewer (Blur / Play-Pause for animated
   images / Play / Mute / Download / Keep), and a per-device retention setting.
+- **Video that actually plays anywhere**: `client/app/js/transcode.js`
+  normalises a sender's clip to H.264/AAC MP4 before upload when it is HEVC or
+  QuickTime (the reason a recipient saw 'could not be played here': iPhone
+  cameras write HEVC and Chromium generally cannot decode it). Real-time via
+  `captureStream()` + `MediaRecorder` — chosen over a WebCodecs pipeline because
+  audio has to survive, and WebCodecs alone means adding a demuxer + sample-remux
+  to get it. Capability-gated, ≤90 s / ≤1920 px / ≤100 MB, and EVERY failure
+  path sends the original file; each outcome is journalled (`transcode: ok 6s
+  12MB->3MB`, `skipped (no-mp4-recorder)`) so a phone report says what the
+  device actually did.
 - **Getting the bytes ONTO the phone, and releasing the app's copy.** Save is a
   real DOWNLOAD (`<a download>` on the Blob URL, filename always carrying an
   extension via `deviceFileName`); the Web Share sheet, which on a phone is a
@@ -480,16 +501,20 @@ replay dedup · envelope HMAC/sender-mismatch/unknown-recipient · auth flow hap
   AFTER the ack is queued (a `redis.exists` once caused ack-jitter flakes).
 - Node's test runner doesn't inherit `--test-concurrency=1` when a single
   file is run directly — pass it explicitly in manual one-file runs.
-- **Pre-existing suite flake (NOT media, still open):** repeated full client
-  runs fail 0–1 random transport tests (`friends: …`, `sdk: pairing…`,
-  `sdk: recipient self-heals…`, `sdk: cancelPairing…`) — verified on master
-  too (2 of 3 runs). Symptom is a login `Nonce unknown, expired or mismatched`
-  or an event wait that expires, i.e. tests in one file sharing Redis db 15
-  while earlier tests' clients are still reconnecting. Mitigated by raising
-  `waitFor`/`waitOpen` to 15 s (a live delivery at second 8 is a pass, a hang
-  is still a failure); the real fix is per-test nonce/limiter isolation, and
-  it is NOT yet done. `update.sh` gates on this suite, so a red run means
-  re-run once before believing it — and never 'fix' it by deleting a case.
+- **Suite flake FIXED (2026-10-11): every test file now gets its own Redis
+  database** (`helpers.js` derives an index in 8..15 from the file name; the app
+  uses 0). The symptom was 0–3 random transport tests failing per run —
+  `Nonce unknown, expired or mismatched`, live-delivery timeouts — with every
+  file green alone and the pair green too. Cause: all suites shared db 15, and a
+  straggling client from a finishing file could `GETDEL` a nonce out from under
+  a login in the next file, or zero a limiter counter mid-test. Two consecutive
+  clean full runs of both suites after the change (170 be, 141 client), and the
+  same runs failed 1–3 beforehand. `update.sh` gates deploys on this suite, so
+  this was worth fixing rather than re-running.
+  Lesson for anyone adding a suite: isolate the shared store, don't tune the
+  timeout — and if a test is 'occasionally red, green in isolation', the first
+  question is what ELSE is holding that connection.
+
 - FE has no DOM tests; `client/test/graph.test.js` guards: every browser/SDK
   module parses + every relative import resolves (caught two shipped
   worker-blocking bugs; extend it when adding app-root classic scripts).
@@ -532,6 +557,14 @@ replay dedup · envelope HMAC/sender-mismatch/unknown-recipient · auth flow hap
   spoke about the BLOB while the call had asked about a PREVIEW. Its regression
   test must run against the REAL backend — no stub 404s the way a poster-less
   blob does (`client/test/appmediaflow.test.js`).
+- **A test double must lie as little as the browser it replaces.** Two
+  `client/test/domshim.js` conveniences were silently invalidating assertions:
+  `getElementById` invented an element for ANY id (so a real `if (!$(id))`
+  guard could never run) and `window.addEventListener` was kept from a
+  minimal earlier object (so handlers registered into nowhere and a
+  "was the error journalled?" test passed against an empty array). Both now
+  behave like the DOM — null for an unknown id, recording listeners — and
+  three tests started failing immediately, which is the correct outcome.
 - **Assert that a doc edit matched.** Sections of this file silently no-opped for
   two commits from `str.replace` on a near-miss anchor, until the script grew a
   `count(old) == 1` check — the same reason a test should assert behaviour and

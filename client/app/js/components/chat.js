@@ -520,7 +520,15 @@ export function createChat({ client, onHomeRefresh }) {
     if (!currentPeer || peerGone) return;
     let prepared;
     try {
-      prepared = await prepareMedia(file);
+      // announced, because re-encoding a clip runs at about real time: without a
+      // word, a 6-second video looks like a frozen app on a phone
+      prepared = await prepareMedia(file, {
+        onPhase: (phase) => {
+          if (phase === 'preparing' && String(file.type ?? '').startsWith('video/')) {
+            toast('Preparing video so every device can play it…');
+          }
+        },
+      });
     } catch (err) {
       // a plain sentence from the prep layer (too big, SVG, unreadable image)
       toast(err?.message ?? 'That file could not be sent.', 'error');

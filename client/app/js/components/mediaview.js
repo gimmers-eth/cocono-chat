@@ -12,6 +12,7 @@
 // which is also what makes a sender-controlled filename harmless.
 
 import { iconEl } from '../icons.js';
+import { logEvent } from '../applog.js';
 import { openLightbox, closeLightbox } from '../ui.js';
 import { mediaWith, messagesWith, updateMedia } from '../store.js';
 import {
@@ -467,6 +468,7 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
         return;
       }
       if (res.how === 'unsupported') {
+        logEvent('save', 'this engine refuses downloads; share fallback offered');
         status('This browser blocks in-app downloads — use Share to put it in Files, or open it in another app.', true);
         const share = btn('viewer-toggle', 'mediaShare', 'Share instead', 'Save via the share sheet');
         share.addEventListener('click', async () => {

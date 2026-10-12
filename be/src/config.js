@@ -110,7 +110,10 @@ export const config = {
   // 5 for a playful dev-scale target; the plan is 1000 for production.
   mailBadgeCount: numOf(env.MAIL_BADGE_COUNT, 5),
   verifyAccountLimit: numOf(env.VERIFY_ACCOUNT_LIMIT, 40),
-  verifyAccountWindowSec: numOf(env.VERIFY_ACCOUNT_WINDOW_SEC, DEFAULT_TIME_WINDOW),
+  // login verify rides a SHORTER window than the generic 15-min one: 40
+  // codes per 5 min per account (still generous, but a stolen-code spammer
+  // gets a smaller blast radius per window)
+  verifyAccountWindowSec: numOf(env.VERIFY_ACCOUNT_WINDOW_SEC, 5 * 60),
   verifyIpLimit: numOf(env.VERIFY_IP_LIMIT, 100),
   verifyIpWindowSec: numOf(env.VERIFY_IP_WINDOW_SEC, IP_TIME_WINDOW),
   deviceCodeTtlSec: numOf(env.DEVICE_CODE_TTL_SEC, 10 * 60),

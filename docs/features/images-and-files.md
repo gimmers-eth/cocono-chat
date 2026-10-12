@@ -636,6 +636,12 @@ hands the server plaintext transcript. Extend it:
   twice. A `video`/`file` therefore no longer has to fit in one attempt.
 - Video transcoding/compression is client-out-of-scope; a 10 MB cap on video
   is short — accepted for M4 (DESIGN.md keeps richer media post-MVP).
+  **SUPERSEDED (2026-10):** the cap is 100 MB and video IS re-encoded on the
+  sender when it is HEVC/QuickTime (`client/app/js/transcode.js`,
+  `captureStream` + `MediaRecorder` to H.264/AAC MP4) — not for size but because
+  a clip the recipient's browser cannot decode is a clip that did not arrive.
+  Bounded to short clips (≤90 s, ≤1920 px) because the pass is real-time; the
+  fallback is the original file, always, and the reason is journalled.
 
 ---
 

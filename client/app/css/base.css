@@ -36,6 +36,11 @@
   /* bottom safe-area padding: only installed (standalone) apps sit under a
      home indicator — in a browser the toolbar already provides the space */
   --sa-b: 0px;
+  /* ...but the two FOOT STRIPS (.chat-tabs, .side-foot) don't need the full
+     home-indicator reserve: the inset guards the curved corners, while these
+     bars are edge-to-edge icon/text rows that stay comfortably tappable with
+     just a small guard band. Cap their extra room at .5rem. */
+  --sa-b-foot: min(var(--sa-b), .5rem);
   font-size: 16px;
 }
 @media (display-mode: standalone) {
@@ -113,7 +118,12 @@ ul { list-style: none; padding: 0; }
 .btn-accent { background: var(--accent); color: var(--on-accent); }
 .btn-ghost { background: transparent; color: var(--muted); }
 .btn-block { display: block; width: 100%; margin-top: .6rem; }
-.btn.round { border-radius: 50%; width: 44px; height: 44px; padding: 0; flex: none; }
+.btn.round { border-radius: 50%; width: 44px; height: 44px; padding: 0; flex: none;
+  /* a circle is a square icon box: grid-centre the glyph (a baseline-aligned
+     inline <i> sits off-centre) and kill .btn i's .45em right margin, which
+     otherwise drags the icon left of the circle's middle. */
+  display: grid; place-items: center; }
+.btn.round i { margin-right: 0; }
 
 .icon-btn {
   background: transparent; border: 0; color: var(--muted);
@@ -879,6 +889,9 @@ span.avatar.chat-avatar { display: inline-grid; place-items: center; font-size: 
   flex: none; display: flex; gap: .6rem; align-items: center;
   padding: .6rem 1rem;
   background: var(--panel);
+  /* same hairline as .side-foot/.convo-filter/.chat-tabs — the composer is
+     a foot bar everywhere, not just in the two-column desktop layout */
+  border-top: 1px solid var(--border);
 }
 .composer input { flex: 1; }
 
@@ -893,6 +906,29 @@ span.avatar.chat-avatar { display: inline-grid; place-items: center; font-size: 
 
 @media (min-width: 900px) {
   .sidebar { width: var(--sidebar-w); flex: none; }
+
+  /* Desktop foot rhythm: the chat pane's bottom stack (composer + chat-tabs)
+     must occupy the SAME two bars as the sidebar's (convo-filter + side-foot),
+     so the columns' horizontal rules line up. One shared bar size: the
+     2.4rem icon strip + .5rem padding, plus the 1px top border all four
+     bars carry (the hairline lives on the base rules, everywhere). */
+  :root { --foot-bar: calc(3.4rem + 1px); }
+  .convo-filter, .chat-tabs, .composer { height: var(--foot-bar); }
+  .composer {
+    padding-block: .5rem; /* the shared hairline lives on the base .composer */
+  }
+  .side-foot { min-height: var(--foot-bar); display: flex; align-items: center; }
+  /* the 44px send circle must fit the strip's 2.4rem content band, or it
+     pads the composer taller than its neighbours — same reasoning as
+     .filter-btn/.chat-tab. */
+  .composer .btn.round { width: 2.4rem; height: 2.4rem; }
+  /* one bar, two roles: version hugs the LEFT edge, the diagnostic (update
+     notice) the RIGHT; it rides its own width (margin-left:auto) so the
+     reload button never stretches across the whole foot. */
+  .side-foot #client-version { flex: none; }
+  .side-foot .update-notice {
+    display: flex; justify-content: flex-end; margin: 0 0 0 auto; text-align: right;
+  }
 }
 
 @media (min-width: 1400px) {
@@ -915,6 +951,13 @@ body:not([data-view]) .page-footer,
 body[data-view="app"] .page-footer,
 body[data-view="blocked"] .page-footer { display: none; }
 .diag-row { display: flex; gap: 0.6rem; align-items: center; justify-content: center; }
+/* the diagnostics icon in the version row: same line as the build number,
+   muted like it, and it inherits the footer's centring so the row never jumps */
+.diag-version-btn {
+  margin-left: .35rem; width: 1.7rem; height: 1.7rem; padding: 0;
+  display: inline-grid; place-items: center; font-size: .85rem;
+}
+.side-foot { display: flex; align-items: center; justify-content: center; gap: .1rem; flex-wrap: wrap; }
 
 .diag-modal {
   position: fixed; top: 50%; left: 50%; z-index: 50;
@@ -989,7 +1032,7 @@ body[data-view="blocked"] .page-footer { display: none; }
 
 /* Sidebar footer: client build */
 .side-foot {
-  margin-top: auto; padding: .5rem .9rem calc(.5rem + var(--sa-b));
+  margin-top: auto; padding: .5rem .9rem calc(.5rem + var(--sa-b-foot));
   border-top: 1px solid var(--border); opacity: .75; user-select: none;
 }
 
@@ -1396,7 +1439,7 @@ body[data-view="blocked"] .page-footer { display: none; }
    for one reusable pattern and M7 got here first, so this matches it. */
 .chat-tabs {
   flex: none; display: flex; justify-content: space-around; align-items: center;
-  gap: .3rem; padding: .5rem .6rem calc(.5rem + var(--sa-b));
+  gap: .3rem; padding: .5rem .6rem calc(.5rem + var(--sa-b-foot));
   border-top: 1px solid var(--border); background: var(--panel);
 }
 .chat-tab {

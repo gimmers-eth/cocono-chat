@@ -9,7 +9,21 @@ import { connectMongo, connectRedis } from '../src/db.js';
 import adminRoutes from '../src/routes/admin-routes/index.js';
 import { createMediaStore } from '../src/lib/mediaStore.js';
 
-export const TEST_REDIS_URL = process.env.TEST_REDIS_URL ?? 'redis://127.0.0.1:6379/15';
+// Per-FILE Redis database (0-15; the app uses 0, so tests stay in the upper
+// half). Sharing one db across suites is the flake: node's runner can leave a
+// file's client reconnecting while the next file runs, and that straggler
+// GETDELs the NONCE out from under a login in flight ('Nonce unknown, expired
+// or mismatched'), or resets a limiter counter mid-test. Separate dbs make
+// that impossible; unique test usernames keep the pub/sub channels apart.
+const DB_SLOT = () => {
+  const name = (import.meta.filename || '').split('/').pop() || 'x';
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 1000;
+  return 8 + (h % 8);                              // 8..15, never 0..7 (app/dev)
+};
+export const TEST_REDIS_URL = process.env.TEST_REDIS_URL
+  ?? `redis://127.0.0.1:6379/${DB_SLOT()}`;
+
 
 export async function setupApp(overrides = {}) {
   const mongod = await MongoMemoryServer.create();

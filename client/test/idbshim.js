@@ -121,7 +121,7 @@ class Db {
     this.objectStoreNames = { contains: (n) => this.stores.has(n) };
   }
 
-  createObjectStore(name, { keyPath }) {
+  createObjectStore(name, { keyPath } = {}) {
     const store = new Store(name, keyPath);
     this.stores.set(name, store);
     return store;

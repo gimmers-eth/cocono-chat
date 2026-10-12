@@ -17,7 +17,7 @@ import { connectMongo, connectRedis } from '@cocono/be/src/db.js';
 
 const APP_ROOT = path.resolve(import.meta.dirname, '..', 'app');
 const SDK_ROOT = path.resolve(import.meta.dirname, '..', 'src');
-const TEST_REDIS_URL = process.env.TEST_REDIS_URL ?? 'redis://127.0.0.1:6379/15';
+import { TEST_REDIS_URL } from './helpers.js';   // same per-file db as every other suite
 const read = (rel) => readFileSync(path.join(APP_ROOT, rel), 'utf8');
 
 async function serve() {
@@ -41,7 +41,10 @@ async function serve() {
 test('media: every module the feature needs is served', async (t) => {
   const srv = await serve();
   t.after(() => srv.stop());
-  for (const file of ['js/media.js', 'js/components/mediabubble.js', 'js/components/mediaview.js']) {
+  // media.js IMPORTS transcode.js, so a missing file there is a boot crash, not
+  // a missing feature — the graph test proves the import resolves in the repo and
+  // this proves the server actually serves it
+  for (const file of ['js/media.js', 'js/transcode.js', 'js/components/mediabubble.js', 'js/components/mediaview.js']) {
     const res = await fetch(`${srv.base}/${file}`);
     assert.equal(res.status, 200, `${file} must be served (a missing module is a boot crash)`);
     assert.match(res.headers.get('content-type'), /javascript/);

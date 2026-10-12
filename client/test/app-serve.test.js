@@ -12,7 +12,7 @@ import { connectMongo, connectRedis } from '@cocono/be/src/db.js';
 
 const APP_ROOT = path.resolve(import.meta.dirname, '..', 'app');
 const SDK_ROOT = path.resolve(import.meta.dirname, '..', 'src');
-const TEST_REDIS_URL = process.env.TEST_REDIS_URL ?? 'redis://127.0.0.1:6379/15';
+import { TEST_REDIS_URL } from './helpers.js';   // same per-file db as every other suite
 
 async function serve() {
   const mongod = await MongoMemoryServer.create();

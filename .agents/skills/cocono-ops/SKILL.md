@@ -181,7 +181,43 @@ than the code it should be running. update.sh does this bounce itself.
   always `systemctl --user ...` (running plain `systemctl status cocono-be`
   finds nothing and is misleading).
 
-## UI conventions (any client/admin styling change)
+## Getting data off a client (diagnostics) — THE channel
+
+Server logs show what the server saw. **The only way to learn what happened on a
+user's device is the diagnostics report they send you**, so any failure path you
+add must write into it.
+
+- **Client journal**: `client/app/js/applog.js` — `logEvent(kind, msg)` and
+  `logError(where, err)` append to a capped (40-line) ring in `localStorage`
+  (`cocono.applog`). It is **persisted on purpose**: the flow is "the video
+  failed, the app closed, they pressed the button five minutes later".
+  `installErrorCapture()` (called at boot from `main.js`) journals uncaught
+  exceptions and promise rejections, deduped so a fault in a loop cannot drown
+  the ring.
+- **Rules**: log the **code** first (`media_tampered`, `unknown_media`,
+  `no_thumb`, `no-dimensions`, …) — codes are what survive the trip; one short
+  line, never a stack; **never** message text, filenames, peer names or blob
+  ids beyond what the rest of the report already carries — the report leaves the
+  device unencrypted and the user is told so.
+- **What else is in a report** (`client/app/js/diag.js` → `collectDiagnostics`):
+  origin, UA, IndexedDB inventory (incl. the new `media` store), identity
+  records, localStorage keys, running vs server build (`MISMATCH` = stale
+  bundle), the service-worker ring, keyboard-fit trace, the **app journal**, and
+  storage usage/quota.
+- **Entry points**: the icon immediately right of the version number in the
+  sidebar footer (`#btn-diag-version`), the Settings → Diagnostics button, and
+  the login-screen footer. Every one of them opens the PREVIEW modal; nothing
+  uploads until the user presses **Send** in it — never bypass that.
+- **Server side**: `POST /api/diagnostics` → `diagnostics` collection (30-day
+  TTL, size-capped, IP + per-account limited) → admin panel "Diagnostics" page
+  (copy / delete / un-limit IP). Anonymous reports are allowed (a device that
+  cannot log in is exactly the one we need data from).
+- **When you add or fix anything user-visible, ask**: "would a report from the
+  user's phone tell me whether this worked?" If not, add the `logEvent` line
+  before you call it done — three rounds of video-preview debugging were
+  guesswork precisely because the failure had no voice.
+
+
 - **Think about spacing before declaring done.** Every new element gets checked against its container's existing rhythm: alignment (centered bar → centered contents), gaps/padding on the same rem scale already used there, and symmetric breathing room when an element adds a line. Trailing/inline crowding (a button hugging the last word, mixed px/rem margins, uneven top-vs-bottom space) is a bug, not a detail.
 - **Shared visuals have ONE source.** Badge artwork lives in `client/app/js/badges-art.js` and the admin panel loads it as-is (served at `/badges-art.js`, hydrated into `.badge-art` slots) — NEVER copy an SVG string into `admin/app.js`. Same rule for anything visual crossing between the two apps: serve/import, don't duplicate.
 - Prefer the **existing local pattern** (icon `margin-right: .45em`, bar padding `rem`, `gap` in flex rows) over inventing per-component magic numbers; if the pattern breaks for the new case, state why in a comment.

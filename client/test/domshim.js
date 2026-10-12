@@ -29,6 +29,12 @@ class El {
     this.dataset = {};
     this.style = {};
     this.attrs = {};
+    // id reflects into attrs, like the DOM attribute it stands for
+    Object.defineProperty(this, 'id', {
+      get: () => this.attrs.id ?? '',
+      set: (v) => { this.attrs.id = String(v); },
+      configurable: true,
+    });
     this.listeners = {};
     this._classes = new Set();
     this._text = '';
@@ -158,6 +164,18 @@ class El {
 
   contains(other) { return other === this || this.descendants().includes(other); }
 
+  get parentElement() { return this.parentNode ?? null; }
+
+  insertBefore(node, ref) {
+    if (!node) { return; }
+    const at = ref ? this.childNodes.indexOf(ref) : -1;
+    node.parentNode = this;
+    if (at < 0) this.childNodes.push(node);
+    else this.childNodes.splice(at, 0, node);
+  }
+
+  insertAdjacentElement(_pos, node) { if (node) { node.parentNode = this; this.childNodes.push(node); } return node; }
+
   // media surface
   play() { this.paused = false; this.fire('play'); return Promise.resolve(); }
   pause() { this.paused = true; this.fire('pause'); }
@@ -187,13 +205,22 @@ export function installDomShim(indexHtml = '') {
   let urlSeq = 0;
 
   const byId = (id) => {
-    if (!registry.has(id)) {
-      const el = new El(declaredIds.has(id) ? 'div' : 'missing');
-      el.attrs.id = id;
-      el._declared = declaredIds.has(id);
-      registry.set(id, el);
-    }
-    return registry.get(id);
+    if (registry.has(id)) return registry.get(id);
+    // a node created by code and THEN given this id (`btn.id = 'x'`) resolves
+    // too — that is how browsers behave, and the diagnostics button is wired
+    // exactly that way
+    const made = created.find((el) => (el.attrs.id ?? null) === id);
+    if (made) { registry.set(id, made); return made; }
+    if (!declaredIds.has(id)) return null;      // like a browser: no such element
+    const el = new El('div');
+    el.attrs.id = id;
+    el._declared = true;
+    // an element from markup always has a parent; code that walks upward
+    // (`versionEl.parentElement`) must not be skipped because the node came
+    // from the registry rather than a parsed tree
+    el.parentNode = globalThis.document?.body ?? null;
+    registry.set(id, el);
+    return el;
   };
 
   globalThis.document = {
@@ -220,7 +247,19 @@ export function installDomShim(indexHtml = '') {
     revokeObjectURL: (url) => { revoked.push(url); },
   });
 
-  globalThis.window ??= { dispatchEvent() {}, addEventListener() {}, removeEventListener() {}, matchMedia: () => ({ matches: false }) };
+  // window records its listeners and can be fired, so the error-capture path is
+  // testable: without it, journaling-on-crash is a browser-only claim
+  // AUGMENT whatever window exists (idbshim may have made a minimal one first):
+  // `??=` alone silently kept an object without listeners, and the error-capture
+  // test then fired into nothing.
+  const win = globalThis.window ??= {};
+  win._listeners ??= {};
+  win.addEventListener = (type, fn) => { (win._listeners[type] ??= []).push(fn); };
+  win.removeEventListener = (type, fn) => { win._listeners[type] = (win._listeners[type] ?? []).filter((f) => f !== fn); };
+  win.dispatchEvent = (ev) => { for (const fn of [...(win._listeners[ev?.type] ?? [])]) fn(ev); return true; };
+  win.matchMedia ??= () => ({ matches: false });
+  win.fire = (type, ev = {}) => { for (const fn of [...(win._listeners[type] ?? [])]) fn({ type, ...ev }); };
+  win.reset = () => { win._listeners = {}; };
   globalThis.Event ??= class { constructor(type) { this.type = type; } };
   globalThis.CustomEvent ??= class { constructor(type, init) { this.type = type; this.detail = init?.detail; } };
   const mem = new Map();
@@ -238,6 +277,8 @@ export function installDomShim(indexHtml = '') {
     revoked,
     created,
     declaredIds,
+    window: globalThis.window,
+    document: globalThis.document,
     reset() {
       registry.clear();
       revoked.length = 0;

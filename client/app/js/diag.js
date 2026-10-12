@@ -1,12 +1,30 @@
-// Storage diagnostics: "Send diagnostics" buttons (auth card footer and the
-// Settings drawer) open a modal previewing WHAT THE BROWSER ACTUALLY KEPT
-// (databases, identity records, quota). The report is only uploaded when the
-// user confirms in the modal — so phones without a web inspector can still
-// report their condition, visibly and on purpose.
+// Storage diagnostics: "Send diagnostics" buttons (auth card footer, the
+// version row in the sidebar, and the Settings drawer) open a modal previewing
+// WHAT THE BROWSER ACTUALLY KEPT (databases, identity records, quota) and
+// EVERY ERROR THE APP JOURNALLED (js/applog.js — uncaught exceptions, rejections,
+// media/send/poster/retention failures). The report is uploaded ONLY when the
+// user confirms in the modal, so phones without a web inspector can still report
+// their condition, visibly and on purpose.
+//
+// THIS IS THE CLIENT-DATA CHANNEL. Server logs show what the server saw; this is
+// the only way to learn what happened ON A DEVICE. Consequences for anyone
+// adding code:
+//   * a `catch` that swallows an error should logError()/logEvent() it first —
+//     if it is unreachable from a phone, it is unfalsifiable;
+//   * new failure kinds get a SHORT STABLE TAG ('media', 'poster', 'send'),
+//     because grepping reports is how a pile of them becomes a pattern;
+//   * nothing conversational or identifying goes in: the report leaves the
+//     device unencrypted by design and the user is told that, so the same
+//     discipline as the push payload applies (see docs/PROJECT_STATUS.md,
+//     "Diagnostics", and the cocono-ops skill).
+// Server side: POST /api/diagnostics → `diagnostics` collection, 30-day TTL,
+// visible in the admin panel (Diagnostics page).
 
 import { $ } from './ui.js';
+import { iconEl } from './icons.js';
 import { readSwLog } from './swkv.js';
 import { keyboardLogLines } from './keyboard.js';
+import { appLogLines } from './applog.js';
 
 const idb = (req) =>
   new Promise((resolve, reject) => {
@@ -84,6 +102,9 @@ export async function collectDiagnostics() {
       .join('\n');
   });
   await attempt('keyboard-fit', async () => `cachedKb=${localStorage.getItem('cocono.kb-h') ?? '-'}\n${keyboardLogLines().join('\n')}`);
+  // the app's own error journal — the part that turns "video doesn't work" into
+  // a line with a code on it
+  await attempt('app-errors', async () => appLogLines(16).join('\n'));
   await attempt('storage', async () => {
     const est = await navigator.storage.estimate();
     const persisted = navigator.storage.persisted ? await navigator.storage.persisted() : 'n/a';
@@ -124,6 +145,24 @@ function openModal(client) {
 
 /** Mount the page-footer button and wire both entry points + the modal. */
 export function mountDiagnostics({ client }) {
+  // The version row in the sidebar: an icon to the RIGHT of the build number.
+  // That row is where a user looks when something is wrong (it is the line that
+  // says which build they are running), so it is where the button belongs — and
+  // it opens the SAME modal, which still requires an explicit Send: an icon in
+  // the chrome must not be able to upload a snapshot of the device on a stray
+  // tap. Hidden on the login screen, where the page footer already has one.
+  const versionEl = $('client-version');
+  if (versionEl && versionEl.parentElement && !$('btn-diag-version')) {
+    const btn = document.createElement('button');
+    btn.id = 'btn-diag-version';
+    btn.type = 'button';
+    btn.className = 'icon-btn diag-version-btn';
+    btn.title = 'Send diagnostics — what happened on this device';
+    btn.append(iconEl('tabDiagnostics'));
+    btn.addEventListener('click', () => openModal(client));
+    versionEl.parentElement.insertBefore(btn, $('update-notice') ?? null);
+  }
+
   // Page footer (visible on the login screen): just a button — clicking it
   // previews the report in the modal.
   const footer = $('page-footer');

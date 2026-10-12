@@ -13,6 +13,7 @@ import { setScope, setFriends, loadFriends, ensureScoped, loadPeerMuted, saveMut
 import { purgeLocalAccount } from './accountPurge.js';
 import { initKeyboardFit } from './keyboard.js';
 import { mountDiagnostics } from './diag.js';
+import { installErrorCapture, logError } from './applog.js';
 import { initUpdateNotice } from './update.js';
 import { applyIcons } from './icons.js';
 import { initInstallAndNotify } from './install.js';
@@ -284,6 +285,10 @@ async function showAuth() {
 }
 
 // Boot — wire every component exactly once, then route.
+// FIRST: journal anything the page cannot handle. Installed before anything
+// else can throw, because the errors we need are the ones on the user's phone,
+// and a `catch { /* ignore */ }` is invisible to everyone but the report.
+installErrorCapture();
 startSingleTabGuard();
 // photo zoom: capture-phase delegation at boot, so it works regardless of
 // what any component's wire() does or drops (profile sheet + settings tab)
@@ -432,6 +437,7 @@ try {
       await client.login();
       await enterApp();
     } catch (err) {
+      logError('boot', err);              // a session that will not resume is the
       if (err instanceof CoconoApiError) throw err; // account issue -> auth view
       // Network was unreachable: the shell cache worked, so come in anyway
       // and browse the local transcript read-only until connection returns.
