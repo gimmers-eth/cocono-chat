@@ -19,6 +19,12 @@ import { getMedia, updateMedia, allMedia } from './store.js';
 import { logEvent } from './applog.js';
 import { transcodeVideo, transcodedName, primeAudioContext, TRANSCODE_ENABLED } from './transcode.js';
 import { stageMedia, unstageMedia } from './vidstage.js';
+// link parsing lives in rich.js (ONE source: the transcript painter and the
+// Links tab must agree on what a link is) — re-exported below for consumers
+// that read the Links API through media.js.
+import { extractLinks } from './rich.js';
+
+export { extractLinks };
 
 // STARTING values only. The server advertises the real ones in
 // `/api/app-info.media` (setMediaLimits below) — a limit duplicated in two
@@ -745,25 +751,6 @@ export async function buildPoster(row) {
 }
 
 // ---------------- the conversation tabs (req 1/4) ----------------
-
-/** One entry per URL in a message, in order, de-duplicated per message. */
-export function extractLinks(text) {
-  const out = [];
-  const seen = new Set();
-  const re = /https?:\/\/[^\s<>"'`]+/gi;
-  let m;
-  while ((m = re.exec(String(text ?? ''))) !== null) {
-    let url = m[0];
-    // trailing punctuation is prose, not part of the link
-    url = url.replace(/[),.;!?*:]+$/, '');
-    let host = '';
-    try { host = new URL(url).hostname; } catch { continue; }
-    if (!host || seen.has(url)) continue;
-    seen.add(url);
-    out.push({ url, host });
-  }
-  return out;
-}
 
 /** Split a conversation's messages + media into what each tab shows. Pure
  *  (no DOM, no store) so the tab rules are testable: images/videos are the

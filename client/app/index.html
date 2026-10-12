@@ -201,8 +201,15 @@
           </div>
           <button id="btn-attach" class="icon-btn attach-btn" title="Attach a photo, video or file"
                   aria-haspopup="true" aria-expanded="false" data-icon="attach"></button>
-          <input id="chat-input" type="text" placeholder="Type a message"
-                 autocomplete="off" maxlength="4096" />
+          <!-- @-mention search: anchored above the composer EXACTLY like the
+               attach menu (same z tier, same float-over-transcript contract).
+               Filled by chat.js with single-line user components, chat's own
+               people first, hard-capped at 3 rows. -->
+          <div id="mention-pop" class="mention-pop" role="listbox" aria-label="Mention a user" hidden></div>
+          <!-- 5-line auto-grow textarea (chat.js autosizeComposer): grows with
+               the text, then scrolls. Shift+Enter newline, Enter sends. -->
+          <textarea id="chat-input" rows="1" placeholder="Type a message"
+                    autocomplete="off" maxlength="4096"></textarea>
           <button id="btn-send" class="btn btn-accent round" title="Send" data-icon="send"></button>
           <!-- gallery FIRST on every platform: no `capture`, so mobile OSes
                offer the camera inside the normal picker instead of forcing it -->
@@ -553,6 +560,11 @@
           <span class="profile-nameline"><span id="profile-line"></span></span>
           <span id="profile-coco" class="coco coco-hero" hidden></span>
         </span>
+        <!-- chat shortcut: opens (or switches to) the conversation with THIS
+             sheet's user. Hidden on the self preview (you do not message
+             yourself from your own card). -->
+        <button id="btn-profile-chat" class="icon-btn profile-chat-btn" title="Message this user"
+                data-icon="chat"></button>
       </div>
 
       <section class="profile-section" id="profile-bio-section" hidden>

@@ -28,8 +28,12 @@ import {
   loadFriends, friendAdd, friendDel, friendMarkFlags, setFriends, FRIENDS_EVENT, loadPeerBlocked, loadPeerMuted, rememberPeerMuted, loadPeerChips,
   loadPeerTags,
   getPin, recordPinSeen, markPeerGone, rememberPeerVerified,
-  rememberPeerModeration, loadPeerModeration,
+  rememberPeerModeration, loadPeerModeration, loadPeerPremiums, loadPins,
 } from '../store.js';
+// Pure @-mention + link parsing (tokenizer, TLD rules, 3-slot search order)
+// lives in rich.js so the painter, the composer popup and the Links tab share
+// ONE definition of what a mention / a link is.
+import { splitRich, mentionCandidates } from '../rich.js';
 // M4 media: prep/policy/lifecycle in ../media.js, painting in the two
 // components beside this file. chat.js stays the ORCHESTRATOR — it owns
 // render(), the composer and the modal lifecycle; media owns what media looks
@@ -453,6 +457,8 @@ export function createChat({ client, onHomeRefresh }) {
     const text = input.value.trim();
     if (!text || !currentPeer || peerGone) return;
     input.value = '';
+    hideMentionPop();
+    autosizeComposer(); // the box drops back to one line with the text
     try {
       const { localId } = await client.sendMessage(currentPeer, text);
       await saveMessage({ id: `out:${localId}`, peer: currentPeer, dir: 'out', text, ts: Date.now(), state: 'sending' });
@@ -477,6 +483,119 @@ export function createChat({ client, onHomeRefresh }) {
         ? 'Offline — messages cannot be sent yet. They stay unsent until you reconnect.'
         : humanError(err), 'error');
     }
+  }
+
+  // ---- composer: 5-line auto-grow + @-mention search ----
+  // The box is a textarea: one line at rest, grows with the text up to FIVE
+  // lines, then scrolls (autosizeComposer owns the cap — measured from the
+  // element's own line-height, so the CSS and the JS can never disagree).
+  const COMPOSER_LINES = 5;
+
+  function composerMaxPx(el) {
+    const cs = getComputedStyle(el);
+    const lh = parseFloat(cs.lineHeight) || (parseFloat(cs.fontSize) * 1.4);
+    return Math.ceil(lh * COMPOSER_LINES)
+      + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom)
+      + (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+  }
+
+  function autosizeComposer() {
+    const el = $('chat-input');
+    if (!el || el.tagName !== 'TEXTAREA') return;
+    el.style.height = 'auto';
+    const max = composerMaxPx(el);
+    el.style.height = `${Math.min(el.scrollHeight, max)}px`;
+    el.style.overflowY = el.scrollHeight > max ? 'auto' : 'hidden';
+  }
+
+  // The @-search: typing "@" (at a word boundary) opens a composer popover
+  // of up to THREE users — the chat's own people first, then the rest of
+  // the known list alphabetically. Rows are the single-line component
+  // (trust icon + worn badge), tap/Enter inserts "@username ".
+  let mentionState = null; // { start, query } of the token being typed
+  let mentionList = [];    // the uls on offer (max 3)
+  let mentionHl = 0;       // keyboard highlight
+
+  function hideMentionPop() {
+    const pop = $('mention-pop');
+    if (pop) { pop.hidden = true; pop.replaceChildren(); }
+    mentionState = null;
+    mentionList = [];
+    mentionHl = 0;
+  }
+
+  function mentionPopOpen() {
+    const pop = $('mention-pop');
+    return !!pop && !pop.hidden;
+  }
+
+  // The @-token the caret sits in: "@" after whitespace/( and valid chars
+  // up to the caret, nothing past it. Returns the '@' index + typed query.
+  function currentMentionToken() {
+    const el = $('chat-input');
+    const pos = el.selectionStart ?? el.value.length;
+    if (pos !== (el.selectionEnd ?? pos)) return null;
+    const m = /(?:^|\s|\()@([a-zA-Z0-9_-]{0,64})$/.exec(el.value.slice(0, pos));
+    if (!m) return null;
+    return { start: pos - m[1].length - 1, query: m[1].toLowerCase() };
+  }
+
+  async function refreshMentions() {
+    const pop = $('mention-pop');
+    if (!pop) return;
+    const tok = currentMentionToken();
+    if (!tok || !currentPeer || peerGone) { hideMentionPop(); return; }
+    const friends = await loadFriends();
+    const cands = mentionCandidates({
+      query: tok.query,
+      currentPeer: String(currentPeer).toLowerCase(),
+      // known users = MY friends mirror (gone accounts cannot be tagged)
+      peers: friends.filter((f) => !f.gone).map((f) => String(f.peer).toLowerCase()),
+    });
+    if (!cands.length) { hideMentionPop(); return; }
+    mentionState = tok;
+    mentionList = cands;
+    mentionHl = 0;
+    const ctx = await buildRichCtx();
+    pop.replaceChildren(...cands.map((ul, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = `mention-row${i === mentionHl ? ' hl' : ''}`;
+      b.setAttribute('role', 'option');
+      b.setAttribute('aria-selected', String(i === mentionHl));
+      b.append(mountLine(document.createElement('span'), mentionLineOpts(ul, ctx)));
+      // keep the caret/focus in the textarea through the tap (the send
+      // button does the same dance — mobile keyboard stays up)
+      b.addEventListener('pointerdown', (e) => e.preventDefault());
+      b.addEventListener('click', () => acceptMention(i));
+      return b;
+    }));
+    pop.hidden = false;
+  }
+
+  function moveMentionHl(d) {
+    if (!mentionList.length) return;
+    mentionHl = (mentionHl + d + mentionList.length) % mentionList.length;
+    [...$('mention-pop').children].forEach((el, i) => {
+      el.classList.toggle('hl', i === mentionHl);
+      el.setAttribute('aria-selected', String(i === mentionHl));
+    });
+  }
+
+  // Replace the typed "@query" with the picked "@username " (the spaces are
+  // the wire format the RECEIVER parses — rich.js).
+  function acceptMention(i = mentionHl) {
+    const ul = mentionList[i];
+    if (!ul || !mentionState) return;
+    const el = $('chat-input');
+    const pos = el.selectionStart ?? el.value.length;
+    const ins = `@${ul} `;
+    el.value = el.value.slice(0, mentionState.start) + ins + el.value.slice(pos);
+    const caret = mentionState.start + ins.length;
+    el.setSelectionRange(caret, caret);
+    hideMentionPop();
+    autosizeComposer();
+    el.focus({ preventScroll: true });
   }
 
   // ---- SENDING MEDIA (plan §6.3 / req 4) ----
@@ -652,6 +771,79 @@ export function createChat({ client, onHomeRefresh }) {
     } catch { /* reported already: the bubble shows failed, the toast said why */ }
   }
 
+  // ---- rich message text: @-mentions + links ----
+  // How a name renders is the VIEWER's business: the sender sees their own
+  // trust ladder for that user, the receiver sees theirs — both are just
+  // this device's mirrors, so ONE resolver (mentionLineOpts) paints both
+  // sides honestly. Names this device does not know stay plain text: a
+  // mention of a user the recipient added still renders as a user
+  // component FOR them, while the sender (who added nobody) sees text.
+  async function buildRichCtx() {
+    const [friends, chips, premiums, mods, pins] = await Promise.all([
+      loadFriends(), loadPeerChips(), loadPeerPremiums(), loadPeerModeration(), loadPins(),
+    ]);
+    return {
+      friends: new Map(friends.map((f) => [String(f.peer).toLowerCase(), f])),
+      chips,
+      premiums,
+      mods,
+      pins: new Map(pins.map((p) => [p.peer, p])),
+      self: String(client.username ?? '').toLowerCase(),
+      peer: String(currentPeer ?? '').toLowerCase(),
+    };
+  }
+
+  function knownUser(ul, ctx) {
+    return ctx.friends.has(ul) || ul === ctx.self || (ctx.peer && ul === ctx.peer);
+  }
+
+  // The single-line user component's options for a mention — same ladder
+  // inputs as the forward list (fwdLineOpts), resolved per name.
+  function mentionLineOpts(ul, ctx) {
+    const ent = ctx.friends.get(ul);
+    const pin = ctx.pins.get(ul);
+    const state = ul === ctx.self
+      ? PS.SELF
+      : stateForEntry(ent, pin, {
+        gone: !!ent?.gone || !!pin?.gone,
+        moderation: moderationOf(ctx.mods.get(ul)),
+      });
+    return { peer: ul, state, chipEl: chipFor(ctx.chips.get(ul), ctx.premiums.get(ul)) };
+  }
+
+  /** Paint message text into `host` (REPLACES its children — the message
+   *  modal reuses one element): plain runs, clickable <a> links (bare
+   *  hosts gain https:// — rich.js), and clickable single-line components
+   *  for @mentions of users THIS device knows. */
+  function appendRichText(host, text, ctx) {
+    const nodes = [];
+    for (const seg of splitRich(text, (ul) => knownUser(ul, ctx))) {
+      if (seg.kind === 'link') {
+        const a = document.createElement('a');
+        a.className = 'msg-link';
+        a.href = seg.href;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.textContent = seg.text;
+        nodes.push(a);
+      } else if (seg.kind === 'mention') {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'msg-mention';
+        b.dataset.ul = seg.name;
+        b.title = `View ${seg.name}'s profile`;
+        // the '@' is part of the message text (Copy keeps it); the NAME is
+        // the single-line component: trust icon + worn badge
+        b.append(document.createTextNode('@'));
+        b.append(mountLine(document.createElement('span'), mentionLineOpts(seg.name, ctx)));
+        nodes.push(b);
+      } else {
+        nodes.push(document.createTextNode(seg.text));
+      }
+    }
+    host.replaceChildren(...nodes);
+  }
+
   // --- rendering ---
 
   // The open-time pin can be undone by chrome that lands a few frames
@@ -689,6 +881,8 @@ export function createChat({ client, onHomeRefresh }) {
     const list = $('chat-messages');
     if (!list || !currentPeer) return;
     const msgs = (await messagesWith(currentPeer)).sort((a, b) => a.ts - b.ts);
+    // one batch of mirror reads for every rich run in this paint
+    const richCtx = await buildRichCtx();
     // One read for the conversation's media rows, then bubble painting stays
     // synchronous. Object URLs from the previous paint go FIRST: bubbles are
     // rebuilt on every event and each unreleased URL pins its decrypted bytes
@@ -733,7 +927,9 @@ export function createChat({ client, onHomeRefresh }) {
           videoPreview: previewIds.has(mRow?.id),
         }));
       } else {
-        body.textContent = m.text;
+        // @-mentions + links become live components (people the VIEWER
+        // knows, clickable sites) — plain text stays plain
+        appendRichText(body, m.text, richCtx);
       }
       const meta = document.createElement('span');
       meta.className = 'meta';
@@ -986,7 +1182,8 @@ export function createChat({ client, onHomeRefresh }) {
       }
     } else {
       textEl.hidden = false;
-      textEl.textContent = rec.text;
+      // the modal's text is a chat surface too: mentions + links paint
+      appendRichText(textEl, rec.text, await buildRichCtx());
       textEl.scrollTop = 0;
       if (pane) { pane.hidden = true; pane.replaceChildren(); }
     }
@@ -1106,14 +1303,24 @@ export function createChat({ client, onHomeRefresh }) {
 
   // One place that turns (mirror entry, local pin, chat state) into the
   // shared peername trust state — red / orange / green ladder.
-  function trustState(ent, pin) {
+  // stateForEntry resolves it for ANY subject (the profile sheet, a mention
+  // in a message); trustState is the open chat riding on top of it.
+  function stateForEntry(ent, pin, { gone = false, moderation = null, pinChanged = false } = {}) {
     return resolvePeerState({
-      gone: peerGone || !!ent?.gone,
-      bound: !!ent?.trusted && pinState !== 'changed',
+      gone,
+      bound: !!ent?.trusted && !pinChanged,
       verified: !!ent?.verified,
       trusted: !!ent?.trust,
       conflict: !!pin && !!ent?.pub && pin.p !== ent.pub,
+      moderation,
+    });
+  }
+
+  function trustState(ent, pin) {
+    return stateForEntry(ent, pin, {
+      gone: peerGone || !!ent?.gone,
       moderation: peerModeration,
+      pinChanged: pinState === 'changed',
     });
   }
 
@@ -1551,54 +1758,90 @@ export function createChat({ client, onHomeRefresh }) {
   // peer is timed out ('malicious') or banned. Filled from the moderation
   // fact cached by the keys/profile reads (peerModeration) — the same
   // flags that replace the trust icon with the danger mark.
-  function renderModerationNotice() {
+  function renderModerationNotice(mod = peerModeration) {
     const el = $('profile-moderation');
     if (!el) return;
     el.replaceChildren();
-    el.hidden = !peerModeration;
-    if (!peerModeration) return;
-    el.append(iconEl(peerModeration === 'banned' ? 'ban' : 'identityAlert', 'icon-danger'));
+    el.hidden = !mod;
+    if (!mod) return;
+    el.append(iconEl(mod === 'banned' ? 'ban' : 'identityAlert', 'icon-danger'));
     const span = document.createElement('span');
-    span.textContent = peerModeration === 'banned'
+    span.textContent = mod === 'banned'
       ? 'This user was banned by CoCoNo staff. The account is locked out of the platform; its data is preserved.'
       : 'WARNING! This user has been identified as malicious by CoCoNo staff';
     el.append(span);
   }
 
-  async function renderProfileView() {
-    if (!currentPeer) return;
-    const ent = await friendEntryFor(currentPeer);
-    const pin = await getPin(currentPeer);
-    const state = trustState(ent, pin);
-    const profileBlocked = (await loadPeerBlocked()).get(currentPeer);
-    renderModerationNotice(); // the TOP notice paints before anything else
-    mountLine($('profile-line'), {
-      peer: currentPeer, state: peerModeration ?? (profileBlocked ? PS.BLOCKED : state),
-      chipEl: chipFor(profileDisplay, sheetPremium),
-      unverified: peerIdentityKnown && !peerIdentityVerified,
+  // The sheet renders for ANY subject — the open chat, or a name clicked
+  // in a message. Every fact resolves FOR THAT USER from this device's own
+  // mirrors ("the viewer sees their own trust"), and the live lookups the
+  // open chat already made (keys facts in the closure vars) are reused only
+  // when the subject IS the open chat; otherwise a keys lookup fills the
+  // App facts (404 = the account is gone). `prof` is the viewProfile fetch
+  // openProfileFor already made (null when it failed) — no second fetch.
+  async function renderProfileView(ul, prof = null) {
+    ul = String(ul ?? '').toLowerCase();
+    if (!ul) return;
+    const isCurrent = ul === String(currentPeer ?? '').toLowerCase();
+    const ent = await friendEntryFor(ul);
+    const pin = await getPin(ul);
+    const profileBlocked = (await loadPeerBlocked()).get(ul);
+
+    let idKnown = isCurrent && peerIdentityKnown;
+    let idVerified = isCurrent && peerIdentityVerified;
+    let joinedAt = isCurrent ? peerJoinedAt : null;
+    let gone = isCurrent && peerGone;
+    let mod = isCurrent ? peerModeration : moderationOf((await loadPeerModeration()).get(ul));
+    const hadHistory = isCurrent
+      ? peerHadHistory
+      : (await messagesWith(ul)).length > 0;
+    if (!isCurrent && !gone) {
+      try {
+        const keys = await client.peerKeys(ul);
+        idKnown = true;
+        idVerified = !!keys?.verified;
+        joinedAt = keys?.joinedAt ?? null;
+        mod = moderationOf(keys) ?? mod;
+        await rememberPeerVerified(ul, idVerified, !!keys?.premium);
+        await rememberPeerModeration(ul, { malicious: keys?.malicious === true, banned: keys?.banned === true });
+      } catch (err) {
+        if (err?.code === 'unknown_account' || err?.status === 404) gone = true;
+        // offline / transient: facts stay UNKNOWN (no false verdicts)
+      }
+    }
+    if (prof) mod = moderationOf(prof) ?? mod;
+    gone = gone || !!ent?.gone || !!pin?.gone;
+
+    const state = stateForEntry(ent, pin, {
+      gone, moderation: mod, pinChanged: isCurrent && pinState === 'changed',
     });
-    renderAccountStage(peerJoinedAt ? new Date(peerJoinedAt).getTime() : null);
+    renderModerationNotice(mod); // the TOP notice paints before anything else
+    mountLine($('profile-line'), {
+      peer: ul, state: mod ?? (profileBlocked ? PS.BLOCKED : state),
+      chipEl: chipFor(profileDisplay, sheetPremium),
+      unverified: idKnown && !idVerified,
+    });
+    renderAccountStage(joinedAt ? new Date(joinedAt).getTime() : null);
 
     // peer profile (bio public; avatar ONLY on mutual add — server rule):
     // show photo when present, else the initial circle
     const bioSec = $('profile-bio-section');
     const bioEl = $('profile-peer-bio');
-    setAvatar($('profile-av'), currentPeer, { src: '', sizeClass: 'profile-avatar' });
+    setAvatar($('profile-av'), ul, { src: '', sizeClass: 'profile-avatar' });
     bioSec.hidden = true;
-    try {
-      const prof = await client.viewProfile(currentPeer);
+    if (prof) {
       // descriptions surface only for ID-verified accounts (an unverified
       // stranger gets no broadcast channel for their text)
-      if (prof.bio && peerIdentityVerified) { bioEl.textContent = prof.bio; bioSec.hidden = false; }
-      rememberPeerAvatar(currentPeer, prof.avatar).catch(() => {});
+      if (prof.bio && idVerified) { bioEl.textContent = prof.bio; bioSec.hidden = false; }
+      rememberPeerAvatar(ul, prof.avatar).catch(() => {});
       if (prof.avatar) {
-        setAvatar($('profile-av'), currentPeer, {
+        setAvatar($('profile-av'), ul, {
           src: `data:${prof.avatarType || 'image/jpeg'};base64,${prof.avatar}`,
           sizeClass: 'profile-avatar',
           zoom: true, // photo set → lightbox + magnifier hint (delegation: #profile-modal)
         });
       }
-    } catch { /* offline / deleted: initials + no bio */ }
+    } // offline / deleted: initials + no bio
 
     const appState = $('profile-app-state');
     const appNote = $('profile-app-note');
@@ -1618,10 +1861,10 @@ export function createChat({ client, onHomeRefresh }) {
     };
 
     // vanished peers: ONE verdict, nothing else
-    if (peerGone || ent?.gone) {
+    if (gone) {
       setRow(appState, appNote, 'bad',
-        peerHadHistory ? 'Account deleted' : 'User not found',
-        peerHadHistory
+        hadHistory ? 'Account deleted' : 'User not found',
+        hadHistory
           ? 'This account no longer exists. Your saved messages stay readable, but nothing new can be sent.'
           : 'No account with this name exists — nothing you send can be delivered.');
       [socialState, socialNote, youState, youNote].forEach((el) => { el.hidden = true; });
@@ -1634,10 +1877,10 @@ export function createChat({ client, onHomeRefresh }) {
     [socialState, socialNote, youState, youNote].forEach((el) => { el.hidden = false; });
 
     // App
-    if (peerIdentityKnown && peerIdentityVerified) {
+    if (idKnown && idVerified) {
       setRow(appState, appNote, 'ok', 'App: Verified',
         'This account handed an ID document to a human reviewer — the person behind it has been checked.');
-    } else if (peerIdentityKnown) {
+    } else if (idKnown) {
       setRow(appState, appNote, 'bad', 'App: Unverified',
         'No ID has been checked for this account. Scammers typically use unverified accounts — they are cheap to set up and throw away.');
     } else {
@@ -1646,15 +1889,18 @@ export function createChat({ client, onHomeRefresh }) {
 
     // Social + counts + CoCo (fetched once; hidden when offline)
     let stats = null;
-    try { stats = await client.userStats(currentPeer); } catch { /* offline */ }
+    try { stats = await client.userStats(ul); } catch { /* offline */ }
     if (stats) {
       // the stats read carries the same moderation flags — they are the
       // FRESHEST staff verdict; keep banner + ladder + sidebar honest
       const sm = moderationOf(stats);
-      if (sm !== peerModeration) {
-        peerModeration = sm;
-        renderModerationNotice();
-        rememberPeerModeration(currentPeer, { malicious: stats.malicious, banned: stats.banned }).catch(() => {});
+      if (sm !== mod) {
+        mod = sm;
+        renderModerationNotice(mod);
+        rememberPeerModeration(ul, { malicious: !!stats.malicious, banned: !!stats.banned }).catch(() => {});
+        // the OPEN chat's head ladder follows a fresh verdict — never the
+        // closure state of some other peer's sheet
+        if (isCurrent) { peerModeration = sm; updateTrustUI().catch(() => {}); }
       }
       const trusted = stats.socialTrusted === true;
       setRow(socialState, socialNote, trusted ? 'ok' : 'bad',
@@ -1678,21 +1924,35 @@ export function createChat({ client, onHomeRefresh }) {
   }
 
   async function openProfileView() {
-    if (!currentPeer) return;
+    return openProfileFor(currentPeer);
+  }
+
+  // THE profile entry point for any name: the chat head, a warn-strip
+  // action, or a @mention clicked in a message. One authoritative
+  // viewProfile fetch feeds badges/chip/photo; renderProfileView resolves
+  // the rest per subject (see its comment).
+  async function openProfileFor(subject) {
+    const ul = String(subject ?? '').toLowerCase();
+    if (!ul) return;
     closeChatOpts(); // the sheet replaces the menu, never stacks on it
-    profileSubject = currentPeer;
-    // one authoritative fetch for the sheet: photo policy, bio, badges, name
-    // chip — all fresh, exactly as this viewer is allowed to see them
+    profileSubject = ul;
+    const isCurrent = ul === String(currentPeer ?? '').toLowerCase();
+    let prof = null;
     try {
-      const prof = await client.viewProfile(currentPeer);
+      prof = await client.viewProfile(ul);
       profileBadges = prof?.badges ?? [];
       profileDisplay = prof?.displayBadge ?? null;
       sheetPremium = !!prof?.premium;
       // the sheet's TOP notice: the staff verdict rides the profile read
-      peerModeration = moderationOf(prof);
+      if (isCurrent) peerModeration = moderationOf(prof);
     } catch { profileBadges = []; }
-    primePeerProfile(currentPeer); // avatar/premium cache update stays
-    await renderProfileView();
+    if (!prof && !isCurrent) {
+      // another subject's stale chip would fake a badge it never earned
+      profileDisplay = null;
+      sheetPremium = false;
+    }
+    primePeerProfile(ul); // cache warm-up (its closure writes guard on == currentPeer)
+    await renderProfileView(ul, prof);
     profileSheetOpen = true;
     $('profile-modal').classList.remove('closing');
     $('profile-overlay').classList.remove('closing');
@@ -1702,6 +1962,10 @@ export function createChat({ client, onHomeRefresh }) {
     // guards on visibility, so calling it earlier silently skipped the top
     // name badge (the bug: selected badge missing on the profile header)
     renderProfileBadges();
+    // the hero's chat shortcut: pointless on your own card, honest everywhere
+    // else (a gone account still opens its read-only history)
+    const chatBtn = $('btn-profile-chat');
+    if (chatBtn) chatBtn.hidden = ul === String(client.username ?? '').toLowerCase();
     $('profile-modal').focus?.();
   }
 
@@ -1778,6 +2042,9 @@ export function createChat({ client, onHomeRefresh }) {
       'This is your public profile — exactly what mutually-added contacts see.');
 
     profileSheetOpen = true;
+    // the self preview has nobody to message — the hero chat icon is hidden
+    const selfChatBtn = $('btn-profile-chat');
+    if (selfChatBtn) selfChatBtn.hidden = true;
     $('profile-modal').classList.remove('closing');
     $('profile-overlay').classList.remove('closing');
     $('profile-overlay').hidden = false;
@@ -2494,6 +2761,8 @@ export function createChat({ client, onHomeRefresh }) {
       // fires no focusin — and the keyboard pre-flight (which keeps the
       // header pinned) only runs for a tap-earned focus. Desktop keeps it.
       if (!peerGone && matchMedia('(pointer: fine)').matches) $('chat-input').focus();
+      hideMentionPop(); // a popup from the previous chat must not survive
+      autosizeComposer(); // (pane is visible now — heights can be measured)
     } catch (err) {
       setStatus(status, humanError(err), true);
     }
@@ -2506,6 +2775,7 @@ export function createChat({ client, onHomeRefresh }) {
     const btn = $('btn-send');
     input.disabled = !enabled;
     btn.disabled = !enabled;
+    if (!enabled) hideMentionPop(); // a locked composer has nobody to tag
     // an attachment is a message: a locked composer locks the + too (ghost
     // chats / blocked / deleted accounts must not be able to open a picker)
     const attach = $('btn-attach');
@@ -2514,11 +2784,12 @@ export function createChat({ client, onHomeRefresh }) {
   }
 
   const paneClosing = () => $('chat-view').classList.contains('closing');
-  const closeChatPane = () => {
+  function closeChatPane() {
     currentPeer = null;
     // a clip playing in the transcript must not keep playing behind a closed
     // pane: sound with nothing on screen is the app behaving badly
     stopInlinePlay();
+    hideMentionPop();
     closeProfileView();
     setChatOpen(false);
     closeMsgModal();
@@ -2584,8 +2855,34 @@ export function createChat({ client, onHomeRefresh }) {
       $('attach-menu') && ($('attach-menu').hidden = true); // sending closes the menu
       sendCurrent();
     });
-    $('chat-input').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') sendCurrent();
+    const composer = $('chat-input');
+    composer.addEventListener('input', () => {
+      autosizeComposer();
+      refreshMentions().catch(() => {});
+    });
+    // caret moves (click / arrows past the popup) re-evaluate the @-token
+    composer.addEventListener('click', () => { refreshMentions().catch(() => {}); });
+    composer.addEventListener('keyup', (e) => {
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') {
+        refreshMentions().catch(() => {});
+      }
+    });
+    // mobile: the caret left the field — the popup belongs to the caret
+    composer.addEventListener('blur', () => setTimeout(() => {
+      if (document.activeElement !== composer) hideMentionPop();
+    }, 120));
+    composer.addEventListener('keydown', (e) => {
+      // the @-search owns Enter/Tab/arrows while it is on screen: Enter
+      // PICKS the highlighted user instead of sending
+      if (mentionPopOpen()) {
+        if (e.key === 'ArrowDown') { e.preventDefault(); moveMentionHl(1); return; }
+        if (e.key === 'ArrowUp') { e.preventDefault(); moveMentionHl(-1); return; }
+        if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); acceptMention(); return; }
+        if (e.key === 'Escape') { e.preventDefault(); hideMentionPop(); return; }
+      }
+      if (e.key !== 'Enter' || e.shiftKey) return; // Shift+Enter = newline
+      e.preventDefault();
+      sendCurrent();
     });
 
     // ---- attach: + button, its menu, and the two pickers (req 2) ----
@@ -2677,6 +2974,7 @@ export function createChat({ client, onHomeRefresh }) {
     // > conversation). Desktop "close" gesture otherwise.
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
+      if (mentionPopOpen()) { hideMentionPop(); return; }
       if (!$('attach-menu')?.hidden) { $('attach-menu').hidden = true; $('btn-attach')?.setAttribute('aria-expanded', 'false'); return; }
       if (!$('lightbox-overlay')?.hidden) { closeLightbox(); return; }
       if (forwardOpen()) { closeForward(); return; }
@@ -2695,6 +2993,12 @@ export function createChat({ client, onHomeRefresh }) {
       if ($('chat-view').hidden || paneClosing()) return;
       const li = e.target.closest('li.msg');
       if (!li) return;
+      // rich runs own their clicks: a link navigates (the browser handles
+      // it), a mention opens that user's profile sheet — the message modal
+      // must NOT pop over either
+      if (e.target.closest('a.msg-link')) return;
+      const men = e.target.closest('.msg-mention');
+      if (men?.dataset?.ul) { openProfileFor(men.dataset.ul).catch(() => {}); return; }
       // a bubble's own Download/Delete buttons are NOT a tap on the bubble:
       // they act and the modal stays shut (req 6 lives right here)
       const badge = e.target.closest('.media-play-badge');
@@ -2730,6 +3034,14 @@ export function createChat({ client, onHomeRefresh }) {
     // chat-head name opens the profile view directly
     $('btn-peer-profile')?.addEventListener('click', openProfileView);
     $('btn-chat-profile')?.addEventListener('click', openProfileView);
+    // the profile sheet's chat shortcut: open (or switch to) THAT user's
+    // conversation — how a mention clicked out of a message becomes a chat
+    $('btn-profile-chat')?.addEventListener('click', () => {
+      const ul = profileSubject;
+      if (!ul) return;
+      closeProfileView();
+      if (ul !== currentPeer) openChat(ul).catch(() => {});
+    });
     $('chatopts-overlay').addEventListener('click', closeChatOpts);
     $('btn-chat-mute')?.addEventListener('click', toggleChatMute);
     $('btn-chat-block')?.addEventListener('click', async () => {

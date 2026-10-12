@@ -162,7 +162,9 @@ function fileRowEl(row, { onOpen, onAction }) {
 function linkRow(item) {
   const li = mk('li', 'link-row');
   const a = mk('a', `link-line ${item.dir === 'out' ? 'media-sent' : 'media-recv'}`);
-  a.href = item.url;
+  // bare transcript hosts ("example.com/x") carry no scheme — href is the
+  // navigable form, url stays what the row DISPLAYS (rich.js)
+  a.href = item.href || item.url;
   a.target = '_blank';
   a.rel = 'noopener noreferrer';
   const ic = mk('span', 'link-icon');
