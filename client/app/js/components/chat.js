@@ -471,6 +471,7 @@ export function createChat({ client, onHomeRefresh }) {
     const text = input.value.trim();
     if (!text || !currentPeer || peerGone) return;
     input.value = '';
+    draftSet(String(currentPeer).toLowerCase(), ''); // the draft is spent
     hideMentionPop();
     autosizeComposer(); // the box drops back to one line with the text
     // METADATA: only names PICKED from the @-search assert "this is a
@@ -508,7 +509,7 @@ export function createChat({ client, onHomeRefresh }) {
   // are filtered to tokens still present in the text (edits can delete or
   // mangle them) — that surviving set is what packRich asserts to the
   // receiver. Cleared with the draft.
-  const pickedMentions = new Set();
+  let pickedMentions = new Set();
 
   function assertPickedMentions(text) {
     if (!pickedMentions.size) return [];
@@ -644,6 +645,43 @@ export function createChat({ client, onHomeRefresh }) {
     hideMentionPop();
     autosizeComposer();
     el.focus({ preventScroll: true });
+  }
+
+  // ---- per-chat composer drafts (LOCAL ONLY) ----
+  // An unfinished message belongs to the chat it was typed in: switching
+  // peers SWAPS the composer content — save the leaving draft, restore the
+  // entering one. Storage is this browser, this ACCOUNT (a shared device
+  // must never leak drafts between users): one small JSON map, never the
+  // server, never cross-device. The picked-mention set rides the draft so
+  // a restored "@name " still asserts on send. Bounded to the 30 most
+  // recent chats — churn cannot grow the key forever.
+  const DRAFT_MAX = 30;
+  let draftSaveTimer = 0;
+
+  const draftsKey = () => `cocono.drafts.${String(client.username ?? '').toLowerCase()}`;
+
+  function readDrafts() {
+    try { return JSON.parse(localStorage.getItem(draftsKey()) ?? '{}') ?? {}; } catch { return {}; }
+  }
+  function draftSet(ul, text, picked = []) {
+    const all = readDrafts();
+    if (text) all[ul] = { text, picked, ts: Date.now() };
+    else delete all[ul];
+    for (const k of Object.keys(all)
+      .sort((a, b) => (all[b].ts ?? 0) - (all[a].ts ?? 0)).slice(DRAFT_MAX)) delete all[k];
+    try { localStorage.setItem(draftsKey(), JSON.stringify(all)); } catch { /* private mode / quota: drafts die quietly */ }
+  }
+  function saveDraft() {
+    if (!currentPeer) return;
+    draftSet(String(currentPeer).toLowerCase(), $('chat-input').value, [...pickedMentions]);
+  }
+  function restoreDraft() {
+    clearTimeout(draftSaveTimer);
+    const el = $('chat-input');
+    const d = currentPeer ? readDrafts()[String(currentPeer).toLowerCase()] : null;
+    el.value = d && typeof d.text === 'string' ? d.text : '';
+    pickedMentions = new Set(Array.isArray(d?.picked) ? d.picked : []);
+    autosizeComposer();
   }
 
   // ---- SENDING MEDIA (plan §6.3 / req 4) ----
@@ -2760,6 +2798,8 @@ export function createChat({ client, onHomeRefresh }) {
   }
 
   async function openChat(username) {
+    saveDraft(); // the LEAVING chat keeps its unfinished message (no-op on
+    // a first open; harmless on a re-open of the same peer)
     const status = $('home-status');
     try {
       let peer = null;
@@ -2848,8 +2888,8 @@ export function createChat({ client, onHomeRefresh }) {
       // header pinned) only runs for a tap-earned focus. Desktop keeps it.
       if (!peerGone && matchMedia('(pointer: fine)').matches) $('chat-input').focus();
       hideMentionPop(); // a popup from the previous chat must not survive
-      pickedMentions.clear(); // nor a half-typed draft's picked names
-      autosizeComposer(); // (pane is visible now — heights can be measured)
+      restoreDraft(); // THIS chat's unfinished message (and only it) fills
+                      // the composer; picked mentions ride along
     } catch (err) {
       setStatus(status, humanError(err), true);
     }
@@ -2872,6 +2912,7 @@ export function createChat({ client, onHomeRefresh }) {
 
   const paneClosing = () => $('chat-view').classList.contains('closing');
   function closeChatPane() {
+    saveDraft(); // before the peer is forgotten — the draft outlives the pane
     currentPeer = null;
     // a clip playing in the transcript must not keep playing behind a closed
     // pane: sound with nothing on screen is the app behaving badly
@@ -2952,6 +2993,10 @@ export function createChat({ client, onHomeRefresh }) {
     composer.addEventListener('input', () => {
       autosizeComposer();
       refreshMentions().catch(() => {});
+      // persisted shortly after typing STOPS (a reload/kill mid-thought
+      // should not lose the draft); a burst of keystrokes = one write
+      clearTimeout(draftSaveTimer);
+      draftSaveTimer = setTimeout(saveDraft, 300);
     });
     // caret moves (click / arrows past the popup) re-evaluate the @-token
     composer.addEventListener('click', () => { refreshMentions().catch(() => {}); });

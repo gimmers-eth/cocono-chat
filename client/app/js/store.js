@@ -85,6 +85,7 @@ export async function deleteAccountData(username) {
   try {
     localStorage.removeItem(`cocono.reads.${ul}`);
     localStorage.removeItem(`cocono.cleared.${ul}`);
+    localStorage.removeItem(`cocono.drafts.${ul}`); // unfinished local messages
     localStorage.removeItem(ownerKey(ul));
   } catch { /* storage unavailable — nothing to clean */ }
   if (scope === ul) {
