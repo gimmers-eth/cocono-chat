@@ -430,25 +430,41 @@ offline replay therefore work untouched: a media message IS a message.
   `client/test/appmediaflow.test.js` against the real server.)
 - **The server reads nothing.** Moderation gets plaintext only because a
   reporter's own client hands over the file keys of its conversation (§2.12).
-- **Codecs are normalised on the sender**: a phone records HEVC/`.mov`, which
-  Safari plays and most other browsers cannot, so `client/app/js/transcode.js`
-  re-encodes such clips to H.264/AAC in MP4 before upload (real-time,
-  capability-gated, ≤90 s and ≤1920 px, and ANY failure — including an engine
-  with no MP4 recorder — sends the original file rather than losing the clip).
-  There are TWO capture engines, because the obvious one is missing exactly
-  where it is needed: `HTMLMediaElement.captureStream()` (Chromium/Firefox),
-  and — for WebKit, which does not implement it, i.e. for every iPhone — a
-  canvas the presented frames are painted into (`requestVideoFrameCallback`)
-  and recorded via `canvas.captureStream()`, with the soundtrack taken from a
-  Web Audio graph on the same element. **A clip whose audio cannot be carried
-  is sent as recorded**: a silent re-encode is a worse loss than a `.mov`. The
-  decoder element is ATTACHED to the document while it runs
-  (`client/app/js/vidstage.js`) — WebKit delivers no frames to a detached
-  `<video>`, which is why no poster had ever been captured from a phone. Every
-  outcome, skips included, is journalled (`transcode: ok 6s 12MB->3MB via
-  canvas`, `skipped (no-capture-engine)`) so a report says what the device did.
+- **Codecs: the camera's own file is what gets sent.** `client/app/js/transcode.js`
+  can re-encode a HEVC/`.mov` clip to H.264/AAC MP4 before upload, and it is
+  **switched off** (`TRANSCODE_ENABLED = false`). It was written for a recipient
+  whose browser cannot decode HEVC — a problem this project never actually
+  observed. What looked like that problem was a Content-Security-Policy with no
+  `media-src`, refusing every `blob:` `<video>` in every browser before a decoder
+  was consulted; once the header was fixed, desktop Chromium decoded the phone's
+  HEVC clips (its own journal: `captured at 0.1s via bitmap/rvfc` — Windows ships
+  an HEVC decoder and Chromium uses it) and the phone played its own. The
+  re-encode meanwhile cost real time, battery and quality, and could hang a send
+  forever on an engine that left `play()` or `onstop` pending. It stays in the
+  tree, bounded (an overall deadline plus per-await ceilings) and journalled, for
+  the day a recipient genuinely cannot play a clip — switch it on for an observed
+  failure, not for a codec name. A test pins the default.
   The `mime` in the descriptor is the container's truth, because a recipient's
-  `<video>` refuses a typeless Blob and mislabels a `.mov` full of H.264.
+  `<video>` refuses a typeless Blob and mislabels a `.mov` full of H.264. An
+  engine that cannot decode a clip says so and offers Save-to-device
+  (§2.13a) rather than showing a black rectangle.
+- **Send progress lives in the message, not in a toast.** The draft row is
+  written the moment the file is picked (the picker's `File` is already a Blob, so
+  the preview is instant) and carries two phases on one determinate bar:
+  `preparing` (0–60%: reading, poster) and `uploading` (60–100%, from the SDK's
+  own XHR byte count). A toast expires after 4.5 s and a phone that works for
+  half a minute with no number on screen looks frozen. A rejected file takes its
+  draft back down; a failed upload keeps the local copy and marks the MESSAGE
+  failed; a send the app did not live to finish is reaped at boot
+  (`reapStaleDrafts`) because a bar that never moves is worse than a failure.
+- **A clip plays in its own bubble.** The centred badge is a real button
+  (`data-act="playpause"`) that plays/pauses the bubble's `<video>` with sound —
+  an explicit tap is what a play button means. Everything else about the bubble
+  still opens the message modal, and the modal pauses inline playback, so there
+  are never two soundtracks. A clip with a poster is `<video poster=…
+  preload=none>` (the JPEG paints, nothing decodes until play); one without keeps
+  the `#t=0.1` first frame. Playback survives the re-render loop because the
+  intent lives in a map, not in an element that is thrown away on every event.
 - **A video is visible in the thread even without a poster**: the bubble and
   the wall tile show a paused, muted, control-less `<video>` over the local
   bytes with a `#t=0.1` media fragment (which is what makes an engine decode a

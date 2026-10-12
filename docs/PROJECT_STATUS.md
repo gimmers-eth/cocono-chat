@@ -426,36 +426,50 @@ replay dedup · envelope HMAC/sender-mismatch/unknown-recipient · auth flow hap
   (chat · images · videos · files · links) with sent-vs-received borders and a
   searchable file list, the message-modal viewer (Blur / Play-Pause for animated
   images / Play / Mute / Download / Keep), and a per-device retention setting.
-- **Video that actually plays anywhere**: `client/app/js/transcode.js`
-  normalises a sender's clip to H.264/AAC MP4 before upload when it is HEVC or
-  QuickTime (the reason a recipient saw 'could not be played here': iPhone
-  cameras write HEVC and Chromium generally cannot decode it). Real-time, with
-  TWO capture engines: `captureStream()` + `MediaRecorder` where the element
-  supports it, and — because **WebKit does not implement
-  `HTMLMediaElement.captureStream()`**, i.e. on every iPhone, the one platform
-  that produces the `.mov`s — a canvas painted from `requestVideoFrameCallback`
-  and recorded via `canvas.captureStream()`, its soundtrack taken from a Web
-  Audio graph (`createMediaElementSource` → `MediaStreamDestination`). Chosen
-  over a WebCodecs pipeline because audio has to survive and WebCodecs alone
-  means adding a demuxer + sample-remux to get it. A clip whose audio cannot be
-  carried (no graph, or a context that stays suspended — that records silence)
-  is sent AS RECORDED: a silent re-encode is a worse loss than a `.mov`.
-  Capability-gated, ≤90 s / ≤1920 px / ≤100 MB, the output is sniffed to prove
-  it really is a playable MP4 before it replaces the source, and EVERY failure
-  path sends the original file; each outcome is journalled (`transcode: ok 6s
-  12MB->3MB via canvas`, `skipped (no-capture-engine)`) so a phone report says
-  what the device actually did.
+- **Video: the camera's own file is sent, and it is visible everywhere.**
+  `client/app/js/transcode.js` can re-encode a HEVC/`.mov` clip to H.264/AAC MP4
+  on the sender, with TWO capture engines — element `captureStream()`, and for
+  WebKit (which does not implement it) a canvas painted from
+  `requestVideoFrameCallback` and recorded via `canvas.captureStream()`, its
+  soundtrack taken from a Web Audio graph — and it is **OFF by default**
+  (`TRANSCODE_ENABLED = false`, pinned by a test). It was written for a recipient
+  who could not decode HEVC; that recipient never existed here. The real cause of
+  "video does not show" was a CSP with no `media-src`, and once it was fixed the
+  desktop Chromium decoded the phone's HEVC clips well enough to return poster
+  frames (`captured at 0.1s via bitmap/rvfc` in its own journal — Windows ships an
+  HEVC decoder and Chromium uses it). What the re-encode then did was cost the
+  SEND: it runs in real time on battery at a quality loss, and it hung, because
+  `await video.play()` and `await rec.onstop` are promises an engine may never
+  settle and nothing bounded them. It stays in the tree bounded (an overall
+  deadline plus per-await ceilings) and journalled, to be switched on for an
+  OBSERVED failure — never for a codec name. A clip an engine cannot decode is met
+  with a sentence and Save-to-device, not a black rectangle.
 - **A video is visible in the thread even when nobody could cut a poster.**
   `client/app/js/vidstage.js` puts the decoder element IN THE DOCUMENT while it
   works and takes it back off afterwards: WebKit hands no decoded frames to a
   detached `<video>`, which is why `thumbCtSize` was null on every video in the
   dev database and why the poster ladder looked like an iOS codec problem. Where
   there is still no poster but the bytes are local, the bubble and the wall tile
-  paint a paused, muted, control-less `<video>` whose src carries `#t=0.1` (the
-  media fragment is what makes an engine decode a frame instead of showing a
-  black box); `error` — an engine that cannot decode the codec — swaps the
-  labelled tile back in, and a stored clip with no poster gets one built on this
-  device (`buildPoster`, once per row per session).
+  paint a paused, control-less `<video>` whose src carries `#t=0.1` (the media
+  fragment is what makes an engine decode a frame instead of showing a black
+  box); `error` — an engine that cannot decode the codec — swaps the labelled tile
+  back in, and a stored clip with no poster gets one built on this device
+  (`buildPoster`, once per row per session).
+- **The clip plays in its own bubble, and the send is visible in the message.**
+  The centred badge is a real button (`data-act="playpause"`) that plays/pauses
+  the bubble's `<video>` with sound; everything else about the bubble still opens
+  the message modal, which pauses inline playback so there are never two
+  soundtracks. With a poster the element is `preload=none` (the JPEG paints,
+  nothing decodes until play); playback survives the re-render loop because the
+  intent lives in a map, not in an element that is thrown away on every event.
+  Sending writes a DRAFT row the moment the file is picked — the picker's `File`
+  is already a Blob, so the preview is instant — and carries `preparing` (0–60%)
+  then `uploading` (60–100%, from the SDK's own XHR byte count) on one
+  determinate bar, because a toast expires after 4.5 s and a phone that works for
+  half a minute with no number on screen looks frozen. A rejected file takes its
+  draft back down, a failed upload keeps the local copy and marks the MESSAGE
+  failed, and a send the app did not live to finish is reaped at boot
+  (`reapStaleDrafts`): a bar that never moves is worse than a failure.
 - **Getting the bytes ONTO the phone, and releasing the app's copy.** Save is a
   real DOWNLOAD (`<a download>` on the Blob URL, filename always carrying an
   extension via `deviceFileName`); the Web Share sheet, which on a phone is a
@@ -505,6 +519,17 @@ replay dedup · envelope HMAC/sender-mismatch/unknown-recipient · auth flow hap
   shows "no longer available"). ~~No range/streaming downloads; no video
   transcoding; a 10 MB video cap~~ — all three CLOSED: Range-resumable
   downloads, sender-side re-encoding to H.264/AAC MP4, and a 100 MB cap.
+
+- **An optional enhancement must never be able to block the thing it enhances.**
+  The sender-side re-encode was a compatibility nicety sitting INLINE in the send
+  path, and when the engine left `play()` or the recorder's `onstop` pending it
+  held the send open forever: no message, no upload, no error, just a phone that
+  looked frozen. Server-side proof was the absence of a blob — nothing created
+  after the CSP fix but an image. Rules now baked in: every await in an optional
+  pass is bounded (`withDeadline` on play/stop/resume), the whole pass has a
+  deadline that kills it and falls back to the original file, and a progress
+  phase the user can see is part of the pass, not a courtesy. If a step cannot
+  finish, the user must be able to tell that from the screen.
 
 ## Test-maintenance lessons (baked into the suites)
 

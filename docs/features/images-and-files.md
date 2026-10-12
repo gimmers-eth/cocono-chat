@@ -460,10 +460,16 @@ bubbles by kind in chat.js:
   bubble width; blurred via CSS `filter: blur(...)` when the blur policy says
   so (§6.7).
 - video → poster thumb + centred play badge (+ duration chip).
-  **IMPLEMENTED, widened:** with no poster but local bytes the bubble paints a
-  paused, muted, control-less `<video>` (src carrying `#t=0.1` so the engine
-  decodes a frame instead of showing black); an engine that cannot decode the
-  codec swaps in the labelled tile on `error`. Nothing may autoplay.
+  **IMPLEMENTED, widened:** the badge is a BUTTON (`data-act="playpause"`) and
+  the clip plays IN THE MESSAGE — with sound, because an explicit tap is what a
+  play button means — while a tap anywhere else on the bubble still opens the
+  modal (which pauses inline playback, so there are never two soundtracks). With
+  bytes on this device the preview is a `<video>`: `poster=…` + `preload=none`
+  when a poster exists (the JPEG paints, nothing decodes until play), otherwise
+  `preload=metadata` with `#t=0.1` so the engine paints a frame instead of a
+  black box. An engine that cannot decode the codec swaps the labelled tile in on
+  `error`. Nothing may autoplay, and playback survives the re-render loop (the
+  intent lives in a map, since bubbles are rebuilt on every event).
 - file → icon + name + size + state row (Download / Decline buttons when
   `state: 'pending'`; progress/status otherwise).
 - outgoing media → thumb/icon + the normal state marks (sending ✓ ✗ ✓✓);
@@ -640,17 +646,21 @@ hands the server plaintext transcript. Extend it:
   twice. A `video`/`file` therefore no longer has to fit in one attempt.
 - Video transcoding/compression is client-out-of-scope; a 10 MB cap on video
   is short — accepted for M4 (DESIGN.md keeps richer media post-MVP).
-  **SUPERSEDED (2026-10):** the cap is 100 MB and video IS re-encoded on the
-  sender when it is HEVC/QuickTime (`client/app/js/transcode.js`) — not for
-  size but because a clip the recipient's browser cannot decode is a clip that
-  did not arrive. TWO engines: `captureStream()` + `MediaRecorder` where the
-  element supports it, and a painted-into-canvas + `canvas.captureStream()`
-  recording where it does not (**WebKit/iPhone**: the platform that produces
-  every `.mov`, and the one engine without element capture). The soundtrack
-  rides a Web Audio graph in the canvas case, and a clip whose audio cannot be
-  carried is sent as recorded rather than re-encoded silent. Bounded to short
-  clips (≤90 s, ≤1920 px) because the pass is real-time; the fallback is the
-  original file, always, and the reason is journalled.
+  **SUPERSEDED (2026-10):** the cap is 100 MB, and a re-encoder exists
+  (`client/app/js/transcode.js`, two engines: element `captureStream()` and — for
+  WebKit, which lacks it — a canvas painted from `requestVideoFrameCallback` and
+  recorded via `canvas.captureStream()`, soundtrack from a Web Audio graph).
+  It is **OFF by default** (`TRANSCODE_ENABLED = false`): the "recipient cannot
+  decode HEVC" problem it was written for turned out to be a CSP with no
+  `media-src`, and once that was fixed the phones in this project played the
+  camera's own clips — desktop Chromium included, which decoded them well enough
+  to return poster frames. What the re-encode did instead was cost a send: it
+  runs in real time, on battery, at a quality loss, and it HUNG when the engine
+  left `play()`/`onstop` pending, so the clip never reached the upload. It stays
+  in the tree bounded (overall deadline + per-await ceilings) and journalled, to
+  be switched on for an observed failure — never for a codec name. A clip an
+  engine cannot decode is met with a sentence and Save-to-device, not a black
+  rectangle.
   The decoder element is attached to the document for the duration
   (`client/app/js/vidstage.js`) — a detached `<video>` yields no frames on
   WebKit, which is why poster capture had never worked on a phone.

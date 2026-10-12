@@ -511,7 +511,6 @@ export function createChat({ client, onHomeRefresh }) {
         msgId: id, ts,
       });
       Object.assign(row, patch);
-      row.state = 'stored';     // we hold these bytes already — they came from this device
       await saveMessage({ id, peer, dir: 'out', text: mediaLabel(prepared.kind, prepared.name), ts, state: 'sending', kind: prepared.kind, mediaId: id });
       await saveMedia(row);
     }
@@ -804,6 +803,15 @@ export function createChat({ client, onHomeRefresh }) {
   // A bubble's Download/Delete press: the message id on the <li> is the only
   // handle the DOM carries, so resolve it to the row and let the shared
   // action do the work (the Files tab calls the same function).
+  /** Stop every inline clip and forget the intent, so a re-render cannot
+   *  restart one behind a closed pane or an open modal. */
+  function stopInlinePlay() {
+    for (const v of ($('chat-messages')?.querySelectorAll('.media-video') ?? [])) {
+      try { v.pause(); } catch { /* already stopped */ }
+    }
+    inlinePlay.clear();
+  }
+
   /**
    * Play/pause the clip IN ITS BUBBLE. The badge is the only thing that does
    * this; the rest of the message still opens the modal. An explicit tap is a
@@ -869,10 +877,7 @@ export function createChat({ client, onHomeRefresh }) {
     // the transcript behind it would be two soundtracks and one confusing pause
     // button. Stop inline playback, and forget it so a re-render does not
     // restart it underneath the modal.
-    for (const v of ($('chat-messages')?.querySelectorAll('.media-video') ?? [])) {
-      try { v.pause(); } catch { /* already stopped */ }
-    }
-    inlinePlay.clear();
+    stopInlinePlay();
     $('msg-modal-title').textContent = rec.dir === 'out' ? 'Sent message' : 'Message';
     $('msg-modal-time').textContent = `${rec.peer} · ${new Date(rec.ts).toLocaleString()}`;
     setStatus($('msg-modal-status'), '');
@@ -2412,6 +2417,9 @@ export function createChat({ client, onHomeRefresh }) {
   const paneClosing = () => $('chat-view').classList.contains('closing');
   const closeChatPane = () => {
     currentPeer = null;
+    // a clip playing in the transcript must not keep playing behind a closed
+    // pane: sound with nothing on screen is the app behaving badly
+    stopInlinePlay();
     closeProfileView();
     setChatOpen(false);
     closeMsgModal();
