@@ -497,7 +497,7 @@ function paintRooms(li, host, g) {
     pin.title = r.pinned
       ? 'Un-pin room — it collapses with the group again'
       : 'Pin room — it stays open when the group is collapsed (a pin is NOT the starred tag)';
-    pin.append(iconEl(r.pinned ? 'pin' : 'pinRegular'));
+    pin.append(iconEl(r.pinned ? 'pin' : 'pinSlash'));
     pin.addEventListener('click', () => { r.pinned = !r.pinned; renderGroups(); });
     const open = el('button', 'room-open');
     open.type = 'button';
