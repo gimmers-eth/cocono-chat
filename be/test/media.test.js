@@ -200,6 +200,34 @@ test('media: upload then download round-trips identical bytes', async () => {
   } finally { await ctx.teardown(); }
 });
 
+test('media: the CSP lets a Blob URL be a media source (or no video can ever play)', async () => {
+  // The failure this guards is invisible from the server and total on the
+  // client: decrypted media is displayed through `URL.createObjectURL`, and
+  // without `media-src … blob:` the `default-src 'self'` fallback governs
+  // <video>/<audio>, so the browser refuses the element BEFORE a decoder is
+  // consulted. Every video then fails looking like a codec problem — poster
+  // capture reports decode-error, the transcode never gets metadata, the bubble
+  // and the viewer paint nothing — while photos keep working because img-src
+  // already allowed blob:. Found from a phone's diagnostics journal, not from
+  // the header: 13/13 posters `decode-error` on a device that plays HEVC fine.
+  const ctx = await setupLive();
+  try {
+    const alice = await createUser(ctx, makeClient(), 'alice');
+    const { res } = await upload(ctx, alice.token, { kind: 'video' });
+    const id = res.json().id;
+    const dl = await ctx.app.inject({ method: 'GET', url: `/api/media/${id}`, headers: auth(alice.token) });
+    const csp = String(dl.headers['content-security-policy'] ?? '');
+    const directive = (name) => csp.split(';').map((s) => s.trim()).find((s) => s.startsWith(`${name} `)) ?? '';
+    assert.match(directive('media-src'), /blob:/,
+      `a Blob URL must be a legal media source; got: ${csp || '(no CSP)'}`);
+    assert.match(directive('img-src'), /blob:/, 'posters are Blob URLs too');
+    assert.match(directive('media-src'), /'self'/, 'and same-origin media stays allowed');
+    // the rest of the policy is still strict: this fix widens ONE directive
+    assert.match(directive('script-src'), /^script-src 'self'$/, 'script-src did not get widened');
+    assert.equal(directive('frame-ancestors'), "frame-ancestors 'none'");
+  } finally { await ctx.teardown(); }
+});
+
 test('media: download authorisation is per-DEVICE and every miss says unknown_media', async () => {
   const ctx = await setupLive();
   try {

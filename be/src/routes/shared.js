@@ -20,11 +20,23 @@ export function requireAuth(request, reply) {
 // M4 fix: strict same-origin security headers. Both the FE and the admin UI
 // are fully same-origin apps, so a strict CSP is cheap; the admin panel's
 // styles live in a file (no inline <style>) to keep style-src strict too.
+//
+// `media-src` earns its line the hard way. Decrypted media is shown through
+// Blob URLs, and without an explicit media-src the `default-src 'self'` above
+// governs <video>/<audio> — a blob: URL is not 'self', so the browser REFUSES
+// the element before a decoder is ever consulted. Every video path in the app
+// then fails looking like a codec problem: the poster ladder's element fires
+// `error` (decode-error), the transcode never gets metadata, the bubble and the
+// viewer paint nothing. `img-src` already allowed blob:, which is exactly why
+// photos worked and only video looked broken. Found from a phone's diagnostics
+// journal (13/13 videos `decode-error`), not from any amount of reasoning about
+// HEVC: a CSP block and an undecodable clip are the same `error` event.
 const CSP = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self'",
   "img-src 'self' data: blob:",
+  "media-src 'self' blob:",
   "connect-src 'self'",
   "manifest-src 'self'",
   "frame-ancestors 'none'",
