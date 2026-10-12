@@ -76,6 +76,7 @@ const walkTags = (nodes, out = []) => {
 };
 const tagsOf = (nodes) => walkTags(nodes).map((el) => el.tagName);
 const findTag = (nodes, tag) => walkTags(nodes).find((el) => el.tagName === String(tag).toUpperCase()) ?? null;
+const findClass = (nodes, cls) => walkTags(nodes).find((el) => (el.className || '').split(/\s+/).includes(cls)) ?? null;
 
 // ---------------- bubbles ----------------
 
@@ -668,24 +669,38 @@ test('bubble: a video is never painted as an <img> over its own video bytes', as
   const mp4 = new Blob([new Uint8Array([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70])], { type: 'video/mp4' });
   const v = { ...row({ id: 'vImg', kind: 'video' }), state: 'stored', data: mp4, thumb: null };
   await store.saveMedia(v);
-  const nodes = bubbleNodes({ dir: 'in', kind: 'video', state: 'delivered' }, v, {});
-  const tags = tagsOf(nodes);
-  assert.ok(!tags.includes('IMG'),
-    'no <img> pointed at video bytes (that is the looping mess in the chat)');
-  const clip = findTag(nodes, 'VIDEO');
-  assert.ok(clip, 'the bytes this device holds are shown as a paused <video>, not a grey tile');
+  const msg = { dir: 'in', kind: 'video', state: 'delivered' };
+
+  // Default paint: NO media element. A transcript of 18 clips is 18 decoders,
+  // and a phone runs out — the element that then fails is the message modal's,
+  // which reads as "this browser cannot decode that video".
+  const nodes = bubbleNodes(msg, v, {});
+  assert.ok(!tagsOf(nodes).includes('IMG'), 'no <img> pointed at video bytes (the looping mess)');
+  assert.equal(findTag(nodes, 'VIDEO'), null, 'and no <video> either, until someone presses play');
+  assert.ok(has(nodes, /media-plain/), 'a labelled tile stands in for the picture');
+  assert.equal(findClass(nodes, 'media-play-badge'), null,
+    'a tile has nothing to overlay: the tap opens the modal, which owns playback');
+
+  // The newest poster-less clips are allowed an element, so the bubble is a
+  // picture rather than a tile — that is chat.js's PREVIEW_VIDEO_MAX budget.
+  const shown = bubbleNodes(msg, v, { videoPreview: true });
+  const clip = findTag(shown, 'VIDEO');
+  assert.ok(clip, 'within the budget, the clip paints its own frame');
+  const badge = findClass(shown, 'media-play-badge');
+  assert.equal(badge.tagName, 'BUTTON', 'and the badge on it is a control: the bytes are here');
+  assert.equal(badge.dataset.act, 'playpause');
   assert.match(clip.src, /#t=0\.1$/, 'with a media fragment, or the box stays black until Play');
   assert.equal(clip.muted, true, 'a bubble never makes a sound by itself');
   assert.equal(clip.autoplay, false);
   assert.equal(clip.loop, false);
   assert.equal(clip.controls, false);
-  assert.ok(has(nodes, /media-play-badge/), 'and it still says "tap me"');
 
   // an engine that cannot decode it (HEVC/.mov on Chromium) must not leave a
   // black rectangle: the labelled tile takes over, in place, on `error`
+  clip.error = { code: 4 };
   clip.fire('error');
-  assert.ok(has([nodes[0]], /media-plain/), 'undecodable → the tile, with the name and size');
-  assert.match(nodes.map((x) => x.textContent).join(' '), /a\.mp4/);
+  assert.ok(has([shown[0]], /media-plain/), 'undecodable → the tile, with the name and size');
+  assert.match(shown.map((x) => x.textContent).join(' '), /a\.mp4/);
 });
 
 test('bubble: a video this device does NOT hold is a labelled tile with a download', async () => {
@@ -699,23 +714,37 @@ test('bubble: a video this device does NOT hold is a labelled tile with a downlo
   assert.match(nodes.map((x) => x.textContent).join(' '), /Download/, 'with the tap that fetches it');
 });
 
-test('bubble: a poster is the <video>’s poster attribute — cheap to paint, and the clip still plays in place', async () => {
+test('bubble: a poster paints a JPEG — and the player carries the same JPEG, so nothing flashes', async () => {
   await fresh();
   const mp4 = new Blob([new Uint8Array([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70])], { type: 'video/mp4' });
   const poster = new Blob(['JPEG'], { type: 'image/jpeg' });
   const v = { ...row({ id: 'vPosterBubble', kind: 'video' }), state: 'stored', data: mp4, thumb: poster };
   await store.saveMedia(v);
-  const nodes = bubbleNodes({ dir: 'in', kind: 'video', state: 'delivered' }, v, {});
-  const clip = findTag(nodes, 'VIDEO');
-  assert.ok(clip, 'bytes on this device → a real <video>, so the badge has something to play');
-  assert.match(clip.poster, /^blob:local\//, 'the JPEG poster paints it');
-  assert.equal(clip.preload, 'none', 'and nothing is decoded until someone presses play');
-  assert.equal(findTag(nodes, 'IMG'), null, 'the poster is an attribute, not a second element');
-  const badge = nodes.flatMap((n) => walkTags([n])).find((el) => el.className.includes('media-play-badge'));
-  assert.equal(badge.tagName, 'BUTTON', 'the badge is a control when there is a clip to play');
+  const msg = { dir: 'in', kind: 'video', state: 'delivered' };
+
+  const nodes = bubbleNodes(msg, v, {});
+  const still = findTag(nodes, 'IMG');
+  assert.ok(still, 'the poster JPEG is the preview: free, and holds no decoder');
+  const cls = (still.className || '').split(/\s+/);
+  assert.ok(!cls.includes('media-video'),
+    'and it does NOT wear the player class: chat.js looks .media-video up and calls play() on what it finds, '
+    + 'which is how one tap tore the player down and the next built it again');
+  assert.ok(cls.includes('media-poster'), 'it wears its own');
+  assert.equal(findTag(nodes, 'VIDEO'), null, 'no media element until the badge is pressed');
+  const badge = findClass(nodes, 'media-play-badge');
+  assert.equal(badge.tagName, 'BUTTON', 'and the badge is a control, because the bytes are here');
   assert.equal(badge.dataset.act, 'playpause');
-  assert.equal(clip.muted, true, 'it still starts silent and still: nothing autoplays');
-  assert.equal(clip.autoplay, false);
+
+  // playing: the element exists, and its poster is the SAME picture, so swapping
+  // <img> → <video> changes nothing on screen until real frames arrive. That gap
+  // was the "video disappears and reappears when I press play" report.
+  const on = bubbleNodes(msg, v, { playing: true });
+  const clip = findTag(on, 'VIDEO');
+  assert.ok(clip, 'the playing row gets the one player');
+  assert.match(clip.poster, /^blob:local\//, 'carrying the poster it replaces');
+  assert.equal(clip.preload, 'auto', 'and loading for real, not on demand');
+  assert.equal(findTag(on, 'IMG'), null, 'one picture, not two');
+  assert.ok(has(on, /media-play-badge is-playing/), 'the badge already says pause');
 });
 
 test('bubble: a poster with no bytes is a picture, and the badge is decoration', async () => {

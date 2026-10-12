@@ -13,6 +13,7 @@
 //    scope, so a re-render can never blank an open viewer.
 
 import { iconEl } from '../icons.js';
+import { logEvent } from '../applog.js';
 import { formatSize, objectUrl, isBlurred, durationText, renderableAsImage, hasLocalBytes } from '../media.js';
 
 const KIND_ICON = { image: 'tabImages', video: 'tabVideos', file: 'attachFile' };
@@ -74,16 +75,19 @@ function statusLine(row) {
 
 /** Preview picture: thumb when present, else the decrypted bytes (a send
  *  without a poster, or an image that could not be thumbnailed). */
-function previewEl(row, blur) {
-  // A VIDEO this device holds is always a <video>, poster or not: the badge on
-  // top of it plays the clip IN PLACE (chat.js owns the tap), which an <img>
-  // cannot do. With a poster the element costs nothing to paint (`preload:none`
-  // shows the JPEG and decodes only on play); without one it decodes frame 0.1 s
-  // so the bubble is a picture rather than a black box.
+function previewEl(row, blur, { playing = false, videoPreview = false } = {}) {
+  // ONE DECODER AT A TIME. A transcript with 18 clips is 18 media elements, and
+  // a phone runs out: iOS refuses the ones past its limit with
+  // MEDIA_ERR_SRC_NOT_SUPPORTED, and the element that then fails is the message
+  // modal's — which reads to the user as "this browser cannot decode that
+  // video" about a clip the same phone plays happily elsewhere. So the default
+  // paint is the poster JPEG (free), a real <video> exists only for the clip
+  // being played, plus the few most recent clips that have no poster to show.
   if (row.kind === 'video') {
-    if (hasLocalBytes(row)) return videoPreviewEl(row);
+    if (playing && hasLocalBytes(row)) return videoEl(row, { playing: true });
     const thumb = row.thumb;
     if (thumb?.size && (!thumb.type || thumb.type.startsWith('image/'))) return imgPreviewEl(thumb, row, blur);
+    if (videoPreview && hasLocalBytes(row)) return videoEl(row, { playing: false });
     return null;
   }
   // A picture, or nothing. The fallback used to reach for `row.data` on any
@@ -95,7 +99,10 @@ function previewEl(row, blur) {
 }
 
 function imgPreviewEl(blob, row, blur) {
-  const img = mk('img', `media-thumb media-${row.kind}${blur ? ' is-blurred' : ''}`);
+  // NOT `media-video` for a poster: that class is how chat.js finds the inline
+  // PLAYER, and a JPEG wearing it would be handed to `.play()`.
+  const kind = row.kind === 'video' ? 'media-poster' : `media-${row.kind}`;
+  const img = mk('img', `media-thumb ${kind}${blur ? ' is-blurred' : ''}`);
   img.alt = '';
   img.decoding = 'async';
   img.src = objectUrl(blob, 'bubbles');
@@ -103,18 +110,22 @@ function imgPreviewEl(blob, row, blur) {
 }
 
 /**
- * The clip itself, as a paused, control-less <video> that the badge on top of
- * it can play IN PLACE. Two loading shapes, because a re-render must not decode
- * a whole conversation of video:
- *   - with a poster: `preload='none'` + the `poster` attribute. The JPEG is what
- *     paints, nothing is decoded until someone presses play.
- *   - without one: `preload='metadata'` and a `#t=0.1` media fragment, which is
- *     what makes an engine decode a frame instead of showing a black box.
- * Nothing here may start by itself (no autoplay, no loop, no controls): sound
- * and playback are a person's decision, and the message modal is the other
- * place this clip can be played.
+ * The clip itself, as a control-less <video> that plays IN THE MESSAGE.
+ *
+ * Created ON DEMAND — see previewEl for why a transcript full of them is a bug,
+ * not a feature. Two loading shapes:
+ *   - with a poster: the `poster` attribute carries the same JPEG the bubble was
+ *     already showing, so swapping picture → player changes nothing on screen
+ *     until real frames exist. That is the fix for "the video disappears and
+ *     reappears when I press play": the gap was an element that dropped its
+ *     poster the instant loading started and had no frame to show yet.
+ *   - without one: `#t=0.1`, the media fragment that makes an engine decode a
+ *     frame instead of showing a black box.
+ * Nothing here may start by itself (no autoplay, no loop, no controls): sound and
+ * playback are a person's decision, and the message modal is the other place this
+ * clip can be played.
  */
-function videoPreviewEl(row) {
+function videoEl(row, { playing = false } = {}) {
   const v = mk('video', 'media-thumb media-video');
   v.muted = true;
   v.setAttribute?.('muted', '');
@@ -123,32 +134,31 @@ function videoPreviewEl(row) {
   v.controls = false;
   v.autoplay = false;
   v.loop = false;
+  v.preload = playing ? 'auto' : 'metadata';
   const url = objectUrl(row.data, 'bubbles');
   if (row.thumb?.size) {
     v.poster = objectUrl(row.thumb, 'bubbles');
-    v.preload = 'none';
     v.src = url;
   } else {
-    v.preload = 'metadata';
     v.src = `${url}#t=0.1`;
   }
-  v.dataset.mediaId = String(row.id ?? '');   // chat.js resumes it across a re-render
+  v.dataset.mediaId = String(row.id ?? '');   // chat.js owns play/pause by this
   return v;
 }
 
 /** Wrap the shot + its overlays in one positioned box (the bubble itself must
  *  not become the containing block for a play badge). */
-function shot(row, blur, playing = false) {
-  const pic = previewEl(row, blur);
+function shot(row, blur, playing = false, videoPreview = false) {
+  const pic = previewEl(row, blur, { playing, videoPreview });
   if (!pic) return null;
   const box = mk('span', 'media-shot');
   box.append(pic);
   if (row.kind === 'video') {
-    // A BUTTON when there is something to play: the badge plays the clip IN THE
-    // MESSAGE (chat.js binds it by class), and the rest of the bubble still
-    // opens the modal. Purely decorative — a `<span>` a tap falls through — when
-    // this device does not hold the bytes.
-    const playable = pic.tagName === 'VIDEO';
+    // A BUTTON whenever this device holds the bytes: the badge plays the clip IN
+    // THE MESSAGE (chat.js binds it by class and builds the player on demand),
+    // and the rest of the bubble still opens the modal. Purely decorative — a
+    // `<span>` a tap falls through — when the bytes are not here.
+    const playable = hasLocalBytes(row);
     const badge = mk(playable ? 'button' : 'span', `media-play-badge${playing ? ' is-playing' : ''}`);
     if (playable) {
       badge.type = 'button';
@@ -158,13 +168,23 @@ function shot(row, blur, playing = false) {
     }
     badge.append(iconEl(playing ? 'mediaPause' : 'mediaPlay'));
     box.append(badge);
-    if (playable) {
+    if (pic.tagName === 'VIDEO') {
       // the badge is the element's own transport: whatever else starts or stops
       // the clip (a re-render, the end of the file, another tap) has to be
       // reflected there, or the button lies about what it will do next
       pic.addEventListener?.('play', () => paintBadge(badge, true));
       pic.addEventListener?.('pause', () => paintBadge(badge, false));
       pic.addEventListener?.('ended', () => paintBadge(badge, false));
+      // A clip THIS ENGINE cannot decode (HEVC/.mov on Chromium is the common
+      // case) fires `error` and would otherwise sit there as a black box. Swap in
+      // the labelled tile: the honest 'a video, N MB, not playable here'. The
+      // MediaError CODE goes in the journal, because 3 (decode) and 4 (source
+      // refused — also what a phone says when it has run out of media elements)
+      // are different problems with different fixes.
+      pic.addEventListener?.('error', () => {
+        try { logEvent('media', `bubble cannot play video code=${pic.error?.code ?? '?'}`); } catch { /* never fatal */ }
+        box.replaceChildren(plainTile(row, 'mediaUndecodable'));
+      }, { once: true });
     }
     if (row.dur) box.append(mk('span', 'media-duration', durationText(row.dur)));
   }
@@ -172,12 +192,6 @@ function shot(row, blur, playing = false) {
     const hint = mk('span', 'media-blur-hint');
     hint.append(iconEl('mediaUnblur'), document.createTextNode(' tap to view'));
     box.append(hint);
-  }
-  // A clip THIS ENGINE cannot decode (HEVC/.mov on Chromium is the common case)
-  // fires `error` on the element and would otherwise sit there as a black box.
-  // Swap in the labelled tile: the honest 'a video, N MB, not playable here'.
-  if (pic.tagName === 'VIDEO') {
-    pic.addEventListener?.('error', () => { box.replaceChildren(plainTile(row, 'mediaUndecodable')); }, { once: true });
   }
   return box;
 }
@@ -213,7 +227,7 @@ function plainTile(row, icon = null) {
  * `verified` is the SENDER's admin identity-verified flag (blur policy, req 7)
  * — 'out' rows are never blurred regardless (isBlurred owns that rule).
  */
-export function bubbleNodes(msg, row, { verified = false, playing = false } = {}) {
+export function bubbleNodes(msg, row, { verified = false, playing = false, videoPreview = false } = {}) {
   // an outgoing send still in flight: the work IS the status. A draft row
   // (written the moment the file is picked) carries preparing/uploading and its
   // progress, so the bubble shows the bar instead of a toast that expires.
@@ -242,7 +256,7 @@ export function bubbleNodes(msg, row, { verified = false, playing = false } = {}
     wrap.append(ic, meta);
     nodes.push(wrap);   // name + size are the whole content of a file bubble
   } else {
-    const box = shot(row, renderableAsImage(row) && isBlurred(row, verified), playing);
+    const box = shot(row, renderableAsImage(row) && isBlurred(row, verified), playing, videoPreview);
     if (box) {
       nodes.push(box);
       if (row.name) nodes.push(mk('span', 'media-name', row.name));

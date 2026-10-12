@@ -23,6 +23,9 @@ import {
 
 // exported so chat.js and the tests agree on the vocabulary
 export const TABS = ['chat', 'images', 'videos', 'files', 'links'];
+
+/** How many poster-less clips may hold a media element just to paint a frame. */
+const WALL_VIDEO_MAX = 4;
 export const TAB_ICON = {
   chat: 'tabChat', images: 'tabImages', videos: 'tabVideos', files: 'tabFiles', links: 'tabLinks',
 };
@@ -74,7 +77,7 @@ export function paintTabActive(host, tab) {
 
 // ---------------- the tab panels ----------------
 
-function tile(row, { blur, caption, onOpen }) {
+function tile(row, { blur, caption, onOpen, videoPreview = false }) {
   const t = mk('button', `media-tile ${dirClass(row)}`);
   t.type = 'button';
   const pic = row.thumb ?? (row.kind === 'image' ? row.data : null);
@@ -84,7 +87,7 @@ function tile(row, { blur, caption, onOpen }) {
     img.decoding = 'async';
     img.src = objectUrl(pic, 'bubbles');
     t.append(img);
-  } else if (row.kind === 'video' && hasLocalBytes(row)) {
+  } else if (row.kind === 'video' && videoPreview && hasLocalBytes(row)) {
     // No poster, but the bytes are on this device: let the engine paint frame
     // one itself (`#t=0.1` is what makes it seek instead of showing black). The
     // wall would otherwise be a grid of film glyphs for every clip whose sender
@@ -197,12 +200,18 @@ export async function paintTabPanel(host, { peer, tab, query = '', verified = fa
       return { count: 0 };
     }
     const wall = mk('div', 'media-wall');
+    // The same decoder budget as the transcript: a wall of poster-less clips must
+    // not become a wall of media elements (a phone runs out, and the element that
+    // then fails is someone's message modal). Posters are free; elements are not.
+    let videoBudget = WALL_VIDEO_MAX;
     for (const row of list) {
+      const needsElement = row.kind === 'video' && !row.thumb?.size && hasLocalBytes(row);
       wall.append(tile(row, {
         // req 7: an unverified SENDER's image is blurred by default, and the
         // record's own toggle (row.blurred) wins — same rule as the transcript
         blur: tab === 'images' && isBlurred(row, verified),
         caption: row.kind === 'video' && row.dur ? durationText(row.dur) : null,
+        videoPreview: needsElement && videoBudget-- > 0,
         onOpen,
       }));
     }
@@ -384,8 +393,17 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
       sound.replaceChildren(iconEl('mediaMute'), document.createTextNode(' Unmute'));
       // Say it BEFORE the user presses Play and gets nothing: an engine that
       // cannot decode this codec (HEVC/.mov on Chromium) fires `error` on load.
+      // The CODE is the part that means anything, so it is journalled and said:
+      // 3 is the decoder giving up on these bytes, 4 is the source being refused
+      // — which is also what a phone reports when it has run out of media
+      // elements. Guessing 'codec' at a 4 is what sent us re-encoding clips that
+      // were perfectly fine.
       video.addEventListener('error', () => {
-        status('This browser cannot decode that video (phone cameras often record HEVC/.mov). It is intact — Save to device and open it in your video app.', true);
+        const code = video.error?.code ?? '?';
+        logEvent('media', `viewer cannot play video code=${code}`);
+        status(code === 3
+          ? 'This browser cannot decode that video (phone cameras often record HEVC/.mov). It is intact — Save to device and open it in your video app.'
+          : `This browser would not play that video (media error ${code}). Close and open it again, or Save to device and use your video app.`, true);
       }, { once: true });
       pane.append(video, play, sound);
     }

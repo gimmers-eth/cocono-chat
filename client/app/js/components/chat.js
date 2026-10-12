@@ -66,11 +66,15 @@ const STATE_MARK = { sending: 'stateSending', sent: 'stateSent', delivered: 'sta
 // a decoder refusal is not something to retry 40 times a minute.
 const posterAsked = new Set();
 
-// Inline playback in the transcript, keyed by media row id. Bubbles are rebuilt
-// atomically on every event, so the element that was playing is thrown away each
-// time: the INTENT lives here and is restored after each paint, or a message
-// arriving mid-clip silently stops someone's video.
+// Inline playback in the transcript, keyed by media row id — and there is only
+// ever ONE entry. Bubbles are rebuilt atomically on every event, so the element
+// that was playing is thrown away each time: the INTENT lives here and is
+// restored after each paint, or a message arriving mid-clip silently stops
+// someone's video.
 const inlinePlay = new Map();   // mediaId -> { t: seconds }
+// How many clips with NO poster may hold a <video> element just to paint frame
+// one. Posters are free; media elements are not (see previewEl in mediabubble.js).
+const PREVIEW_VIDEO_MAX = 2;
 
 // Timeline notices: when a security heads-up happens it must not be a
 // fleeting toast — it lands in the conversation timeline (dir:'sys') AND
@@ -690,6 +694,13 @@ export function createChat({ client, onHomeRefresh }) {
         if (id && inlinePlay.has(id)) inlinePlay.set(id, { t: v.currentTime || 0 });
       }
     }
+    // Which clips may hold a media element: the one being played (below) plus the
+    // newest few with no poster to show. Everything else paints a JPEG.
+    const previewIds = new Set(msgs
+      .map((m) => mediaById.get(m.mediaId))
+      .filter((r) => r && r.kind === 'video' && !r.thumb?.size && hasLocalBytes(r))
+      .slice(-PREVIEW_VIDEO_MAX)
+      .map((r) => r.id));
     releaseScope('bubbles');
     const frag = document.createDocumentFragment();
     for (const m of msgs) {
@@ -712,7 +723,11 @@ export function createChat({ client, onHomeRefresh }) {
         // notification show, never the raw descriptor
         body.className = 'media-body';
         const mRow = mediaById.get(m.mediaId);
-        body.append(...bubbleNodes(m, mRow, { verified: peerIdentityVerified, playing: inlinePlay.has(mRow?.id) }));
+        body.append(...bubbleNodes(m, mRow, {
+          verified: peerIdentityVerified,
+          playing: inlinePlay.has(String(mRow?.id)),
+          videoPreview: previewIds.has(mRow?.id),
+        }));
       } else {
         body.textContent = m.text;
       }
@@ -728,20 +743,7 @@ export function createChat({ client, onHomeRefresh }) {
       frag.appendChild(li);
     }
     list.replaceChildren(frag);
-    // resume anything that was playing in the transcript when the bubbles were
-    // rebuilt (same clip, same place in it)
-    if (inlinePlay.size) {
-      for (const v of list.querySelectorAll('.media-video')) {
-        const st = inlinePlay.get(v.dataset?.mediaId);
-        if (!st) continue;
-        try { v.currentTime = st.t || 0; } catch { /* not seekable yet */ }
-        v.muted = false;
-        const p = v.play?.();
-        // refused (autoplay policy, or a codec this engine will not touch): give
-        // up quietly rather than fighting the user's transcript every paint
-        if (p?.catch) p.catch(() => inlinePlay.delete(v.dataset.mediaId));
-      }
-    }
+    resumeInlinePlay();
     list.scrollTop = list.scrollHeight;
     settleAtBottom(list); // hold the pin through the late-landing chrome
     // A clip whose bytes are on this device but which has no poster: cut one
@@ -803,39 +805,80 @@ export function createChat({ client, onHomeRefresh }) {
   // A bubble's Download/Delete press: the message id on the <li> is the only
   // handle the DOM carries, so resolve it to the row and let the shared
   // action do the work (the Files tab calls the same function).
-  /** Stop every inline clip and forget the intent, so a re-render cannot
-   *  restart one behind a closed pane or an open modal. */
+  /**
+   * Play/pause the clip IN ITS BUBBLE — the badge is the only thing that does
+   * this; the rest of the message still opens the modal.
+   *
+   * There is ONE player slot. Bubbles paint their poster JPEG, so pressing play
+   * repaints this one bubble with a real `<video>` (carrying the same poster, so
+   * nothing flashes) and starts it; pressing pause — or starting another clip, or
+   * opening the modal, or closing the pane — gives the slot back, which is also
+   * how the decoder is released. An explicit tap is a user gesture, so the clip
+   * plays WITH sound: that is what pressing play means.
+   */
+  async function toggleInlinePlay(li) {
+    const live = li.querySelector('.media-video');
+    if (live && !live.paused) {
+      inlinePlay.clear();
+      try { live.pause(); } catch { /* already stopped */ }
+      await render();                       // the poster paints again, the decoder is freed
+      return;
+    }
+    const rec = await getMessage(li.dataset.id);
+    const row = rec?.mediaId ? await getMedia(rec.mediaId) : null;
+    if (!row) return;
+    if (!hasLocalBytes(row)) {
+      // nothing to play on this device yet: the modal owns the download and says so
+      if (rec) openMsgModal(rec);
+      return;
+    }
+    inlinePlay.clear();                     // ONE player at a time (see previewEl)
+    inlinePlay.set(String(row.id), { t: live?.currentTime || 0 });
+    if (live) { startInline(live); return; }
+    await render();                         // paints the player element for this row
+    // render() resumes the one slot itself; this only covers a paint that did not
+    // happen (no open conversation), and never double-starts a running clip
+    const made = [...($('chat-messages')?.querySelectorAll('.media-video') ?? [])]
+      .find((el) => el.dataset?.mediaId === String(row.id));
+    if (made && made.paused) startInline(made);
+  }
+
+  function startInline(v) {
+    v.muted = false;
+    const p = v.play?.();
+    if (p?.catch) {
+      p.catch(() => {
+        inlinePlay.clear();
+        toast('This browser cannot play that video here — open the message for the details.', 'error');
+      });
+    }
+  }
+
+  /** After a paint: the one clip that was playing is playing again, in the same
+   *  place in it — the element it belonged to was thrown away with the rest. */
+  function resumeInlinePlay() {
+    if (!inlinePlay.size) return;
+    const list = $('chat-messages');
+    if (!list) return;
+    for (const [id, st] of inlinePlay) {
+      const v = [...list.querySelectorAll('.media-video')].find((el) => el.dataset?.mediaId === id);
+      if (!v) { inlinePlay.delete(id); continue; }
+      try { if (st.t) v.currentTime = st.t; } catch { /* not seekable yet */ }
+      v.muted = false;
+      // refused (autoplay policy, or a codec this engine will not touch): give up
+      // quietly rather than fighting the transcript on every paint
+      const p = v.play?.();
+      if (p?.catch) p.catch(() => inlinePlay.delete(id));
+    }
+  }
+
+  /** Stop the inline clip and forget the intent, so a re-render cannot restart
+   *  it behind a closed pane or underneath an open modal. */
   function stopInlinePlay() {
     for (const v of ($('chat-messages')?.querySelectorAll('.media-video') ?? [])) {
       try { v.pause(); } catch { /* already stopped */ }
     }
     inlinePlay.clear();
-  }
-
-  /**
-   * Play/pause the clip IN ITS BUBBLE. The badge is the only thing that does
-   * this; the rest of the message still opens the modal. An explicit tap is a
-   * user gesture, so the clip plays WITH sound — that is what pressing play
-   * means — and a refusal (codec, policy) says so instead of doing nothing.
-   */
-  function toggleInlinePlay(li) {
-    const v = li.querySelector('.media-video');
-    if (!v) return;
-    const id = v.dataset?.mediaId || li.dataset.id;
-    if (!v.paused) {
-      inlinePlay.delete(id);
-      try { v.pause(); } catch { /* already stopped */ }
-      return;
-    }
-    v.muted = false;
-    inlinePlay.set(id, { t: v.currentTime || 0 });
-    const p = v.play?.();
-    if (p?.catch) {
-      p.catch(() => {
-        inlinePlay.delete(id);
-        toast('This browser cannot play that video here — open the message for the details.', 'error');
-      });
-    }
   }
 
   async function runBubbleAction(messageId, action) {
@@ -2602,7 +2645,7 @@ export function createChat({ client, onHomeRefresh }) {
       if (badge && badge.dataset?.act === 'playpause') {
         // the badge is the clip's transport IN the message: play/pause here,
         // and the modal stays shut. The rest of the bubble still opens it.
-        toggleInlinePlay(li);
+        toggleInlinePlay(li).catch(() => {});
         return;
       }
       const act = e.target.closest('.media-dl') ? 'download'
