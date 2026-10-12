@@ -784,7 +784,7 @@ export function createHome({ client, chat, onLogout }) {
     reviewBtn.addEventListener('click', review);
     input.addEventListener('keydown', (e) => e.key === 'Enter' && review());
 
-    $('btn-pair-cancel').addEventListener('click', closePairModal);
+    $('btn-pair-review-close').addEventListener('click', closePairModal);
     $('pair-overlay').addEventListener('click', closePairModal);
     approveBtn.addEventListener('click', async () => {
       if (!codeInReview) return closePairModal();

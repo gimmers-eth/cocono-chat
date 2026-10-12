@@ -1063,6 +1063,15 @@ body[data-view="blocked"] .page-footer { display: none; }
 .tf-val.num { color: var(--accent, #7d6ce0); }
 /* the confirm dialog has a single action (cancel is the header ✕) — it
    belongs centered, not shy in the corner */
+/* The confirm dialog is asked FROM INSIDE other modals — the message modal's
+   Delete, the chat menu's Remove — so it must sit above every sheet it can
+   coincide with. At an equal z-index the LATER element in the document wins, and
+   #confirm-modal is earlier than #msg-modal: the question would have painted
+   underneath the very dialog that summoned it, which is a button that does
+   nothing. Below the lightbox (70/71) and the toast (75), above the sheets
+   (50), the chat menu (55) and premium (60/61). */
+#confirm-overlay { z-index: 65; }
+#confirm-modal { z-index: 66; }
 #confirm-modal .row-actions { justify-content: center; }
 
 .tf-consequence {
@@ -1471,21 +1480,33 @@ body[data-view="blocked"] .page-footer { display: none; }
    the bubble does not collapse while the decoder works, `contain` so a phone's
    portrait clip is never cropped, and pointer-events:none so the tap still
    belongs to the bubble/tile that owns it. */
-.media-tile video, .media-shot video.media-thumb {
-  display: block; width: 100%; object-fit: contain; pointer-events: none;
+.media-tile video {
+  display: block; width: 100%; height: 100%; object-fit: cover;
+  pointer-events: none; background: rgb(0 0 0 / .55);
+}
+/* A clip standing in for its own poster (no thumb on this device yet). Sized by
+   the SAME rule as the poster it replaces — natural, capped, never stretched —
+   because the player overlay is positioned to the box this element defines, and a
+   different box is a different size on screen the moment play is pressed. */
+.media-shot video.media-thumb {
+  display: block; width: auto; height: auto; max-width: 100%; max-height: 260px;
+  object-fit: contain; pointer-events: none; border-radius: 6px;
   background: rgb(0 0 0 / .55);
 }
-.media-tile video { height: 100%; }
-.media-shot video.media-thumb { max-height: 260px; min-height: 6rem; border-radius: 6px; }
 /* The inline player is an OVERLAY on the poster, not a replacement for it. The
    poster stays in the flow and defines the box, so pressing play cannot change
    the size of the bubble (the report was "the video changes size when I press
    play"), and taking the player away reveals the same pixels again — no blink.
    Same crop as the poster (`cover`), so the two are pixel-identical until real
-   frames arrive. */
+   frames arrive.
+
+   TRANSPARENT, deliberately: an opaque background here is a black rectangle for
+   the milliseconds between appending the element and its first frame, which is
+   exactly the flicker that was reported. With nothing behind it, the poster <img>
+   underneath shows through until the video paints over it. */
 .media-player {
   position: absolute; inset: 0; display: block; width: 100%; height: 100%;
-  object-fit: cover; border-radius: 6px; background: #000; z-index: 1;
+  object-fit: cover; border-radius: 6px; background: transparent; z-index: 1;
 }
 /* the transport and the facts stay above the picture they describe */
 .media-play-badge, .media-duration, .media-blur-hint { z-index: 2; }
@@ -1528,7 +1549,14 @@ body[data-view="blocked"] .page-footer { display: none; }
 /* ---- bubbles ---- */
 .msg.msg-media { padding: .35rem; max-width: min(78%, 560px); }
 .media-body { display: block; }
-.media-shot { position: relative; display: block; line-height: 0; }
+.media-shot {
+  position: relative; display: block; line-height: 0;
+  /* SHRINK-WRAP the picture and centre it in the bubble. The player overlay is
+     positioned to THIS box, so a box wider than the poster made the clip jump
+     from the thumbnail's own width (192 px, left-aligned) to the full bubble
+     (267 px) and crop it differently the instant play was pressed. */
+  width: max-content; max-width: 100%; margin: 0 auto;
+}
 .media-thumb {
   display: block; max-width: 100%; max-height: 260px; border-radius: 6px;
   object-fit: cover;
@@ -1612,6 +1640,11 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
 .viewer-image, .viewer-video, .viewer-poster {
   max-width: 100%; max-height: 40vh; border-radius: 8px; display: block;
 }
+/* In the modal the PICTURE is the control: tap the clip to play/pause it, tap a
+   photo to zoom. Said with a cursor, because a tap target nobody can see is a
+   feature nobody finds. */
+.viewer-video.is-tappable { cursor: pointer; }
+.viewer-image.is-zoomable { cursor: zoom-in; }
 .viewer-waiting { color: var(--muted); display: flex; align-items: center; gap: .5rem; font-size: .85rem; }
 .viewer-waiting i { font-size: 1.4rem; }
 .viewer-file { text-align: center; padding: .8rem .4rem; }

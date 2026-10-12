@@ -403,7 +403,11 @@
   <section id="pair-modal" class="diag-modal" role="dialog" aria-modal="true" aria-labelledby="pair-title" hidden>
     <header class="drawer-head">
       <h2 id="pair-title">Approve new device?</h2>
-      <button id="btn-pair-cancel" class="icon-btn" title="Cancel" data-icon="close"></button>
+      <!-- NOT #btn-pair-cancel: that id belongs to the pairing WAITING screen's
+           Cancel button, and a duplicate id means getElementById hands BOTH
+           callers the first one — so this modal's ✕ was bound to nothing and the
+           waiting screen's Cancel closed a modal it had never opened. -->
+      <button id="btn-pair-review-close" class="icon-btn" title="Cancel" data-icon="close"></button>
     </header>
     <div class="pair-who">
       <span class="pair-ic" data-icon="tabDevices"></span>
@@ -429,8 +433,9 @@
   <div id="msg-overlay" class="overlay" hidden></div>
   <!-- Message panel: the message itself is FIXED (always visible, same
        height); only the bottom section is a carousel — the action row and
-       the forward controls swap by horizontal slide beneath the message. -->
-  <div id="msg-overlay" class="overlay" hidden></div>
+       the forward controls swap by horizontal slide beneath the message.
+       (This used to carry a SECOND #msg-overlay: a duplicate id, so every
+       lookup silently took the first and the other was dead markup.) -->
   <section id="msg-modal" class="side-menu" role="dialog" aria-modal="true" aria-labelledby="msg-modal-title" hidden>
     <header class="drawer-head">
       <h2 id="msg-modal-title">Message</h2>

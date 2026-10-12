@@ -897,3 +897,57 @@ test('drafts: a send the app did not finish is settled, not left spinning', asyn
   assert.equal(d2.state, 'failed', 'no bytes, no claim: failed');
   assert.equal((await store.getMedia('b-kept')).state, 'stored', 'a settled row is untouched');
 });
+
+test('viewer: the picture is the control — tap the clip to play, tap a photo to zoom', async () => {
+  await fresh();
+  const host = dom.byId('msg-media');
+
+  // a clip: tapping the picture itself is the transport, and the button under it
+  // is the same toggle wearing words
+  const clip = await stored({ id: 'vTap', kind: 'video', mime: 'video/mp4' });
+  let t = view.openViewer(host, {
+    client: fakeClient(), msg: { dir: 'in', kind: 'video' }, row: clip,
+    verified: true, onChange: () => {}, onStatus: () => {},
+  });
+  const video = host.querySelector('.viewer-video');
+  assert.ok(video, 'the clip is shown');
+  assert.ok(video.className.includes('is-tappable'), 'and it says so, with a cursor');
+  assert.equal(video.paused, true, 'nothing starts by itself');
+  video.fire('click');
+  assert.equal(video.paused, false, 'a tap on the picture plays it');
+  const playBtn = host.querySelectorAll('.viewer-toggle').find((b) => /Pause|Play/.test(b.textContent));
+  assert.match(playBtn.textContent, /Pause/, 'the button agrees with the picture');
+  video.fire('click');
+  assert.equal(video.paused, true, 'and the next tap pauses it');
+  assert.match(playBtn.textContent, /Play/);
+  t();
+
+  // a photo: a tap zooms, which is what a person tries first
+  const pic = await stored({ id: 'iTap', kind: 'image' });
+  const lightbox = dom.byId('lightbox-overlay');
+  lightbox.hidden = true;
+  t = view.openViewer(host, {
+    client: fakeClient(), msg: { dir: 'in', kind: 'image' }, row: pic,
+    verified: true, onChange: () => {}, onStatus: () => {},
+  });
+  const img = host.querySelector('.viewer-image');
+  assert.ok(img.className.includes('is-zoomable'), 'an unblurred photo invites the zoom');
+  img.fire('click');
+  assert.equal(lightbox.hidden, false, 'and the tap opens the lightbox');
+  t();
+
+  // a BLURRED photo must not zoom: the lightbox carries no blur class, so a tap
+  // there would quietly defeat the reason the picture is blurred
+  lightbox.hidden = true;
+  const shy = await stored({ id: 'iBlur', kind: 'image' });
+  t = view.openViewer(host, {
+    client: fakeClient(), msg: { dir: 'in', kind: 'image' }, row: shy,
+    verified: false, onChange: () => {}, onStatus: () => {},
+  });
+  const blurred = host.querySelector('.viewer-image');
+  assert.ok(blurred.className.includes('is-blurred'), 'blurred on open (unverified sender)');
+  assert.ok(!blurred.className.includes('is-zoomable'), 'so it is not a zoom target');
+  blurred.fire('click');
+  assert.equal(lightbox.hidden, true, 'and tapping it reveals nothing');
+  t();
+});

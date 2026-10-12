@@ -332,6 +332,16 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
       const img = mk('img', `viewer-image${blur ? ' is-blurred' : ''}`);
       img.alt = '';
       img.src = url;
+      // TAP TO ZOOM — the same door the Expand button opens, because a picture
+      // you have to find a button for is a picture most people never enlarge.
+      // NOT while the blur policy is showing: the lightbox carries no blur
+      // class, so zooming a blurred photo would quietly defeat the reason it is
+      // blurred. Unblur is right there and is the honest way through.
+      if (!blur) {
+        img.classList?.add?.('is-zoomable');
+        img.title = 'Tap to view full size';
+        img.addEventListener?.('click', () => openLightbox(url, { round: false }));
+      }
       pane.append(img);
       if (row.animated) {
         // native GIF playback cannot be paused in an <img>; pausing SHOWS the
@@ -372,20 +382,26 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
       seekToFirstFrame(video);
       video.src = url;
       const play = btn('viewer-toggle', 'mediaPlay', 'Play', 'Play this video');
-      play.addEventListener('click', () => {
+      const togglePlay = () => {
         if (video.paused) {
           video.play().catch(() => {
             // Named, because 'could not be played here' is a dead end and this
             // one has a way out: a phone recording is very often HEVC/.mov,
             // which Safari plays and Chromium on the same machine may not. The
             // file is intact — it is this element that cannot decode it, so
-            // Save-to-device and open it in a video app is the honest answer
-            // until we transcode on the way up (WebCodecs + an mp4 muxer: a
-            // dependency decision, not a bug fix).
+            // Save-to-device and open it in a video app is the honest answer.
             status('This browser cannot decode that video (phone cameras often record HEVC/.mov). It is downloaded intact — Save to device and open it in your video app.', true);
           });
         } else video.pause();
-      });
+      };
+      play.addEventListener('click', togglePlay);
+      // THE PICTURE IS THE BUTTON TOO. In a modal built around one clip, hunting
+      // for a small Play button underneath it is the wrong ergonomics; the button
+      // stays because it says the state in words, and both drive one toggle, so
+      // they can never disagree (the play/pause listeners below paint it).
+      video.classList?.add?.('is-tappable');
+      video.title = 'Tap to play or pause';
+      video.addEventListener('click', togglePlay);
       video.addEventListener('play', () => play.replaceChildren(iconEl('mediaPause'), document.createTextNode(' Pause')));
       video.addEventListener('pause', () => play.replaceChildren(iconEl('mediaPlay'), document.createTextNode(' Play')));
       const sound = btn('viewer-toggle', 'mediaUnmute', 'Mute', 'Mute this video');

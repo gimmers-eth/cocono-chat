@@ -140,10 +140,10 @@ function videoEl(row) {
   v.loop = false;
   v.preload = 'metadata';
   if (row.thumb?.size) v.poster = objectUrl(row.thumb, 'bubbles');
-  // A stable box, identical to the poster's: without it, pressing play swapped a
-  // 256 px JPEG for an element sized by its own rules and the bubble changed
-  // size under the user's thumb.
-  if (Number(row.w) > 0 && Number(row.h) > 0) v.style.aspectRatio = `${row.w} / ${row.h}`;
+  // The box is defined by the PICTURE (see .media-shot in base.css), so this
+  // element must obey the same rule the poster does: natural size, capped,
+  // never stretched. A forced width or ratio here is what made the bubble 267 px
+  // wide and the wrong shape while the poster underneath it was 192 px.
   // listeners before src: a Blob source can answer before anyone is listening
   if (!row.thumb?.size) seekToFirstFrame(v);
   v.src = objectUrl(row.data, 'bubbles');
@@ -199,13 +199,6 @@ function shot(row, blur, playing = false, videoPreview = false) {
   // how chat.js finds this box again after a repaint, to put the SAME player
   // element back over the SAME poster
   if (row.kind === 'video') box.dataset.mediaId = String(row.id ?? '');
-  // A clip whose real dimensions we know gets a box with THAT ratio, so the
-  // poster <img> and the player <video> occupy exactly the same pixels and
-  // swapping one for the other cannot move the transcript.
-  if (row.kind === 'video' && Number(row.w) > 0 && Number(row.h) > 0) {
-    box.classList?.add?.('has-ar');
-    box.style?.setProperty?.('--ar', `${row.w} / ${row.h}`);
-  }
   box.append(pic);
   if (row.kind === 'video') {
     // A BUTTON whenever this device holds the bytes: the badge plays the clip IN

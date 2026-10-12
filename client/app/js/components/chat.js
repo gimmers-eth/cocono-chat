@@ -752,6 +752,7 @@ export function createChat({ client, onHomeRefresh }) {
     for (const row of mediaById.values()) {
       if (!row || row.kind !== 'video' || row.state !== 'stored') continue;
       if (row.thumb?.size || !hasLocalBytes(row) || posterAsked.has(row.id)) continue;
+      if (inlineEl) continue;      // never repaint under a clip that is playing
       posterAsked.add(row.id);
       buildPoster(row)
         .then((thumb) => { if (thumb) render().catch(() => {}); })
@@ -889,7 +890,9 @@ export function createChat({ client, onHomeRefresh }) {
     if (!list) return;
     const box = [...list.querySelectorAll('.media-shot')].find((b) => b.dataset?.mediaId === inlineId);
     if (!box) { dropInlinePlayer(); return; }    // its message is not on screen any more
-    box.append(inlineEl);
+    // Only when it actually moved: re-parenting a media element for no reason is
+    // a reload on WebKit, and a reload mid-clip is the flicker that was reported.
+    if (inlineEl.parentNode !== box) box.append(inlineEl);
     try { if (inlineAt) inlineEl.currentTime = inlineAt; } catch { /* not seekable yet */ }
     const badge = box.querySelector?.('.media-play-badge');
     if (badge) paintPlayBadge(badge, inlineWanted);
@@ -1035,6 +1038,26 @@ export function createChat({ client, onHomeRefresh }) {
     // (plan §6.4) and the peer keeps theirs — but leaving megabytes behind
     // after a user deletes their own message would make "Deleted" a lie.
     const rec = await getMessage(msgId);
+    // An attachment is not a line of text: deleting it drops bytes this device
+    // cannot fetch again once the server's copy is gone (every device acked, or
+    // the retention sweep ran). That deserves a question, not one tap next to a
+    // button the user was aiming at for something else.
+    if (rec?.mediaId) {
+      const row = await getMedia(rec.mediaId);
+      const what = row?.kind === 'video' ? 'video' : row?.kind === 'file' ? 'file' : 'photo';
+      const ok = await confirmModal({
+        title: `Delete this ${what}?`,
+        body: `The message and the ${what === 'file' ? 'file' : what === 'video' ? 'video' : 'photo'} bytes go from this device. `
+          + (rec.dir === 'out'
+            ? 'The person you sent it to keeps their copy.'
+            : 'The sender keeps their copy.'),
+        warning: hasLocalBytes(row) && !row?.blobId
+          ? 'This device holds the only copy you can still reach — once it is gone it cannot be downloaded again.'
+          : '',
+        okLabel: 'Delete', danger: true,
+      });
+      if (!ok) return;
+    }
     if (rec?.mediaId) await deleteMedia(rec.mediaId);
     await deleteMessage(msgId);
     closeMsgModal();

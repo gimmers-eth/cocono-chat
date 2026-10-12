@@ -212,3 +212,34 @@ test('media: the SDK surface the app calls exists and is exported', async (t) =>
     assert.match(cryptoSrc, new RegExp(`export async function ${name}\\b`));
   }
 });
+
+test('media: the confirm dialog sits ABOVE the modal that summoned it', () => {
+  // Delete is pressed from inside the message modal. At an equal z-index the
+  // LATER element in the document wins, and #confirm-modal is earlier than
+  // #msg-modal — so the question would paint underneath the dialog that asked it,
+  // which is indistinguishable from a dead button.
+  const css = read('css/base.css');
+  const z = (sel) => Number(css.match(new RegExp(`${sel} \\{[^}]*z-index: (\\d+)`))?.[1] ?? 0);
+  const confirmZ = Math.min(z('#confirm-overlay'), z('#confirm-modal'));
+  assert.ok(confirmZ > 0, 'the confirm pair has an explicit z-index');
+  const msgZ = Number(css.match(/\.side-menu \{[^}]*z-index: (\d+)/)?.[1] ?? 0);
+  assert.ok(confirmZ > msgZ, `confirm (${confirmZ}) must be above the message sheet (${msgZ})`);
+  const lightbox = Number(css.match(/\.lightbox-overlay \{[^}]*z-index: (\d+)/)?.[1] ?? 0);
+  assert.ok(confirmZ < lightbox, 'and still below the lightbox, which is a full-screen takeover');
+});
+
+test('media: deleting an attachment asks first, and the markup has no duplicate ids', () => {
+  const chat = read('js/components/chat.js');
+  const del = chat.match(/async function deleteCurrentMsg\(\) \{[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(del, /await confirmModal\(/, 'a media delete is a question, not one tap');
+  assert.match(del, /if \(!ok\) return;/, 'and "no" means nothing happens');
+  assert.match(del, /Delete this \$\{what\}\?/, 'the question names what is about to go');
+
+  // a duplicate id is dead markup that every lookup silently ignores: there were
+  // two #msg-overlay elements, so half the CSS/DOM assumptions about "the" overlay
+  // were about the other one
+  const html = read('index.html');
+  const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]);
+  const dupes = ids.filter((id, i) => ids.indexOf(id) !== i);
+  assert.deepEqual([...new Set(dupes)], [], `index.html must not repeat an id (found: ${[...new Set(dupes)].join(', ')})`);
+});
