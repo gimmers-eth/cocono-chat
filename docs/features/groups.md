@@ -144,8 +144,15 @@ its card tints a step darker (between open-rooms and the sidebar) and the
 star glyphs of the surviving rows go invisible. Mobile got the real
 carousel: the DM pane's chat-open ORDER was fixed (body class first, THEN
 the animation — a slide started while display:none is eaten invisibly, the
-actual reason no animation was visible) and closes now slide back OUT to
-the right; a blocked sender's message example sits in Mortensen → general
+actual reason no animation was visible). MOBILE IS NOW A REAL CAROUSEL:
+list and pane are laid out TOGETHER (no display swap anywhere — that can
+never animate), the pane RIDES IN from the left on a transform transition
+and RIDES OUT to the right when closed (chat.js closeChatPane / groups.js
+closeRoom choreograph the body classes; the .no-slide snap makes the
+off-stage reset invisible); message options (the bubble modal AND the
+chat-options menu) now animate closed like the settings menu
+(animateSheetClose + reopen flags); the 'Mock data' strip is gone from the
+room UI. A blocked sender's message example sits in Mortensen → general
 (red italic, delivered). Read-only rooms carry NO padlock: their name shows inside
 (#italic-parens) in the list and the room header spells "#name (read only)".
 The chats/groups SIDEBAR TABS wear unread BADGES — the chats tab counts

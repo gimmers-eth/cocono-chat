@@ -1261,6 +1261,12 @@ export function createChat({ client, onHomeRefresh }) {
   // --- message modal (tap a bubble): readable scrollable text + fixed actions ---
 
   let msgId = null; // message currently shown in the modal
+  // MESSAGE OPTIONS (the bubble modal + the chat-options menu) now animate
+  // CLOSED like the settings menu: an open FLAG drives the state, and
+  // animateSheetClose defers the hidden paint (reopenCheck aborts it if the
+  // sheet was re-opened mid-ride)
+  let msgSheetOpen = false;
+  let optsSheetOpen = false;
   // the viewer's teardown (revokes the full-size Blob URLs). Kept here because
   // closeMsgModal — not the media module — is what the Escape chain, the scrim
   // tap, the chat close and a re-open all funnel through.
@@ -1310,12 +1316,13 @@ export function createChat({ client, onHomeRefresh }) {
     $('btn-msg-copy').hidden = !!row;
     $('btn-msg-fwd').disabled = false;
     $('msg-overlay').hidden = false;
+    msgSheetOpen = true;
     $('msg-modal').hidden = false;
     $('btn-msg-close').focus?.();
   }
 
   function msgModalOpen() {
-    return !$('msg-modal').hidden;
+    return msgSheetOpen; // FLAG, not .hidden: the flag is false while the
   }
 
   function closeMsgModal() {
@@ -1326,8 +1333,8 @@ export function createChat({ client, onHomeRefresh }) {
     msgId = null;
     forwardId = null;
     $('msg-panes').classList.remove('showing-fwd'); // always reopen on pane A
-    $('msg-overlay').hidden = true;
-    $('msg-modal').hidden = true;
+    msgSheetOpen = false;
+    animateSheetClose($('msg-modal'), $('msg-overlay'), { reopenCheck: () => msgSheetOpen });
   }
 
   async function copyMessageText() {
@@ -1835,6 +1842,9 @@ export function createChat({ client, onHomeRefresh }) {
     });
     $('chatopts-menu-view').hidden = false;
     $('chatopts-identity-view').hidden = true;
+    $('chatopts-modal').classList.remove('closing');
+    $('chatopts-overlay').classList.remove('closing');
+    optsSheetOpen = true;
     $('chatopts-overlay').hidden = false;
     $('chatopts-modal').hidden = false;
     setMenuBtnOpen(true);
@@ -2392,13 +2402,13 @@ export function createChat({ client, onHomeRefresh }) {
   }
 
   function closeChatOpts() {
-    $('chatopts-overlay').hidden = true;
-    $('chatopts-modal').hidden = true;
+    optsSheetOpen = false;
     setMenuBtnOpen(false);
+    animateSheetClose($('chatopts-modal'), $('chatopts-overlay'), { reopenCheck: () => optsSheetOpen });
   }
 
   function toggleChatOpts() {
-    if ($('chatopts-modal').hidden) openChatOpts();
+    if (!optsSheetOpen) openChatOpts();
     else closeChatOpts();
   }
 
@@ -2840,12 +2850,18 @@ export function createChat({ client, onHomeRefresh }) {
       // animate the (possibly already visible — chat SWITCH) pane entering.
       // class + forced reflow restarts it every time; display-toggling alone
       // would not fire when switching A -> B with the pane staying shown.
-      // ORDER MATTERS (mobile carousel): setChatOpen first — phones keep
-      // .chat-pane display:none until the class lands, and an animation
-      // started while display:none is consumed invisibly (that was the
-      // "no slide on mobile" report). The class, THEN the enter hop.
+      // Mobile: chat-open is now a TRANSFORM target (the pane rides in on
+      // the carousel transition — pure CSS). A ride still in flight from a
+      // just-closed chat is cancelled transition-free so the new pane lands
+      // at rest instead of dragging the old ride's +100% transform.
+      // THE CAROUSEL ENTRY: chat-open is a TRANSFORM target on mobile, so
+      // the class alone rides the pane in from the left (pure CSS
+      // transition, no timing traps); a ride still in flight from a
+      // just-closed chat is cancelled transition-free. Desktop keeps its
+      // class-driven hop — and BOTH need the class set.
       setChatOpen(true);
-      playChatEnter();
+      if (window.matchMedia?.('(max-width: 899px)').matches) cancelRide();
+      else playChatEnter();
       const last = await render();
       // history = a real conversation existed at open: something received,
       // or something sent that the server accepted (sent/delivered). A
@@ -2914,6 +2930,18 @@ export function createChat({ client, onHomeRefresh }) {
     input.placeholder = enabled ? 'Type a message' : `${currentPeer ?? 'This user'} no longer exists`;
   }
 
+  // Cancel an in-flight carousel ride: drop the +100% transform with the
+  // transition disabled so the pane lands at rest instead of swinging back
+  // across the screen when the new chat-open class moves its target to 0.
+  function cancelRide() {
+    const b = document.body;
+    if (!b.classList.contains('chat-sliding-out')) return;
+    b.classList.add('no-slide');
+    b.classList.remove('chat-sliding-out');
+    void b.offsetWidth;
+    b.classList.remove('no-slide');
+  }
+
   const paneClosing = () => $('chat-view').classList.contains('closing');
   function closeChatPane() {
     saveDraft(); // before the peer is forgotten — the draft outlives the pane
@@ -2931,6 +2959,8 @@ export function createChat({ client, onHomeRefresh }) {
     closeChatOpts();
     closeForward();
     const view = $('chat-view');
+    const b = document.body;
+    const anim = window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches;
     const finish = () => {
       view.classList.remove('closing');
       // never stomp a chat opened while the slide-out was still running
@@ -2942,7 +2972,28 @@ export function createChat({ client, onHomeRefresh }) {
       // and the chat pane visibly snapped narrower — the desktop "flicker"
       $('chat-empty').hidden = false;
     };
-    if (window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches && !view.hidden) {
+    if (anim && window.matchMedia?.('(max-width: 899px)').matches && !view.hidden) {
+      // MOBILE CAROUSEL EXIT: the pane RIDES OUT to the right (the CSS
+      // transform transition does the motion while chat-open is still on).
+      // When the ride settles, chat-open drops and the sliding-out class is
+      // removed under .no-slide — the off-stage LEFT position snaps back
+      // with zero transition, so the pane never swings across the screen.
+      b.classList.add('chat-sliding-out');
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        b.classList.add('no-slide');
+        if (!currentPeer) setChatOpen(false);
+        b.classList.remove('chat-sliding-out');
+        void b.offsetWidth; // commit the transition-free reset
+        b.classList.remove('no-slide');
+        if (currentPeer) return;
+        view.hidden = true;
+        $('chat-empty').hidden = false;
+      };
+      setTimeout(done, 320); // the .28s ride + slack; tab stalls land the same
+    } else if (anim && !view.hidden) {
       let settled = false;
       const done = () => { if (!settled) { settled = true; finish(); } };
       view.addEventListener('animationend', done, { once: true });
@@ -3126,7 +3177,7 @@ export function createChat({ client, onHomeRefresh }) {
       if (!$('premium-modal')?.hidden) { closeBadgeModal(); return; }
       if (!$('profile-modal')?.hidden) { closeProfileView(); return; }
       if (msgModalOpen()) { closeMsgModal(); return; }
-      if (!$('chatopts-modal').hidden) { closeChatOpts(); return; }
+      if (optsSheetOpen) { closeChatOpts(); return; }
       if (document.body.classList.contains('chat-open')) closeChatPane();
     });
 

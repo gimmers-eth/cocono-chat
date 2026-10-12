@@ -450,10 +450,9 @@ function buildGroupView(client) {
     renderGroups(); // the sidebar row mirrors it
   });
   // (the speaker joins the ROOM TAG STRIP below — the DM head's layout)
-  const msg = document.createElement('p');
-  msg.className = 'group-head-note muted small';
-  msg.textContent = 'Mock data — the room list, roles and messages are fixtures (docs/features/groups.md, P1).';
-  view.append(head, msg);
+  // (no 'Mock data' strip: it was noise over the UI under review — the
+  // fixtures are documented here and in docs/features/groups.md)
+  view.append(head);
 
   // EVERY GROUP CHAT CARRIES ITS TAGS (P1 review): the DM tag strip's own
   // skin (.chat-tagbar/.tag-btn) under the header — tapping toggles the
@@ -575,14 +574,42 @@ function openRoom(g, r) {
   msgHost.hidden = false;
   tabPanel.hidden = true;
   view.hidden = false;
-  document.body.classList.add('group-open');
-  playEnter(view); // the chat pane's slide in/out, settings-matched pacing
+  const b = document.body;
+  b.classList.add('group-open');
+  if (b.classList.contains('chat-sliding-out')) {
+    // a DM ride still in flight: land the pane at rest, transition-free —
+    // the room is simply THERE (the entry glide is from off-stage only)
+    b.classList.add('no-slide');
+    b.classList.remove('chat-sliding-out');
+    void b.offsetWidth;
+    b.classList.remove('no-slide');
+  } else {
+    playEnter(view); // desktop keeps the class-driven hop; mobile rides via CSS
+  }
   bubble(r.msgs ?? []);
 }
 
 function closeRoom() {
   activeCtx = null;
   paintRoomTags(); // hides the room's tag strip with the room
+  // MOBILE CAROUSEL EXIT: ride the pane OUT to the right (the same
+  // chat-sliding-out ride chat.js runs), then the transition-free reset
+  if (!reducedMotion() && window.matchMedia?.('(max-width: 899px)').matches && !view.hidden) {
+    const b = document.body;
+    b.classList.add('chat-sliding-out');
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      b.classList.add('no-slide');
+      b.classList.remove('group-open', 'chat-sliding-out');
+      void b.offsetWidth;
+      b.classList.remove('no-slide');
+      view.hidden = true;
+    };
+    setTimeout(done, 320);
+    return;
+  }
   if (reducedMotion() || view.hidden) {
     view.hidden = true;
     document.body.classList.remove('group-open');

@@ -917,9 +917,39 @@ span.avatar.chat-avatar { display: inline-grid; place-items: center; font-size: 
 /* ---------- mobile: one pane at a time ---------- */
 
 @media (max-width: 899px) {
-  .chat-pane { display: none; }
-  body.chat-open .sidebar { display: none; }
-  body.chat-open .chat-pane { display: flex; }
+  /* TWO-PANEL CAROUSEL: the sidebar and the chat/room pane are full-width
+     panels; the pane RIDES IN from the left and OUT to the right on a
+     transform transition over the (never hidden) list. The old
+     display:none<->flex swap is what killed every previous attempt to
+     animate this: a display change cannot transition, and a slide started
+     under display:none is consumed invisibly. The JS (chat.js
+     closeChatPane / groups.js closeRoom) holds .chat-sliding-out through
+     the exit ride, then drops the body classes with .no-slide so the
+     off-stage reset never swings back across the screen. */
+  #view-app { position: relative; }
+  .chat-pane {
+    position: absolute; inset: 0; z-index: 6; display: flex;
+    transform: translateX(-100%); visibility: hidden;
+  }
+  body.chat-open .chat-pane, body.group-open .chat-pane {
+    transform: none; visibility: visible;
+  }
+  body.chat-sliding-out .chat-pane { transform: translateX(100%); visibility: visible; }
+  @media (prefers-reduced-motion: no-preference) {
+    .chat-pane, body.chat-sliding-out .chat-pane {
+      transition: transform .28s cubic-bezier(.4, 0, .85, .35), visibility 0s linear .28s;
+    }
+    body.chat-open .chat-pane, body.group-open .chat-pane {
+      transition: transform .28s cubic-bezier(.22, .9, .3, 1), visibility 0s;
+    }
+    body.chat-sliding-out .chat-pane { transition: transform .28s cubic-bezier(.4, 0, .85, .35), visibility 0s; }
+  }
+  body.no-slide .chat-pane { transition: none !important; }
+  /* the PANE rides; the per-view keyframe hops are desktop-only chrome */
+  .chat-view.entering, .chat-view.closing,
+  .group-view.entering, .group-view.closing { animation: none; }
+  /* the sidebar list is the UNDERLAY of the ride — never display:none */
+  body.chat-open .sidebar, body.group-open .sidebar { display: flex; }
   .msg { max-width: 82%; }
 }
 
@@ -1891,7 +1921,6 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
    hero's chat button); muted turns it red like #btn-chat-mute */
 .group-head-mute { margin-left: auto; flex: none; color: var(--muted); }
 .group-head-mute.muted-on { color: var(--danger); }
-.group-head-note { flex: none; margin: .35rem .9rem 0; }
 .group-messages { flex: 1; }
 /* sender chip ABOVE the text (req 19): the bubble owns the person line */
 .group-view .msg { max-width: min(78%, 640px); }
@@ -1904,20 +1933,8 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
 .group-composer-input:focus { outline: none; border-color: var(--accent); }
 .group-tabpanel { flex: 1; }
 
-/* mobile: the opened room takes the whole main pane, exactly like a chat */
-@media (max-width: 899px) {
-  body.group-open .sidebar { display: none; }
-  body.group-open .chat-pane { display: flex; }
-  /* THE CAROUSEL (P1 review): on phones chats and rooms are ONE stack that
-     slides — an open comes in FROM THE LEFT (the shared chat-slide-in), a
-     back CLOSES TO THE RIGHT (mirror of the entry, the carousel's reverse).
-     Desktop keeps its left-hop exit untouched. */
-  @keyframes chat-slide-back {
-    from { transform: none; opacity: 1; }
-    to   { transform: translateX(18%); opacity: .55; }
-  }
-  .chat-view.closing, .group-view.closing { animation-name: chat-slide-back; }
-}
+/* mobile: the opened room rides the SAME carousel pane as a chat (the
+   body.group-open rule above) — room view is absolute inside main */
 
 /* P1 review round 3: the COLLAPSED group's room card sits a step DARKER
    than open rooms — halfway between the raised card and the sidebar
