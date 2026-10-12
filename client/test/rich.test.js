@@ -6,6 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   USERNAME_RE, linkHref, splitRich, extractLinks, mentionCandidates,
+  packRich, unpackRich,
 } from '../app/js/rich.js';
 
 test('rich: usernames follow the server rules', () => {
@@ -89,4 +90,26 @@ test('rich: linkHref only ever hands back http(s)', () => {
   assert.equal(linkHref('example.com'), 'https://example.com');
   assert.equal(linkHref('http://x.y'), 'http://x.y');
   assert.equal(linkHref('https://x.y'), 'https://x.y');
+});
+
+test('rich: the men envelope asserts search-picked names to the receiver', () => {
+  const wire = packRich('hi @bob-3 and @zedz!', ['bob-3']);
+  assert.ok(wire.startsWith('{"men":'), 'picked mentions ride a JSON envelope');
+  const back = unpackRich(wire);
+  assert.equal(back.text, 'hi @bob-3 and @zedz!', 'the plain text comes back intact');
+  assert.deepEqual(back.mentions, ['bob-3'], 'ONLY the picked name is asserted');
+  // no picks -> plain wire (old receivers read it untouched)
+  assert.equal(packRich('plain @bob-3 hello', []), 'plain @bob-3 hello');
+  assert.deepEqual(unpackRich('plain text'), { text: 'plain text', mentions: [] });
+  // hostile/corrupt envelopes are REFUSED, never half-believed
+  assert.deepEqual(unpackRich('{"men": ["<script>"], "text": "x"}').mentions, [],
+    'a name that cannot exist is dropped');
+  assert.deepEqual(unpackRich('{"men": ["bob-3"], "text": 5}').mentions, [],
+    'a non-string text is not an envelope at all');
+  assert.deepEqual(unpackRich('{"men": broken').mentions, [], 'unparseable JSON passes through');
+  assert.deepEqual(unpackRich('{"media":{"id":"a"}}').mentions, [], 'media payloads are not envelopes');
+  // dedup + case-fold + cap
+  const many = Array.from({ length: 40 }, (_, i) => `user-${i}`);
+  assert.equal(unpackRich(packRich('x', many)).mentions.length, 20, 'a burst cannot bury the record');
+  assert.deepEqual(unpackRich(packRich('x', ['Bob-3', 'bob-3'])).mentions, ['bob-3']);
 });

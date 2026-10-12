@@ -11,10 +11,33 @@ Related: [../FRIENDS.md](../FRIENDS.md) (the trust ladder a mention renders) ·
 
 ## 1. The wire format
 
-A mention is **plain text**: the composer inserts `"@username "` — an ASCII
-username (server rules, 4–64 chars) glued to a space, normally after a space
-of its own. Nothing else; no markup, no metadata, no new frame kind. The
-receiver re-detects it at render time.
+A hand-typed mention is **plain text**: `"@username "` — an ASCII username
+(server rules, 4–64 chars) glued to a space. Nothing else; the receiver
+detects it at render time and it only becomes a chip for devices that
+already KNOW that name.
+
+**Picked mentions carry metadata.** When the sender SELECTS a user from the
+@-search, the composer marks that name as picked and the send wraps the
+message in an envelope:
+
+```json
+{"men":["bob-3"],"text":"hi @bob-3, see example.com/x"}
+```
+
+`{"men":…,"text":…}` is the same in-plaintext-JSON trick the `{"media":…}
+descriptor uses (and it nests cleanly inside the E2EE envelope — only the two
+parties ever see it). The receiver unwraps it at arrival: the transcript
+stores the plain `text` plus a `men` field of the ASSERTED names, and those
+names render as user chips **even when the receiver has never seen that
+user** — the sender vouched for the name by picking it. The assertion is
+render-only: it can mark a chip purple, it can NEVER fake a trust icon —
+the icon always comes from the receiver's own mirrors (an asserted stranger
+wears the red not-added mark, honestly).
+
+Envelopes are validated on arrival (legal usernames only, deduped, capped
+at 20, unparsable JSON passes through untouched), senders without picks send
+plain text, and media/sys payloads are never wrapped. Forwarding rebuilds
+the envelope from the stored `men` ∩ the names still present in the text.
 
 ## 2. One parser: `js/rich.js` (pure)
 
@@ -28,10 +51,12 @@ the rules in `client/test/rich.test.js`.
 
 ## 3. Rendering: what a NAME means is the viewer's business
 
-Both sides render a mention through the **single-line user component**
-(`components/userline.js` mountLine): trust icon + name + worn badge — with
-the trust state resolved from **this device's** mirrors. The sender sees
-their ladder for that user, the receiver sees theirs. Consequences:
+A recognized mention renders as a **chip** (the `.badge-chip` skin) in brand
+purple — a purple name is a PERSON, not prose — holding the single-line
+component (`components/userline.js` mountLine): trust icon + name + worn
+badge, with the trust state resolved from **this device's** mirrors. The
+`@` sigil is parsing furniture: it lives in the wire text, never in the
+display. Consequences:
 
 * A user you have NOT added renders as a mention only for the people who
   HAVE added them (the receiver's known-users match) — you see plain text.
@@ -58,10 +83,13 @@ the highlight; Escape (or caret leaving the token) closes.
 
 ## 5. The composer box
 
-`#chat-input` is a **textarea**: one line at rest, auto-grows with the typed
-text up to **5 lines**, then scrolls (`autosizeComposer` measures the
-element's own line-height — the cap lives in one place). Enter sends,
-Shift+Enter is a newline (the mention popup owns Enter while it is open).
+`#chat-input` is a **textarea**: one line at rest (a pill, matching the foot
+bar), auto-grows with the typed text up to **5 lines**, then scrolls. While
+multi-line the sides go STRAIGHT and only the corners round (the `.multiline`
+class — a pill radius on a tall box bows the whole edge). `autosizeComposer`
+measures the element's own line-height — the cap lives in one place.
+Enter sends, Shift+Enter is a newline (the mention popup owns Enter while it
+is open).
 
 ## 6. The Links tab
 

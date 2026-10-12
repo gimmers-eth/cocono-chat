@@ -33,7 +33,7 @@ import {
 // Pure @-mention + link parsing (tokenizer, TLD rules, 3-slot search order)
 // lives in rich.js so the painter, the composer popup and the Links tab share
 // ONE definition of what a mention / a link is.
-import { splitRich, mentionCandidates } from '../rich.js';
+import { splitRich, mentionCandidates, packRich, unpackRich } from '../rich.js';
 // M4 media: prep/policy/lifecycle in ../media.js, painting in the two
 // components beside this file. chat.js stays the ORCHESTRATOR — it owns
 // render(), the composer and the modal lifecycle; media owns what media looks
@@ -310,8 +310,12 @@ export function createChat({ client, onHomeRefresh }) {
       // sentence. The transcript stores a human LABEL (never raw JSON — the
       // sidebar, a notification and a report transcript all read that field),
       // and the descriptor itself goes into the media row.
-      const media = parseMediaPayload(m.text);
-      const displayText = media ? mediaLabel(media.kind, media.name) : m.text;
+      // MENTIONS FIRST: a {"men":…,"text":…} envelope is what the sender's
+      // @-SEARCH asserts — those names are users for the RECEIVER too, even
+      // names the receiver has never seen (rich.js unpackRich).
+      const rich = unpackRich(m.text);
+      const media = parseMediaPayload(rich.text);
+      const displayText = media ? mediaLabel(media.kind, media.name) : rich.text;
       await saveMessage({
         id: `in:${m.mid}`,
         peer: m.peer,
@@ -320,6 +324,7 @@ export function createChat({ client, onHomeRefresh }) {
         ts: m.ts,
         fromDeviceId: m.fromDeviceId,
         ...(media ? { kind: media.kind, mediaId: media.id } : {}),
+        ...(media || !rich.mentions.length ? {} : { men: rich.mentions }),
       });
       if (media) await adoptIncomingMedia(`in:${m.mid}`, m.peer, 'in', media, m.ts);
       // prime profile for new/unknown peers, but only when our cache is
@@ -382,7 +387,11 @@ export function createChat({ client, onHomeRefresh }) {
         await saveMessage({ id, peer, dir: 'out', text: mediaLabel(m.media.kind, m.media.name), ts, state: 'synced', kind: m.media.kind, mediaId: m.media.id });
         await adoptIncomingMedia(id, peer, 'out', m.media, ts);
       } else {
-        await saveMessage({ id, peer, dir: 'out', text: m.text, ts, state: 'synced' });
+        // the sender's OWN device sent this draft — the {"men":…} envelope
+        // rides the wire text here too; the transcript keeps the plain text
+        // and the asserted names next to it
+        const rich = unpackRich(m.text);
+        await saveMessage({ id, peer, dir: 'out', text: rich.text, ts, state: 'synced', ...(rich.mentions.length ? { men: rich.mentions } : {}) });
       }
       // Our OWN send, mirrored from another device: it reorders the sidebar
       // like any last message but must never raise an unread dot here —
@@ -459,9 +468,12 @@ export function createChat({ client, onHomeRefresh }) {
     input.value = '';
     hideMentionPop();
     autosizeComposer(); // the box drops back to one line with the text
+    // METADATA: only names PICKED from the @-search assert "this is a
+    // user" to the receiver (packRich); hand-typed "@words" ride plain.
+    const men = assertPickedMentions(text);
     try {
-      const { localId } = await client.sendMessage(currentPeer, text);
-      await saveMessage({ id: `out:${localId}`, peer: currentPeer, dir: 'out', text, ts: Date.now(), state: 'sending' });
+      const { localId } = await client.sendMessage(currentPeer, packRich(text, men));
+      await saveMessage({ id: `out:${localId}`, peer: currentPeer, dir: 'out', text, ts: Date.now(), state: 'sending', ...(men.length ? { men } : {}) });
       // Replying is proof of engagement: whatever of this peer's messages is
       // on screen counts as seen now.
       markRead(currentPeer, Date.now());
@@ -470,7 +482,9 @@ export function createChat({ client, onHomeRefresh }) {
       // Multi-message sessions: keep typing — re-claim focus (belt and
       // braces for the send button, which must not steal it; see wire()).
       input.focus({ preventScroll: true });
+      pickedMentions.clear(); // asserted for THAT message only
     } catch (err) {
+      pickedMentions.clear(); // the draft died with the send
       // Peer account died between opening the chat and sending: learn the
       // gone fact right here so the sidebar + strip flip to deleted-state.
       if (err?.code === 'unknown_account' || err?.status === 404) {
@@ -483,6 +497,20 @@ export function createChat({ client, onHomeRefresh }) {
         ? 'Offline — messages cannot be sent yet. They stay unsent until you reconnect.'
         : humanError(err), 'error');
     }
+  }
+
+  // Names the composer PICKED from the @-search this draft. On send they
+  // are filtered to tokens still present in the text (edits can delete or
+  // mangle them) — that surviving set is what packRich asserts to the
+  // receiver. Cleared with the draft.
+  const pickedMentions = new Set();
+
+  function assertPickedMentions(text) {
+    if (!pickedMentions.size) return [];
+    const tokens = new Set(
+      splitRich(text, () => true).filter((s) => s.kind === 'mention').map((s) => s.name),
+    );
+    return [...pickedMentions].filter((ul) => tokens.has(ul));
   }
 
   // ---- composer: 5-line auto-grow + @-mention search ----
@@ -499,13 +527,27 @@ export function createChat({ client, onHomeRefresh }) {
       + (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
   }
 
+  // The height of the field at EXACTLY one line — the pill/multiline switch.
+  function composerLinePx(el) {
+    const cs = getComputedStyle(el);
+    const lh = parseFloat(cs.lineHeight) || (parseFloat(cs.fontSize) * 1.4);
+    return Math.ceil(lh)
+      + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom)
+      + (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+  }
+
   function autosizeComposer() {
     const el = $('chat-input');
     if (!el || el.tagName !== 'TEXTAREA') return;
     el.style.height = 'auto';
     const max = composerMaxPx(el);
-    el.style.height = `${Math.min(el.scrollHeight, max)}px`;
+    const h = Math.min(el.scrollHeight, max);
+    el.style.height = `${h}px`;
     el.style.overflowY = el.scrollHeight > max ? 'auto' : 'hidden';
+    // ONE line is a pill (the foot-bar rhythm); more than one STRAIGHTENS
+    // the sides and only rounds the corners — a 999px radius on a tall box
+    // bows the entire left/right edge, which is not a corner, that's a lens
+    el.classList.toggle('multiline', h > composerLinePx(el) + 1);
   }
 
   // The @-search: typing "@" (at a word boundary) opens a composer popover
@@ -593,6 +635,7 @@ export function createChat({ client, onHomeRefresh }) {
     el.value = el.value.slice(0, mentionState.start) + ins + el.value.slice(pos);
     const caret = mentionState.start + ins.length;
     el.setSelectionRange(caret, caret);
+    pickedMentions.add(ul); // PICKED from search — this name asserts a user
     hideMentionPop();
     autosizeComposer();
     el.focus({ preventScroll: true });
@@ -793,9 +836,10 @@ export function createChat({ client, onHomeRefresh }) {
     };
   }
 
-  function knownUser(ul, ctx) {
-    return ctx.friends.has(ul) || ul === ctx.self || (ctx.peer && ul === ctx.peer);
+  function knownUser(ul, ctx, asserted = EMPTY_MEN) {
+    return ctx.friends.has(ul) || ul === ctx.self || (ctx.peer && ul === ctx.peer) || asserted.has(ul);
   }
+  const EMPTY_MEN = new Set();
 
   // The single-line user component's options for a mention — same ladder
   // inputs as the forward list (fwdLineOpts), resolved per name.
@@ -815,9 +859,9 @@ export function createChat({ client, onHomeRefresh }) {
    *  modal reuses one element): plain runs, clickable <a> links (bare
    *  hosts gain https:// — rich.js), and clickable single-line components
    *  for @mentions of users THIS device knows. */
-  function appendRichText(host, text, ctx) {
+  function appendRichText(host, text, ctx, asserted = EMPTY_MEN) {
     const nodes = [];
-    for (const seg of splitRich(text, (ul) => knownUser(ul, ctx))) {
+    for (const seg of splitRich(text, (ul) => knownUser(ul, ctx, asserted))) {
       if (seg.kind === 'link') {
         const a = document.createElement('a');
         a.className = 'msg-link';
@@ -928,8 +972,9 @@ export function createChat({ client, onHomeRefresh }) {
         }));
       } else {
         // @-mentions + links become live components (people the VIEWER
-        // knows, clickable sites) — plain text stays plain
-        appendRichText(body, m.text, richCtx);
+        // knows, plus the names this message ASSERTS — m.men, picked from
+        // the sender's search) — plain text stays plain
+        appendRichText(body, m.text, richCtx, new Set(m.men ?? []));
       }
       const meta = document.createElement('span');
       meta.className = 'meta';
@@ -1183,7 +1228,7 @@ export function createChat({ client, onHomeRefresh }) {
     } else {
       textEl.hidden = false;
       // the modal's text is a chat surface too: mentions + links paint
-      appendRichText(textEl, rec.text, await buildRichCtx());
+      appendRichText(textEl, rec.text, await buildRichCtx(), new Set(rec.men ?? []));
       textEl.scrollTop = 0;
       if (pane) { pane.hidden = true; pane.replaceChildren(); }
     }
@@ -2475,8 +2520,12 @@ export function createChat({ client, onHomeRefresh }) {
       return;
     }
     try {
-      const { localId } = await client.sendMessage(target, rec.text);
-      await saveMessage({ id: `out:${localId}`, peer: target, dir: 'out', text: rec.text, ts: Date.now(), state: 'sending' });
+      // forwarding a mention-bearing message re-asserts its PICKED names
+      // (the envelope rebuilds; the transcript row keeps the plain text)
+      const men = (rec.men ?? []).filter((ul) => splitRich(rec.text, () => true)
+        .some((s) => s.kind === 'mention' && s.name === ul));
+      const { localId } = await client.sendMessage(target, packRich(rec.text, men));
+      await saveMessage({ id: `out:${localId}`, peer: target, dir: 'out', text: rec.text, ts: Date.now(), state: 'sending', ...(men.length ? { men } : {}) });
       closeForward();
       toast(`Forwarded to ${target}`);
       onHomeRefresh?.();
@@ -2762,6 +2811,7 @@ export function createChat({ client, onHomeRefresh }) {
       // header pinned) only runs for a tap-earned focus. Desktop keeps it.
       if (!peerGone && matchMedia('(pointer: fine)').matches) $('chat-input').focus();
       hideMentionPop(); // a popup from the previous chat must not survive
+      pickedMentions.clear(); // nor a half-typed draft's picked names
       autosizeComposer(); // (pane is visible now — heights can be measured)
     } catch (err) {
       setStatus(status, humanError(err), true);
@@ -2790,6 +2840,7 @@ export function createChat({ client, onHomeRefresh }) {
     // pane: sound with nothing on screen is the app behaving badly
     stopInlinePlay();
     hideMentionPop();
+    pickedMentions.clear();
     closeProfileView();
     setChatOpen(false);
     closeMsgModal();

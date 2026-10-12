@@ -134,6 +134,37 @@ export function extractLinks(text) {
 }
 
 /**
+ * The MENTION METADATA envelope. When the sender PICKS a name from the
+ * @-search the composer knows it is a person — the receiver may not have
+ * that user on ANY list of its own, so the assertion rides with the
+ * message: {"men":["<ul>",…],"text":"…"} (the same in-plaintext-json trick
+ * the {"media":…} descriptor uses — E2EE means only the two parties ever
+ * see it anyway). Hand-typed "@words" never get an envelope: they only
+ * render as chips where the VIEWER already knows the name.
+ */
+export function packRich(text, mentions = []) {
+  const men = [...new Set((mentions ?? []).map((m) => String(m).toLowerCase()).filter((u) => USERNAME_RE.test(u)))];
+  if (!men.length) return String(text ?? '');
+  return JSON.stringify({ men, text: String(text ?? '') });
+}
+
+/** Unwrap one message text: -> { text, mentions }. Anything that is not a
+ *  valid envelope comes back untouched (mentions: []) — old senders, media
+ *  payloads, sys JSON and literal '{"men":' prose all pass through. */
+export function unpackRich(text) {
+  const s = String(text ?? '');
+  if (!s.startsWith('{"men":')) return { text: s, mentions: [] };
+  try {
+    const j = JSON.parse(s);
+    if (typeof j?.text !== 'string') return { text: s, mentions: [] };
+    const men = [...new Set((Array.isArray(j.men) ? j.men : [])
+      .map((u) => String(u).toLowerCase())
+      .filter((u) => USERNAME_RE.test(u)))].slice(0, 20);
+    return { text: j.text, mentions: men };
+  } catch { return { text: s, mentions: [] }; }
+}
+
+/**
  * The @-search roster, in SPEC order: the chat's own people FIRST (the peer
  * you are typing to is who @ almost always means), then the other known
  * users alphabetically. Substring match on the typed query, HARD CAP 3 —

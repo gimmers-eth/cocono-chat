@@ -908,6 +908,9 @@ span.avatar.chat-avatar { display: inline-grid; place-items: center; font-size: 
   box-sizing: border-box;
 }
 .composer textarea#chat-input:focus { outline: none; border-color: var(--accent); }
+/* grown past one line: STRAIGHT sides, rounded corners (chat.js toggles
+   .multiline) — a pill radius on a 5-line box bows the whole edge */
+.composer textarea#chat-input.multiline { border-radius: 16px; }
 
 /* ---------- mobile: one pane at a time ---------- */
 
@@ -1714,16 +1717,18 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
 .msg.out .msg-link { color: var(--bubble-text); }
 .msg-mention {
   /* THE chip: the same skin as .badge-chip (raised panel + hairline
-     border, 999px), holding the single-line user component (trust icon +
-     name + worn badge). No '@' sigil — that is parsing furniture, not
-     display — and the text colour stays the bubble's own. */
+     border), holding the single-line user component (trust icon +
+     name + worn badge) in BRAND PURPLE — a chip-coloured name is a
+     PERSON, not prose; the colour survives even where the viewer has
+     no trust record (an ASSERTED mention shows the stranger icon inside
+     the purple chip). No '@' sigil — that is parsing furniture. */
   display: inline-flex; align-items: center;
   padding: .1rem .55rem;
   background: var(--panel-raised); border: 1px solid var(--border);
-  color: inherit; font: inherit; font-size: .85rem; cursor: pointer;
+  color: var(--accent); font: inherit; font-size: .85rem; cursor: pointer;
   vertical-align: baseline; border-radius: 999px;
 }
-.msg-mention .uname { font-size: inherit; }
+.msg-mention .uname { font-size: inherit; color: inherit; }
 .msg-mention:hover { border-color: var(--accent); }
 .msg-mention:hover .uname-text { text-decoration: underline; text-underline-offset: 2px; }
 
