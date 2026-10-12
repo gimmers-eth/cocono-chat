@@ -827,6 +827,12 @@ export function createChat({ client, onHomeRefresh }) {
   // mention of a user the recipient added still renders as a user
   // component FOR them, while the sender (who added nobody) sees text.
   async function buildRichCtx() {
+    // OWN badge facts drive SELF chips. The boot wiring can run BEFORE the
+    // session is live (a phone restoring straight into the app logged in
+    // later), so a paint that finds NO facts on a LIVE session loads them
+    // lazily — loadSelfFacts repaints the moment identity lands. (Mobile
+    // symptom this kills: my own name parsing without my badge, forever.)
+    if (!selfFacts && client.token) loadSelfFacts();
     const [friends, chips, premiums, mods, pins] = await Promise.all([
       loadFriends(), loadPeerChips(), loadPeerPremiums(), loadPeerModeration(), loadPins(),
     ]);
@@ -851,14 +857,18 @@ export function createChat({ client, onHomeRefresh }) {
   // identity() once per session, refreshed when the worn badge changes
   // ('cocono:badges-changed' — the wear button and the badge poll fire it).
   let selfFacts = null; // { display, premium }
+  let selfFactsLoading = false; // in-flight guard: paints never stack calls
   async function loadSelfFacts() {
+    if (selfFactsLoading) return;
+    selfFactsLoading = true;
     try {
       const me = await client.identity();
       selfFacts = { display: me?.displayBadge ?? null, premium: !!me?.premium };
       // late-landing facts must repaint the open chat (a SELF mention that
       // first painted chip-less gets its badge)
       if (currentPeer) render().catch(() => {});
-    } catch { /* offline: mentions of me render without a chip */ }
+    } catch { /* offline / no session yet: stays null, the next paint retries */ }
+    finally { selfFactsLoading = false; }
   }
 
   // The single-line user component's options for a mention — same ladder
@@ -2904,7 +2914,8 @@ export function createChat({ client, onHomeRefresh }) {
     // the conversation tab strip — five icons, one row, under the composer
     buildTabStrip($('chat-tabs'), { onChange: (tab) => setTab(tab).catch(() => {}) });
 
-    // own badge facts for SELF name rendering (mention chips)
+    // own badge facts for SELF name rendering (mention chips) — when the
+    // boot ALREADY has a session; the lazy paint path covers every other
     loadSelfFacts();
     window.addEventListener('cocono:badges-changed', () => loadSelfFacts());
 
