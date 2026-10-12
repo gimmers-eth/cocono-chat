@@ -195,7 +195,7 @@ export function inlinePlayerEl(row) {
 function shot(row, blur, playing = false, videoPreview = false) {
   const pic = previewEl(row, blur, { videoPreview });
   if (!pic) return null;
-  const box = mk('span', 'media-shot');
+  const box = mk('span', `media-shot${playing ? ' is-playing' : ''}`);
   // how chat.js finds this box again after a repaint, to put the SAME player
   // element back over the SAME poster
   if (row.kind === 'video') box.dataset.mediaId = String(row.id ?? '');
@@ -250,6 +250,9 @@ export function paintPlayBadge(badge, playing) {
   try {
     badge.replaceChildren(iconEl(playing ? 'mediaPause' : 'mediaPlay'));
     badge.classList?.toggle?.('is-playing', !!playing);
+    // the BOX carries it too: that is what CSS uses to get the badge out of the
+    // way while the clip plays, and to bring it back on hover
+    badge.parentNode?.classList?.toggle?.('is-playing', !!playing);
     badge.title = playing ? 'Pause this video' : 'Play this video here';
   } catch { /* a badge that cannot repaint is not worth a thrown render */ }
 }

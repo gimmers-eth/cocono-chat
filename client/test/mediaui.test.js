@@ -243,3 +243,36 @@ test('media: deleting an attachment asks first, and the markup has no duplicate 
   const dupes = ids.filter((id, i) => ids.indexOf(id) !== i);
   assert.deepEqual([...new Set(dupes)], [], `index.html must not repeat an id (found: ${[...new Set(dupes)].join(', ')})`);
 });
+
+test('chat: a click in the transcript is not a licence to rebuild it', () => {
+  // `catchUp` is bound to EVERY click on #chat-messages (and to window focus),
+  // and it used to call render() unconditionally — a full rebuild of the list for
+  // a tap that changed nothing. That is the flicker and the scrollbar jump, and
+  // it also tore the inline player out of the DOM on every press of play, because
+  // the badge's own click bubbles to the same listener.
+  const chat = read('js/components/chat.js');
+  const fn = chat.match(/const catchUp = \(\) => \{[\s\S]*?\n    \};/)?.[0] ?? '';
+  assert.ok(fn.length > 0, 'found the catch-up handler');
+  assert.match(fn, /isUnread\(/, 'it asks whether anything is actually unread');
+  const at = fn.indexOf('isUnread(');
+  // searched from the guard onwards: the comment above it names render() too, and
+  // an indexOf over the whole body would "find" the prose
+  const render = fn.indexOf('render()', at);
+  assert.ok(at > -1 && render > at, 'and it only repaints AFTER that answer says yes');
+  assert.match(fn, /markRead\(peer, last\.ts\)/, 'the read stamp is the part it always owes');
+  assert.match(chat, /\$\('chat-messages'\)\.addEventListener\('click', catchUp\)/,
+    'still bound to the transcript click — the guard is what changed, not the wiring');
+});
+
+test('chat: the play badge gets out of the way while the clip plays', () => {
+  const css = read('css/base.css');
+  assert.match(css, /\.media-shot\.is-playing \.media-play-badge \{[^}]*opacity: 0/,
+    'invisible while playing');
+  assert.ok(!/\.media-shot\.is-playing \.media-play-badge \{[^}]*pointer-events: none/.test(css),
+    'but NOT untappable: a touch screen has no hover to bring it back with');
+  assert.match(css, /@media \(hover: hover\) and \(pointer: fine\) \{[\s\S]*?is-playing:hover \.media-play-badge[\s\S]*?opacity: 1/,
+    'and hover devices get it back on hover');
+  const bubble = read('js/components/mediabubble.js');
+  assert.match(bubble, /badge\.parentNode\?\.classList\?\.toggle\?\.\('is-playing'/,
+    'the BOX carries the state, which is what the CSS selector reads');
+});

@@ -951,3 +951,29 @@ test('viewer: the picture is the control — tap the clip to play, tap a photo t
   assert.equal(lightbox.hidden, true, 'and tapping it reveals nothing');
   t();
 });
+
+test('badge: the shot box carries the playing state, and the glyph follows the clip', async () => {
+  await fresh();
+  const mp4 = new Blob([new Uint8Array([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70])], { type: 'video/mp4' });
+  const poster = new Blob(['JPEG'], { type: 'image/jpeg' });
+  const v = { ...row({ id: 'vBadge', kind: 'video' }), state: 'stored', data: mp4, thumb: poster };
+  await store.saveMedia(v);
+  const msg = { dir: 'in', kind: 'video', state: 'delivered' };
+
+  const idle = bubbleNodes(msg, v, {});
+  const box = findClass(idle, 'media-shot');
+  assert.ok(!(box.className || '').includes('is-playing'), 'not playing, badge showing');
+
+  const on = bubbleNodes(msg, v, { playing: true });
+  const onBox = findClass(on, 'media-shot');
+  assert.ok((onBox.className || '').split(/\s+/).includes('is-playing'),
+    'the BOX says playing — that is the selector CSS uses to get the glyph out of the way');
+
+  // and it follows the element, not just the paint: playback that ends on its own
+  // must bring the badge back without waiting for a re-render
+  const badge = findClass(on, 'media-play-badge');
+  bubble.paintPlayBadge(badge, false);
+  assert.ok(!(onBox.className || '').split(/\s+/).includes('is-playing'), 'pause/ended clears it');
+  bubble.paintPlayBadge(badge, true);
+  assert.ok((onBox.className || '').split(/\s+/).includes('is-playing'), 'and play sets it again');
+});

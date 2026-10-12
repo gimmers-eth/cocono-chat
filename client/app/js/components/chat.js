@@ -2832,12 +2832,29 @@ export function createChat({ client, onHomeRefresh }) {
     // Catch up on attention: when the window becomes visible/focused (or the
     // user clicks into the conversation/input) with a chat open, the messages
     // on screen are now seen — clear the dot for THIS peer only.
+    //
+    // It only repaints when there is something TO catch up on. This handler sits
+    // on every click in the transcript and on every window focus, and render()
+    // rebuilds the whole list — every bubble, every poster <img>, every object
+    // URL. Doing that for a tap that changed nothing is a visible flicker, a
+    // scrollbar that jumps as the pictures give up their heights and take them
+    // back, and (worst of all) a clip being played inline torn out of the DOM and
+    // put back together. The read stamp is the only thing this owes anyone, and
+    // it is one localStorage write.
     const catchUp = () => {
       if (!currentPeer || !windowActive()) return;
-      render().then((last) => {
-        markRead(currentPeer, last?.ts ?? Date.now());
-        onHomeRefresh?.();
-      });
+      const peer = currentPeer;
+      messagesWith(peer)
+        .then((msgs) => {
+          // newest by TS, not by store key: the rows come back keyed by id, and
+          // marking read against the wrong 'last' would leave a dot that never
+          // clears (render() sorts for exactly this reason)
+          const last = [...(msgs ?? [])].sort((a, b) => a.ts - b.ts).pop();
+          if (!last || !isUnread(peer, last.ts)) return;   // nothing to catch up on
+          markRead(peer, last.ts);
+          return render().then(() => { onHomeRefresh?.(); });
+        })
+        .catch(() => {});
     };
     document.addEventListener('visibilitychange', catchUp);
     window.addEventListener('focus', catchUp);
