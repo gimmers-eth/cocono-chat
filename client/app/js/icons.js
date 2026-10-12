@@ -110,6 +110,15 @@ export const ICONS = {
   stateSent: 'fa-check',
   stateDelivered: 'fa-check-double',
   stateFailed: 'fa-circle-exclamation', // + .icon-danger
+
+  // GROUPS (docs/features/groups.md — P1 mock)
+  users: 'fa-users',                 // group chats / members
+  crown: 'fa-crown',                 // my role: owner
+  groupAdmin: 'fa-user-shield',      // my role: admin
+  groupMember: 'fa-user',            // my role: member
+  lock: 'fa-lock',                   // read-only room
+  starRegular: 'fa-regular fa-star', // un-starred room
+  tabSearch: 'fa-magnifying-glass',  // sidebar search tab (coming soon)
 };
 
 /** <i> element for an ICONS key (returns plain <i> — callers style/label). */

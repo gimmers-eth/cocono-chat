@@ -1,0 +1,426 @@
+// GROUPS — P1 UI MOCK (docs/features/groups.md). NO store, NO network: one
+// fixed fake dataset renders the sidebar tabs + group/room list + the room
+// chat, so the UI can be reviewed and settled BEFORE the wire format exists
+// (P4 builds the API, P5 swaps FAKE_GROUPS for server data behind these
+// same render functions). Every affordance that needs the API toasts its
+// phase honestly — nothing here pretends to be live.
+//
+// What the mock MUST show (review checklist lives in the doc):
+//   * 3 sidebar tabs above the username search; the sidebar BODY slides
+//     (header + filter bar + version foot never move — reqs 2 & 15);
+//   * group rows with MY role icon (req 18), rooms under them, hide/show
+//     toggle, per-room star (starred rooms survive a collapse — req 13),
+//     read-only locks (req 11);
+//   * a room chat whose messages carry the SENDER as the single-line
+//     component — trust icon + worn badge, viewer-side state (req 19);
+//   * the conversation tab strip (req 16) and a working echo composer.
+
+import { $, toast } from '../ui.js';
+import { iconEl } from '../icons.js';
+import { mountLine } from './userline.js';
+import { PS } from './peername.js';
+import { nameChipEl } from '../badges.js';
+
+// ---------------------------------------------------------------- fixtures
+
+// How fake people render for the VIEWER (req 19): state = this device's
+// ladder position, badge = the chip they wear, gone = deleted account. The
+// mix covers every rung so the icons can be reviewed in one screen.
+const PEOPLE = {
+  sofie: { state: PS.TRUSTED, badge: null },
+  mads: { state: PS.VERIFIED, badge: 'mail' },
+  karl: { state: PS.UNVERIFIED, badge: null, unverified: true },
+  jens: { state: PS.STRANGER, badge: null },
+  marlene: { state: PS.TRUSTED, badge: 'premium' },
+  petter: { state: PS.GONE, badge: null },
+  ida: { state: PS.TRUSTED, badge: 'og' },
+};
+
+// 10 groups (req: names are NOT unique — suffixes are decoration, not keys).
+// role = MY pass level (reqs 6/18). ro = read-only for me (req 11).
+// starred rooms stay visible when the group is collapsed (req 13).
+const FAKE_GROUPS = [
+  {
+    name: 'Mortensen Family', role: 'owner', open: true,
+    rooms: [
+      { name: 'general', starred: true, msgs: [
+        { from: 'sofie', text: 'Sunday dinner at ours? @marlene bring the guitar!', t: '09:12' },
+        { from: 'marlene', text: 'Always. I found a new example.com/jambook to work through.', t: '09:20' },
+        { from: 'mads', text: 'Can I bring the kids? No homework room this weekend.', t: '09:31' },
+      ] },
+      { name: 'weekend-house', unread: 2, msgs: [
+        { from: 'ida', text: 'The roof patch held through the storm. Firewood stacked.', t: '08:02' },
+        { from: 'karl', text: 'Taking the dog up Saturday — anyone around?', t: '08:40' },
+      ] },
+      { name: 'adults-only', ro: true, msgs: [
+        { from: 'sofie', text: 'Gift list for mom’s 70th — kids, you cannot see this room. (This is the pass demo.)', t: 'Yest' },
+      ] },
+    ],
+  },
+  {
+    name: 'Team Aurora', role: 'admin', open: true,
+    rooms: [
+      { name: 'general', starred: true, msgs: [
+        { from: 'jens', text: 'Deploy window moved to Thursday. @karl owns the runbook.', t: '10:15' },
+        { from: 'karl', text: 'Acknowledged. Staging is green: aurora.example.com/status', t: '10:22' },
+      ] },
+      { name: 'design', msgs: [
+        { from: 'ida', text: 'New spacing scale is in the mock — one rhythm, every surface.', t: 'Mon' },
+      ] },
+      { name: 'ops-alerts', ro: true, unread: 5, msgs: [
+        { from: 'mads', text: 'CPU spike on node-3, self-healed. Journal clean.', t: '07:55' },
+      ] },
+    ],
+  },
+  {
+    name: 'Hikers Trail', role: 'member',
+    rooms: [
+      { name: 'general', msgs: [
+        { from: 'petter', text: 'See you all at the trailhead 7am…', t: 'June' },
+        { from: 'sofie', text: 'RIP the boots I ruined for that ridge photo.', t: '06:45' },
+      ] },
+      { name: 'gear-talk', starred: true, msgs: [
+        { from: 'mads', text: 'The new ultralight tent is example.com/tent-x — worth it.', t: 'Tues' },
+      ] },
+    ],
+  },
+  { name: 'Chess Club', role: 'member', rooms: [
+    { name: 'general', msgs: [{ from: 'jens', text: 'Thursday blitz cancelled — hall booked for the exam.', t: 'Wed' }] },
+    { name: 'tournament', ro: true, msgs: [{ from: 'ida', text: 'Pairings are up. Read-only for non-players (pass demo).', t: 'Yest' }] },
+  ] },
+  { name: 'Block Watch', role: 'admin', rooms: [
+    { name: 'general', msgs: [{ from: 'karl', text: 'Gate code reminder: it changed Monday, see the notice board.', t: '17:03' }] },
+    { name: 'alerts', ro: true, unread: 1, msgs: [{ from: 'marlene', text: 'Tool van on Birch St — logged, no action needed.', t: '21:41' }] },
+  ] },
+  { name: 'Old Jazz Vinyl', role: 'member', rooms: [
+    { name: 'general', starred: true, msgs: [{ from: 'petter', text: 'Blue Note reissue pressing question…', t: 'May' }] },
+    { name: 'marketplace', msgs: [{ from: 'sofie', text: 'Selling my duplicate Kind of Blue — DM me.', t: 'Sun' }] },
+  ] },
+  { name: 'Ghibli Fans', role: 'member', rooms: [
+    { name: 'general', msgs: [{ from: 'ida', text: 'Marshi watch-along Saturday, bring snacks.', t: '8:14' }] },
+  ] },
+  { name: 'Night-Shift Nurses', role: 'admin', rooms: [
+    { name: 'general', msgs: [{ from: 'mads', text: 'Ward 4 short-staffed tomorrow — anyone swap?', t: '23:50' }] },
+    { name: 'handover', ro: true, unread: 3, msgs: [{ from: 'karl', text: 'Handover log template updated. Read-only for students.', t: '22:07' }] },
+  ] },
+  { name: 'Code Guild', role: 'owner', rooms: [
+    { name: 'general', msgs: [{ from: 'jens', text: 'Monthly challenge: build a GC. Submissions due the 28th.', t: '09:00' }] },
+    { name: 'code-review', ro: true, msgs: [{ from: 'sofie', text: 'PR #412 needs eyes — diff only here (pass demo).', t: '13:31' }] },
+  ] },
+  { name: 'Weekend Woodworkers', role: 'member', rooms: [
+    { name: 'general', msgs: [{ from: 'marlene', text: 'Dovetail jig finally behaves. Photo proof in the drive.', t: '11:20' }] },
+    { name: 'show-and-tell', ro: true, msgs: [{ from: 'ida', text: 'Q3 show pieces thread — post finished work only.', t: 'Yest' }] },
+  ] },
+];
+
+// ---------------------------------------------------------------- helpers
+
+const el = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+};
+
+const ROLE_ICON = { owner: ['crown', 'You are an OWNER of this group'], admin: ['groupAdmin', 'You are an ADMIN of this group'], member: ['groupMember', 'You are a MEMBER of this group'] };
+
+// The single-line component for a fake sender lives in appendMessage:
+// trust icon + name + worn badge (+ red identity mark where the fixture
+// wears one) — req 19.
+
+const stub = (what) => toast(`${what} arrives with the group API (P4/P5).`);
+
+// ---------------------------------------------------------------- sidebar
+
+let track = null;
+let listHost = null; // #group-list
+const TABS = ['chats', 'groups', 'search'];
+
+function buildTabBar(sidebar, anchorAfter) {
+  const nav = el('nav', 'side-tabs');
+  nav.setAttribute('role', 'tablist');
+  nav.setAttribute('aria-label', 'Chat list');
+  const labels = { chats: ['userSolid', 'Chats', 'Single-user chats'], groups: ['users', 'Groups', 'Group rooms'], search: ['tabSearch', 'Search', 'Search — coming soon'] };
+  for (const [i, key] of TABS.entries()) {
+    const [icon, label, title] = labels[key];
+    const b = el('button', `side-tab${i === 0 ? ' active' : ''}`);
+    b.type = 'button';
+    b.dataset.tab = key;
+    b.title = title;
+    b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', String(i === 0));
+    b.append(iconEl(icon), el('span', 'side-tab-label', label));
+    b.addEventListener('click', () => setTab(i));
+    nav.append(b);
+  }
+  anchorAfter.after(nav);
+  return nav;
+}
+
+function setTab(i) {
+  const side = document.querySelector('.sidebar');
+  side.querySelectorAll('.side-tab').forEach((b, k) => {
+    b.classList.toggle('active', k === i);
+    b.setAttribute('aria-selected', String(k === i));
+  });
+  track.style.transform = `translateX(${-i * (100 / TABS.length)}%)`;
+}
+
+// The slider: EXISTING sidebar nodes (username search, status, convo list)
+// move into pane 0 untouched — ids/refs keep working. The tab bar, the tag
+// filter, the install nudge and the version foot NEVER slide (reqs 2 & 15).
+function buildPanes(sidebar) {
+  const head = sidebar.querySelector('.side-head');
+  const newChat = sidebar.querySelector('.new-chat');
+  const status = $('home-status');
+  const wrap = sidebar.querySelector('.convo-wrap');
+
+  buildTabBar(sidebar, head);
+
+  track = el('div', 'side-pane-track');
+  const panes = el('div', 'side-panes');
+
+  const p0 = el('div', 'side-pane pane-chats');
+  p0.append(newChat, status, wrap);
+  const p1 = el('div', 'side-pane pane-groups');
+  listHost = el('ul', 'group-list');
+  listHost.id = 'group-list';
+  p1.append(listHost);
+  const p2 = el('div', 'side-pane pane-search');
+  const note = el('p', 'search-soon', 'Search — coming soon. It will find users, groups and messages, with the tag filter already pinned under the sliders.');
+  p2.append(note);
+
+  track.append(p0, p1, p2);
+  panes.append(track);
+  track.style.width = `${TABS.length * 100}%`;
+  for (const p of [p0, p1, p2]) p.style.width = `${100 / TABS.length}%`;
+  const tabs = sidebar.querySelector('.side-tabs');
+  tabs.after(panes);
+}
+
+function renderGroups() {
+  listHost.replaceChildren();
+  for (const g of FAKE_GROUPS) {
+    const li = el('li', 'group-item');
+    li.append(groupRow(g));
+    const rooms = el('ul', 'room-list');
+    rooms.hidden = !g.open;
+    li.append(rooms);
+    paintRooms(li, rooms, g);
+    listHost.append(li);
+  }
+}
+
+function groupRow(g) {
+  const row = el('div', 'group-row');
+  const chev = el('button', 'grp-btn grp-toggle');
+  chev.type = 'button';
+  chev.title = g.open ? 'Hide rooms' : 'Show rooms';
+  chev.append(iconEl('viewMore', g.open ? 'chev-up' : ''));
+  chev.setAttribute('aria-expanded', String(!!g.open));
+  const nameBtn = el('button', 'grp-name');
+  nameBtn.type = 'button';
+  nameBtn.textContent = g.name;
+  nameBtn.title = `Open ${g.name} — general`;
+  const roleMeta = ROLE_ICON[g.role];
+  const role = iconEl(roleMeta[0], `grp-role role-${g.role}`);
+  role.title = roleMeta[1];
+  const members = el('button', 'grp-btn');
+  members.type = 'button';
+  members.title = 'Room members';
+  members.append(iconEl('users'));
+  const settings = el('button', 'grp-btn');
+  settings.type = 'button';
+  settings.title = 'Group settings (P2)';
+  settings.append(iconEl('settings'));
+  row.append(chev, nameBtn, role, members, settings);
+
+  chev.addEventListener('click', () => {
+    g.open = !g.open;
+    chev.title = g.open ? 'Hide rooms' : 'Show rooms';
+    chev.replaceChildren(iconEl('viewMore', g.open ? 'chev-up' : ''));
+    chev.setAttribute('aria-expanded', String(!!g.open));
+    const li = row.closest('.group-item');
+    const rooms = li.querySelector('.room-list');
+    rooms.hidden = !g.open;
+    paintRooms(li, rooms, g);
+  });
+  nameBtn.addEventListener('click', () => {
+    const general = g.rooms.find((r) => r.name === 'general') ?? g.rooms[0];
+    openRoom(g, general);
+  });
+  members.addEventListener('click', () => stub('Member lists'));
+  settings.addEventListener('click', () => toast('Group settings are P2 — see docs/features/groups.md'));
+  return row;
+}
+
+function paintRooms(li, host, g) {
+  host.replaceChildren();
+  // collapsed: only STARRED rooms stay (req 13)
+  for (const r of g.rooms) {
+    if (!g.open && !r.starred) continue;
+    const rr = el('li', 'room-row');
+    const star = el('button', 'room-star');
+    star.type = 'button';
+    star.title = r.starred ? 'Un-star room' : 'Star room — it stays visible when the group is collapsed';
+    star.append(iconEl(r.starred ? 'tagStar' : 'starRegular', r.starred ? 'star-on' : ''));
+    star.addEventListener('click', () => { r.starred = !r.starred; paintRooms(li, host, g); });
+    const open = el('button', 'room-open');
+    open.type = 'button';
+    const nm = el('span', 'room-name', `#${r.name}`);
+    open.append(nm);
+    if (r.ro) {
+      const lock = iconEl('lock', 'room-lock');
+      lock.title = 'Read-only for you with your current passes';
+      open.append(lock);
+    }
+    if (r.unread) open.append(el('span', 'room-unread', String(r.unread)));
+    open.addEventListener('click', () => openRoom(g, r));
+    rr.append(star, open);
+    host.append(rr);
+  }
+  if (!g.open && !g.rooms.some((r) => r.starred)) host.hidden = true;
+}
+
+// ---------------------------------------------------------------- the room chat view
+
+let view = null;
+let msgHost = null;
+let headName = null;
+let headRoom = null;
+let tabPanel = null;
+const TAB_NAMES = ['chat', 'images', 'videos', 'files', 'links'];
+
+function buildGroupView(client) {
+  const main = document.querySelector('main.chat-pane');
+  view = el('section', 'group-view');
+  view.id = 'group-view';
+  view.hidden = true;
+
+  const head = el('header', 'group-head');
+  const back = el('button', 'icon-btn group-back');
+  back.type = 'button';
+  back.title = 'Back to chats';
+  back.append(iconEl('back'));
+  headName = el('span', 'group-head-name');
+  headRoom = el('span', 'group-head-room');
+  head.append(back, headName, headRoom);
+  const msg = document.createElement('p');
+  msg.className = 'group-head-note muted small';
+  msg.textContent = 'Mock data — the room list, roles and messages are fixtures (docs/features/groups.md, P1).';
+  view.append(head, msg);
+
+  msgHost = el('ul', 'messages group-messages');
+  tabPanel = el('div', 'chat-tabpanel group-tabpanel');
+  tabPanel.hidden = true;
+  view.append(msgHost, tabPanel);
+
+  const foot = el('footer', 'composer');
+  const input = el('textarea', 'group-composer-input');
+  input.rows = 1;
+  input.placeholder = 'Message this room (mock — nothing is sent anywhere)';
+  input.maxLength = 4096;
+  const send = el('button', 'btn btn-accent round');
+  send.type = 'button';
+  send.title = 'Send';
+  send.append(iconEl('send'));
+  foot.append(input, send);
+  const doSend = () => {
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    appendMessage({ me: String(client.username ?? 'me').toLowerCase(), text, t: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) });
+  };
+  send.addEventListener('click', doSend);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(); }
+  });
+  view.append(foot);
+
+  const tabs = el('nav', 'chat-tabs group-tabs');
+  tabs.setAttribute('role', 'tablist');
+  const iconKeys = { chat: 'tabChat', images: 'tabImages', videos: 'tabVideos', files: 'tabFiles', links: 'tabLinks' };
+  for (const [i, name] of TAB_NAMES.entries()) {
+    const b = el('button', `chat-tab${i === 0 ? ' active' : ''}`);
+    b.type = 'button';
+    b.title = name.charAt(0).toUpperCase() + name.slice(1);
+    b.append(iconEl(iconKeys[name]));
+    b.addEventListener('click', () => {
+      [...tabs.children].forEach((x, k) => x.classList.toggle('active', k === i));
+      if (name === 'chat') {
+        msgHost.hidden = false;
+        tabPanel.hidden = true;
+      } else {
+        msgHost.hidden = true;
+        tabPanel.hidden = false;
+        // req 16 lives here: the strip is the DM's strip; the media LIFECYCLE
+        // (member-aware acks/pruning) is P4/P5 work
+        tabPanel.replaceChildren(el('p', 'media-empty', `Room ${name} — the DM tab strip reused for group rooms (member-aware media arrives with the API, P4/P5).`));
+      }
+    });
+    tabs.append(b);
+  }
+  view.append(tabs);
+
+  back.addEventListener('click', closeRoom);
+  main.append(view);
+}
+
+function bubble(msgs) {
+  msgHost.replaceChildren();
+  for (const m of msgs) appendMessage(m);
+  msgHost.scrollTop = msgHost.scrollHeight;
+}
+
+function appendMessage(m) {
+  const li = el('li', `msg ${m.me ? 'out' : 'in'}`);
+  const who = m.me ?? m.from;
+  const chipRow = el('div', 'gr-sender-row');
+  const chipBtn = el('button', 'msg-mention gr-sender');
+  chipBtn.type = 'button';
+  chipBtn.title = `View ${who}'s profile (live with the API)`;
+  if (m.me) {
+    chipBtn.append(mountLine(document.createElement('span'), { peer: who, state: PS.SELF }));
+  } else {
+    const p = PEOPLE[who] ?? { state: PS.STRANGER };
+    const chip = nameChipEl(p.badge ?? null);
+    if (chip) chip.classList.add('name-chip-inline');
+    chipBtn.append(mountLine(document.createElement('span'), {
+      peer: who, state: p.state, chipEl: chip, unverified: p.unverified ?? null, gone: p.state === PS.GONE,
+    }));
+  }
+  chipBtn.addEventListener('click', () => stub('Profile sheets from group messages'));
+  const body = el('span', 'gr-body', m.text);
+  const meta = el('span', 'meta', m.t ?? '');
+  li.append(chipRow, body, meta);
+  chipRow.append(chipBtn);
+  msgHost.append(li);
+}
+
+function openRoom(g, r) {
+  r.unread = 0; // the mock marks read on open
+  renderGroups();
+  headName.replaceChildren(iconEl('users', 'gh-ic'), el('span', 'gh-group', g.name));
+  headRoom.textContent = `#${r.name}${r.ro ? ' — read-only (pass)' : ''}`;
+  msgHost.hidden = false;
+  tabPanel.hidden = true;
+  view.hidden = false;
+  document.body.classList.add('group-open');
+  bubble(r.msgs ?? []);
+}
+
+function closeRoom() {
+  view.hidden = true;
+  document.body.classList.remove('group-open');
+}
+
+// ---------------------------------------------------------------- mount
+
+export function mountGroups({ client }) {
+  const sidebar = document.querySelector('.sidebar');
+  if (!sidebar || $('group-list')) return; // idempotent
+  buildPanes(sidebar);
+  renderGroups();
+  buildGroupView(client);
+  setTab(0);
+}
