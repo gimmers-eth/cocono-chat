@@ -1908,4 +1908,13 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
 @media (max-width: 899px) {
   body.group-open .sidebar { display: none; }
   body.group-open .chat-pane { display: flex; }
+  /* THE CAROUSEL (P1 review): on phones chats and rooms are ONE stack that
+     slides — an open comes in FROM THE LEFT (the shared chat-slide-in), a
+     back CLOSES TO THE RIGHT (mirror of the entry, the carousel's reverse).
+     Desktop keeps its left-hop exit untouched. */
+  @keyframes chat-slide-back {
+    from { transform: none; opacity: 1; }
+    to   { transform: translateX(18%); opacity: .55; }
+  }
+  .chat-view.closing, .group-view.closing { animation-name: chat-slide-back; }
 }

@@ -130,4 +130,11 @@ pacing now MATCHES the settings panel (.22s in / .2s out). Read-only rooms carry
 (#italic-parens) in the list and the room header spells "#name (read only)".
 The chats/groups SIDEBAR TABS wear unread BADGES — the chats tab counts
 real DM unreads from the local store (same fact the row dots read), the
-groups tab sums the room unreads; a tab with nothing waiting shows '0'.
+groups tab sums the room unreads; a tab with nothing waiting shows '0'. USER CHATS AND ROOMS ARE MUTUALLY EXCLUSIVE —
+opening a room closes the open DM (and vice-versa via a body-class
+observer), like switching between user chats; this also ends the doubled
+pane/strip that read as duplicated tabs. On MOBILE the stack behaves like
+a carousel: chats slide IN from the left, back slides them OUT to the
+right (desktop keeps its left hop). Every room chat carries its own TAG
+strip (the DM skin; edits land in the sidebar filter immediately), and a
+group with no room matching the pinned tag filter disappears entirely.

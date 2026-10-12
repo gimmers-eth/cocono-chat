@@ -20,7 +20,7 @@ import { iconEl } from '../icons.js';
 import { mountLine } from './userline.js';
 import { PS } from './peername.js';
 import { nameChipEl } from '../badges.js';
-import { tagIconEl, TAG_LABELS, currentFilter } from '../tags.js';
+import { tagIconEl, TAG_LABELS, TAG_IDS, currentFilter } from '../tags.js';
 import { allMessages, isUnread } from '../store.js';
 
 // ---------------------------------------------------------------- fixtures
@@ -355,7 +355,10 @@ let headName = null;
 let headRoom = null;
 let headMuteBtn = null;
 let tabPanel = null;
+let tagbar = null;
+let tagIcons = null;
 let activeCtx = null; // { g, r } of the open room (header mute mirrors it)
+let chatRef = null;   // the DM chat component (mutual-close, see openRoom)
 const TAB_NAMES = ['chat', 'images', 'videos', 'files', 'links'];
 
 const reducedMotion = () => !window.matchMedia?.('(prefers-reduced-motion: no-preference)').matches;
@@ -368,6 +371,31 @@ function playEnter(v) {
   void v.offsetWidth;
   v.classList.add('entering');
   v.addEventListener('animationend', () => v.classList.remove('entering'), { once: true });
+}
+
+// The room's OWN tag strip: same TAG_IDS, same .tag-btn skin and purple
+// ON state as the DM chat head; edits write straight to the fixture (the
+// sidebar list + filter repaint through it).
+function paintRoomTags() {
+  if (!tagbar) return;
+  const r = activeCtx?.r;
+  tagbar.hidden = !r;
+  if (!r) return;
+  const label = el('span', 'tagbar-label', 'Tag:');
+  tagIcons.replaceChildren(label, ...TAG_IDS.map((t) => {
+    const on = (r.tags ?? []).includes(t);
+    const b = el('button', `tag-btn${on ? ' tag-on' : ''}`);
+    b.type = 'button';
+    b.setAttribute('aria-pressed', String(on));
+    b.title = on ? `Remove the ${TAG_LABELS[t]} tag` : `Tag #${r.name} ${TAG_LABELS[t]}`;
+    b.append(tagIconEl(t));
+    b.addEventListener('click', () => {
+      r.tags = on ? (r.tags ?? []).filter((x) => x !== t) : [...(r.tags ?? []), t];
+      paintRoomTags();
+      renderGroups(); // the sidebar rows + the pinned filter see it immediately
+    });
+    return b;
+  }));
 }
 
 function paintHeadMute() {
@@ -411,6 +439,17 @@ function buildGroupView(client) {
   msg.className = 'group-head-note muted small';
   msg.textContent = 'Mock data — the room list, roles and messages are fixtures (docs/features/groups.md, P1).';
   view.append(head, msg);
+
+  // EVERY GROUP CHAT CARRIES ITS TAGS (P1 review): the DM tag strip's own
+  // skin (.chat-tagbar/.tag-btn) under the header — tapping toggles the
+  // room's tag, which the pinned sidebar filter matches on live.
+  tagbar = el('div', 'chat-tagbar group-tagbar');
+  tagbar.hidden = true;
+  tagbar.setAttribute('role', 'group');
+  tagbar.setAttribute('aria-label', 'Room tags');
+  tagIcons = el('span', 'tagbar-icons');
+  tagbar.append(tagIcons);
+  view.append(tagbar);
 
   msgHost = el('ul', 'messages group-messages');
   tabPanel = el('div', 'chat-tabpanel group-tabpanel');
@@ -500,9 +539,15 @@ function appendMessage(m) {
 }
 
 function openRoom(g, r) {
+  // MUTUAL CLOSE (P1 review — this is what looked like "duplicated tabs"):
+  // a DM stayed open UNDER a room, two panes, two strips. Opening a room
+  // closes the user chat exactly like switching to another user chat; the
+  // body-class observer below closes the room when a user chat opens.
+  if (document.body.classList.contains('chat-open')) chatRef?.closeChat?.();
   r.unread = 0; // the mock marks read on open
   renderGroups();
   activeCtx = { g, r };
+  paintRoomTags();
   headName.replaceChildren(iconEl('users', 'gh-ic'), el('span', 'gh-group', g.name));
   headRoom.textContent = `#${r.name}${r.ro ? ' (read only)' : ''}`;
   paintHeadMute();
@@ -516,6 +561,7 @@ function openRoom(g, r) {
 
 function closeRoom() {
   activeCtx = null;
+  paintRoomTags(); // hides the room's tag strip with the room
   if (reducedMotion() || view.hidden) {
     view.hidden = true;
     document.body.classList.remove('group-open');
@@ -539,9 +585,12 @@ function closeRoom() {
 
 // ---------------------------------------------------------------- mount
 
-export function mountGroups({ client }) {
+export function mountGroups({ client, chat = null }) {
+  chatRef = chat;
   const sidebar = document.querySelector('.sidebar');
-  if (!sidebar || $('group-list')) return; // idempotent
+  // idempotent on BOTH evidence — the tab bar itself AND the list host:
+  // a double mount can never build a second tab bar
+  if (!sidebar || sidebar.querySelector('.side-tabs') || $('group-list')) return { updateTabBadges() {} };
   buildPanes(sidebar);
   renderGroups();
   buildGroupView(client);
@@ -552,7 +601,14 @@ export function mountGroups({ client }) {
   // both panes and the buttons' aria stays exactly as tags.js set it.
   sidebar.querySelector('.convo-filter')?.addEventListener('click', () => renderGroups());
   updateTabBadges();
+  // THE REVERSE CLOSE (P1 review): opening a user chat while a room is
+  // open shuts the room — watching body's class is how chat-open lands
+  // from EVERY path (sidebar row, share link, notification click) without
+  // touching home.js or chat.js.
+  new MutationObserver(() => {
+    if (document.body.classList.contains('chat-open') && view && !view.hidden) closeRoom();
+  }).observe(document.body, { attributeFilter: ['class'] });
   // main.js calls this whenever the DM list repaints (open/read/send), so
   // the chats-tab number tracks the same truth the rows dot from
-  return { updateTabBadges };
+  return { updateTabBadges, render: renderGroups };
 }

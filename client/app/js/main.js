@@ -342,7 +342,7 @@ chat.connectEvents();
 home.wire();
 // GROUPS P1 MOCK (docs/features/groups.md): sidebar tabs + room chats from
 // fixtures — no store, no network. P5 replaces this mount with real data.
-groupsMock = mountGroups({ client });
+groupsMock = mountGroups({ client, chat });
 auth.wire();
 // CONTROL NUDGES (be/src/lib/notify.js): the server says a slice of
 // authoritative state THIS account caches moved because of someone else.
