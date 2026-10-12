@@ -19,7 +19,8 @@ const dom = installDomShim(readFileSync(path.join(APP, 'index.html'), 'utf8'));
 
 const store = await import('../app/js/store.js');
 const M = await import('../app/js/media.js');
-const { bubbleNodes } = await import('../app/js/components/mediabubble.js');
+const bubble = await import('../app/js/components/mediabubble.js');
+const { bubbleNodes } = bubble;
 const view = await import('../app/js/components/mediaview.js');
 
 let n = 0;
@@ -689,7 +690,9 @@ test('bubble: a video is never painted as an <img> over its own video bytes', as
   const badge = findClass(shown, 'media-play-badge');
   assert.equal(badge.tagName, 'BUTTON', 'and the badge on it is a control: the bytes are here');
   assert.equal(badge.dataset.act, 'playpause');
-  assert.match(clip.src, /#t=0\.1$/, 'with a media fragment, or the box stays black until Play');
+  assert.ok(!clip.src.includes('#t='),
+    'NO media fragment: WebKit answers code 4 (source not supported) for a blob: URL carrying one');
+  assert.equal(clip.preload, 'metadata', 'it asks for metadata, then seeks for a frame');
   assert.equal(clip.muted, true, 'a bubble never makes a sound by itself');
   assert.equal(clip.autoplay, false);
   assert.equal(clip.loop, false);
@@ -735,16 +738,22 @@ test('bubble: a poster paints a JPEG — and the player carries the same JPEG, s
   assert.equal(badge.tagName, 'BUTTON', 'and the badge is a control, because the bytes are here');
   assert.equal(badge.dataset.act, 'playpause');
 
-  // playing: the element exists, and its poster is the SAME picture, so swapping
-  // <img> → <video> changes nothing on screen until real frames arrive. That gap
-  // was the "video disappears and reappears when I press play" report.
+  // playing changes the BADGE, not the picture: the player is an overlay chat.js
+  // lays over this same <img>, so the box cannot change size and nothing blinks
   const on = bubbleNodes(msg, v, { playing: true });
-  const clip = findTag(on, 'VIDEO');
-  assert.ok(clip, 'the playing row gets the one player');
-  assert.match(clip.poster, /^blob:local\//, 'carrying the poster it replaces');
-  assert.equal(clip.preload, 'auto', 'and loading for real, not on demand');
-  assert.equal(findTag(on, 'IMG'), null, 'one picture, not two');
+  assert.ok(findTag(on, 'IMG'), 'the poster is still the thing in the flow');
+  assert.equal(findTag(on, 'VIDEO'), null, 'and no second element is built for it');
   assert.ok(has(on, /media-play-badge is-playing/), 'the badge already says pause');
+
+  // the overlay itself: same poster, no fragment, and a class of its own so it
+  // cannot inherit a preview's sizing (that difference was the size change)
+  const player = bubble.inlinePlayerEl(v);
+  assert.ok((player.className || '').split(/\s+/).includes('media-player'));
+  assert.ok(!(player.className || '').split(/\s+/).includes('media-thumb'), 'it is not a preview');
+  assert.match(player.poster, /^blob:local\//, 'it carries the poster it covers');
+  assert.ok(!player.src.includes('#t='), 'no media fragment (WebKit refuses the source)');
+  assert.equal(player.preload, 'auto');
+  assert.equal(player.dataset.mediaId, 'vPosterBubble', 'addressable, so a repaint puts it back');
 });
 
 test('bubble: a poster with no bytes is a picture, and the badge is decoration', async () => {

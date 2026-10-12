@@ -14,7 +14,10 @@
 
 import { iconEl } from '../icons.js';
 import { logEvent } from '../applog.js';
-import { formatSize, objectUrl, isBlurred, durationText, renderableAsImage, hasLocalBytes } from '../media.js';
+import {
+  formatSize, objectUrl, isBlurred, durationText, renderableAsImage, hasLocalBytes,
+  seekToFirstFrame,
+} from '../media.js';
 
 const KIND_ICON = { image: 'tabImages', video: 'tabVideos', file: 'attachFile' };
 
@@ -75,7 +78,7 @@ function statusLine(row) {
 
 /** Preview picture: thumb when present, else the decrypted bytes (a send
  *  without a poster, or an image that could not be thumbnailed). */
-function previewEl(row, blur, { playing = false, videoPreview = false } = {}) {
+function previewEl(row, blur, { videoPreview = false } = {}) {
   // ONE DECODER AT A TIME. A transcript with 18 clips is 18 media elements, and
   // a phone runs out: iOS refuses the ones past its limit with
   // MEDIA_ERR_SRC_NOT_SUPPORTED, and the element that then fails is the message
@@ -84,13 +87,15 @@ function previewEl(row, blur, { playing = false, videoPreview = false } = {}) {
   // paint is the poster JPEG (free), a real <video> exists only for the clip
   // being played, plus the few most recent clips that have no poster to show.
   if (row.kind === 'video') {
-    if (playing && hasLocalBytes(row)) return videoEl(row, { playing: true });
+    // The poster is the picture, and it stays the picture while the clip plays:
+    // chat.js lays the player OVER it (see inlinePlayerEl), so pressing play
+    // cannot change the size of anything or blink the frame out.
     const thumb = row.thumb;
     if (thumb?.size && (!thumb.type || thumb.type.startsWith('image/'))) return imgPreviewEl(thumb, row, blur);
-    if (videoPreview && hasLocalBytes(row)) return videoEl(row, { playing: false });
+    // no poster to show: within chat.js's budget this clip paints its own frame
+    if (videoPreview && hasLocalBytes(row)) return videoEl(row);
     return null;
-  }
-  // A picture, or nothing. The fallback used to reach for `row.data` on any
+  }  // A picture, or nothing. The fallback used to reach for `row.data` on any
   // stored row, which for a VIDEO meant handing MP4 bytes to an <img> — the
   // engine paints a broken/looping frame instead of a preview.
   const blob = row.thumb ?? (renderableAsImage(row) && HAS_OWN_BYTES.has(row.state) ? row.data : null);
@@ -113,19 +118,18 @@ function imgPreviewEl(blob, row, blur) {
  * The clip itself, as a control-less <video> that plays IN THE MESSAGE.
  *
  * Created ON DEMAND — see previewEl for why a transcript full of them is a bug,
- * not a feature. Two loading shapes:
- *   - with a poster: the `poster` attribute carries the same JPEG the bubble was
- *     already showing, so swapping picture → player changes nothing on screen
- *     until real frames exist. That is the fix for "the video disappears and
- *     reappears when I press play": the gap was an element that dropped its
- *     poster the instant loading started and had no frame to show yet.
- *   - without one: `#t=0.1`, the media fragment that makes an engine decode a
- *     frame instead of showing a black box.
- * Nothing here may start by itself (no autoplay, no loop, no controls): sound and
- * playback are a person's decision, and the message modal is the other place this
- * clip can be played.
+ * not a feature. The poster attribute carries the same JPEG the bubble was
+ * already showing, so picture → player changes nothing on screen until real
+ * frames exist.
+ *
+ * NO `#t=0.1` MEDIA FRAGMENT. It looks like the portable way to make an engine
+ * decode frame one, and on Chromium it is — but WebKit answers
+ * MEDIA_ERR_SRC_NOT_SUPPORTED (code 4) for a `blob:` URL carrying a fragment, so
+ * every iPhone got a source error on an element that was fine a moment earlier.
+ * The frame is asked for with a SEEK on `loadedmetadata` instead, which is what
+ * the poster ladder has always done successfully on the same phones.
  */
-function videoEl(row, { playing = false } = {}) {
+function videoEl(row) {
   const v = mk('video', 'media-thumb media-video');
   v.muted = true;
   v.setAttribute?.('muted', '');
@@ -134,24 +138,74 @@ function videoEl(row, { playing = false } = {}) {
   v.controls = false;
   v.autoplay = false;
   v.loop = false;
-  v.preload = playing ? 'auto' : 'metadata';
-  const url = objectUrl(row.data, 'bubbles');
-  if (row.thumb?.size) {
-    v.poster = objectUrl(row.thumb, 'bubbles');
-    v.src = url;
-  } else {
-    v.src = `${url}#t=0.1`;
-  }
+  v.preload = 'metadata';
+  if (row.thumb?.size) v.poster = objectUrl(row.thumb, 'bubbles');
+  // A stable box, identical to the poster's: without it, pressing play swapped a
+  // 256 px JPEG for an element sized by its own rules and the bubble changed
+  // size under the user's thumb.
+  if (Number(row.w) > 0 && Number(row.h) > 0) v.style.aspectRatio = `${row.w} / ${row.h}`;
+  // listeners before src: a Blob source can answer before anyone is listening
+  if (!row.thumb?.size) seekToFirstFrame(v);
+  v.src = objectUrl(row.data, 'bubbles');
   v.dataset.mediaId = String(row.id ?? '');   // chat.js owns play/pause by this
+  return v;
+}
+
+/**
+ * The player chat.js swaps into a bubble when its badge is pressed, built by the
+ * same hand as the painted one so the two are pixel-identical (exported: the
+ * swap happens WITHOUT a re-render, which is what keeps the picture from
+ * blinking out and back).
+ */
+export function inlinePlayerEl(row) {
+  // `media-player`, NOT `media-thumb`: this element covers the poster inside the
+  // shot box rather than standing in for it, so it must not pick up the sizing
+  // rules of a preview (that difference is what made the bubble change size on
+  // every play/pause).
+  const v = mk('video', 'media-player');
+  v.setAttribute?.('playsinline', '');
+  v.playsInline = true;
+  v.controls = false;
+  v.autoplay = false;
+  v.loop = false;
+  v.preload = 'auto';
+  // Its OWN URL scope: 'bubbles' is released at the start of every repaint, and a
+  // revoked src under a playing element is a code-4 error mid-clip. chat.js
+  // releases 'player' when the slot is given back.
+  if (row.thumb?.size) v.poster = objectUrl(row.thumb, 'player');
+  v.dataset.mediaId = String(row.id ?? '');
+  // the badge is a sibling in the shot box, and it must say what the NEXT tap
+  // does whatever started or stopped the clip
+  const sync = () => {
+    const b = v.parentNode?.querySelector?.('.media-play-badge');
+    if (b) paintPlayBadge(b, !v.paused);
+  };
+  v.addEventListener?.('play', sync);
+  v.addEventListener?.('pause', sync);
+  v.addEventListener?.('ended', sync);
+  v.addEventListener?.('error', () => {
+    try { logEvent('media', `inline player error code=${v.error?.code ?? '?'}`); } catch { /* never fatal */ }
+  }, { once: true });
+  v.src = objectUrl(row.data, 'player');   // assigned LAST: everything is listening
   return v;
 }
 
 /** Wrap the shot + its overlays in one positioned box (the bubble itself must
  *  not become the containing block for a play badge). */
 function shot(row, blur, playing = false, videoPreview = false) {
-  const pic = previewEl(row, blur, { playing, videoPreview });
+  const pic = previewEl(row, blur, { videoPreview });
   if (!pic) return null;
   const box = mk('span', 'media-shot');
+  // how chat.js finds this box again after a repaint, to put the SAME player
+  // element back over the SAME poster
+  if (row.kind === 'video') box.dataset.mediaId = String(row.id ?? '');
+  // A clip whose real dimensions we know gets a box with THAT ratio, so the
+  // poster <img> and the player <video> occupy exactly the same pixels and
+  // swapping one for the other cannot move the transcript.
+  if (row.kind === 'video' && Number(row.w) > 0 && Number(row.h) > 0) {
+    box.classList?.add?.('has-ar');
+    box.style?.setProperty?.('--ar', `${row.w} / ${row.h}`);
+  }
   box.append(pic);
   if (row.kind === 'video') {
     // A BUTTON whenever this device holds the bytes: the badge plays the clip IN
@@ -172,9 +226,9 @@ function shot(row, blur, playing = false, videoPreview = false) {
       // the badge is the element's own transport: whatever else starts or stops
       // the clip (a re-render, the end of the file, another tap) has to be
       // reflected there, or the button lies about what it will do next
-      pic.addEventListener?.('play', () => paintBadge(badge, true));
-      pic.addEventListener?.('pause', () => paintBadge(badge, false));
-      pic.addEventListener?.('ended', () => paintBadge(badge, false));
+      pic.addEventListener?.('play', () => paintPlayBadge(badge, true));
+      pic.addEventListener?.('pause', () => paintPlayBadge(badge, false));
+      pic.addEventListener?.('ended', () => paintPlayBadge(badge, false));
       // A clip THIS ENGINE cannot decode (HEVC/.mov on Chromium is the common
       // case) fires `error` and would otherwise sit there as a black box. Swap in
       // the labelled tile: the honest 'a video, N MB, not playable here'. The
@@ -196,8 +250,10 @@ function shot(row, blur, playing = false, videoPreview = false) {
   return box;
 }
 
-/** The badge's glyph says what the NEXT tap does: pause while it plays. */
-function paintBadge(badge, playing) {
+/** The badge's glyph says what the NEXT tap does: pause while it plays.
+ *  Exported because chat.js flips it when playback changes without the element
+ *  being involved (a pause from the modal opening, a repaint). */
+export function paintPlayBadge(badge, playing) {
   try {
     badge.replaceChildren(iconEl(playing ? 'mediaPause' : 'mediaPlay'));
     badge.classList?.toggle?.('is-playing', !!playing);

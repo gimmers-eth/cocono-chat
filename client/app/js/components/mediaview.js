@@ -18,7 +18,7 @@ import { mediaWith, messagesWith, updateMedia } from '../store.js';
 import {
   formatSize, durationText, isBlurred, objectUrl, releaseScope, filterMedia,
   tabBuckets, downloadMedia, declineMedia, renderableAsImage,
-  saveToDevice, shareToDevice, hasLocalBytes,
+  saveToDevice, shareToDevice, hasLocalBytes, seekToFirstFrame,
 } from '../media.js';
 
 // exported so chat.js and the tests agree on the vocabulary
@@ -102,7 +102,8 @@ function tile(row, { blur, caption, onOpen, videoPreview = false }) {
     v.loop = false;
     v.preload = 'metadata';
     v.setAttribute?.('tabindex', '-1');
-    v.src = `${objectUrl(row.data, 'bubbles')}#t=0.1`;
+    v.src = objectUrl(row.data, 'bubbles');
+    seekToFirstFrame(v);
     // an engine that cannot decode it (HEVC on Chromium) must not leave a black
     // square: fall back to the glyph the tile would have had
     v.addEventListener?.('error', () => {
@@ -349,11 +350,13 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
     } else {
       const url = objectUrl(full, 'viewer');
       const video = mk('video', 'viewer-video');
-      // `#t=0.1` makes the engine seek (and therefore DECODE) a frame instead of
-      // leaving a black rectangle until Play is pressed — a modal that opens on
-      // black reads as 'the video is broken'. The bytes are already local, so
-      // 'auto' costs no network.
-      video.src = `${url}#t=0.1`;
+      // A frame is asked for with a SEEK, never with a `#t=0.1` fragment on the
+      // src. WebKit answers MEDIA_ERR_SRC_NOT_SUPPORTED (code 4) for a blob: URL
+      // carrying a fragment — which is exactly the report this shipped with:
+      // "the sender cannot play it in the modal, the recipient can", because
+      // Chromium accepts the fragment and Safari refuses the source. A modal that
+      // opens on black reads as 'the video is broken'; the bytes are already
+      // local, so 'auto' costs no network.
       video.playsInline = true;   // NO native controls: the row below is ours
       video.preload = 'auto';
       // Stated explicitly because a video that 'constantly loops' was the
@@ -364,6 +367,10 @@ export function openViewer(host, { client, msg, row, verified, onChange, onStatu
       video.loop = false;
       video.controls = false;
       if (row.thumb && row.thumb.size) video.poster = objectUrl(row.thumb, 'viewer');
+      // everything that listens is attached BEFORE src is assigned: a Blob source
+      // can answer fast, and an event nobody was listening for is a black modal
+      seekToFirstFrame(video);
+      video.src = url;
       const play = btn('viewer-toggle', 'mediaPlay', 'Play', 'Play this video');
       play.addEventListener('click', () => {
         if (video.paused) {

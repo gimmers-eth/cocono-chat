@@ -39,7 +39,7 @@ import {
   retryFailedDownloads, pruneLocalMedia, releaseScope, buildPoster, hasLocalBytes,
   reapStaleDrafts,
 } from '../media.js';
-import { bubbleNodes } from './mediabubble.js';
+import { bubbleNodes, inlinePlayerEl, paintPlayBadge } from './mediabubble.js';
 import {
   buildTabStrip, paintTabActive, paintTabPanel, mediaAction, openViewer,
 } from './mediaview.js';
@@ -66,12 +66,14 @@ const STATE_MARK = { sending: 'stateSending', sent: 'stateSent', delivered: 'sta
 // a decoder refusal is not something to retry 40 times a minute.
 const posterAsked = new Set();
 
-// Inline playback in the transcript, keyed by media row id — and there is only
-// ever ONE entry. Bubbles are rebuilt atomically on every event, so the element
-// that was playing is thrown away each time: the INTENT lives here and is
-// restored after each paint, or a message arriving mid-clip silently stops
-// someone's video.
-const inlinePlay = new Map();   // mediaId -> { t: seconds }
+// The ONE inline player, held OUTSIDE the paint. Bubbles are rebuilt atomically
+// on every event, so an element owned by a bubble is thrown away each time — and
+// a rebuilt <video> reloads, which is the picture blinking out and back mid-clip.
+// Owning it here means a repaint hands the same element back to the same bubble.
+let inlineEl = null;        // the <video> overlay
+let inlineId = null;        // the media row it belongs to
+let inlineAt = 0;           // seconds, to carry across a repaint
+let inlineWanted = false;   // should be playing, not merely paused
 // How many clips with NO poster may hold a <video> element just to paint frame
 // one. Posters are free; media elements are not (see previewEl in mediabubble.js).
 const PREVIEW_VIDEO_MAX = 2;
@@ -687,18 +689,13 @@ export function createChat({ client, onHomeRefresh }) {
     // for the life of the tab.
     const rows = await mediaWith(currentPeer);
     const mediaById = new Map(rows.map((r) => [r.id, r]));
-    // where an inline clip had got to, read BEFORE its element is thrown away
-    if (inlinePlay.size) {
-      for (const v of list.querySelectorAll('.media-video')) {
-        const id = v.dataset?.mediaId;
-        if (id && inlinePlay.has(id)) inlinePlay.set(id, { t: v.currentTime || 0 });
-      }
-    }
+    // where the inline clip had got to, read BEFORE the tree is thrown away
+    if (inlineEl && !inlineEl.paused) inlineAt = inlineEl.currentTime || inlineAt;
     // Which clips may hold a media element: the one being played (below) plus the
     // newest few with no poster to show. Everything else paints a JPEG.
     const previewIds = new Set(msgs
       .map((m) => mediaById.get(m.mediaId))
-      .filter((r) => r && r.kind === 'video' && !r.thumb?.size && hasLocalBytes(r))
+      .filter((r) => r && r.kind === 'video' && !r.thumb?.size && hasLocalBytes(r) && String(r.id) !== inlineId)
       .slice(-PREVIEW_VIDEO_MAX)
       .map((r) => r.id));
     releaseScope('bubbles');
@@ -725,7 +722,8 @@ export function createChat({ client, onHomeRefresh }) {
         const mRow = mediaById.get(m.mediaId);
         body.append(...bubbleNodes(m, mRow, {
           verified: peerIdentityVerified,
-          playing: inlinePlay.has(String(mRow?.id)),
+          // the badge glyph says what the next tap does, so the paint must know
+          playing: !!inlineWanted && String(mRow?.id ?? '') === inlineId,
           videoPreview: previewIds.has(mRow?.id),
         }));
       } else {
@@ -809,19 +807,24 @@ export function createChat({ client, onHomeRefresh }) {
    * Play/pause the clip IN ITS BUBBLE — the badge is the only thing that does
    * this; the rest of the message still opens the modal.
    *
-   * There is ONE player slot. Bubbles paint their poster JPEG, so pressing play
-   * repaints this one bubble with a real `<video>` (carrying the same poster, so
-   * nothing flashes) and starts it; pressing pause — or starting another clip, or
-   * opening the modal, or closing the pane — gives the slot back, which is also
-   * how the decoder is released. An explicit tap is a user gesture, so the clip
-   * plays WITH sound: that is what pressing play means.
+   * The player is an OVERLAY on the poster, not a replacement for it, and it goes
+   * in WITHOUT repainting the transcript. Both halves matter, and both were the
+   * bug: a repaint is what made the picture blink out and back, and a differently
+   * sized element is what made the bubble change size under the user's thumb. The
+   * poster stays in the flow and defines the box, the player covers exactly that
+   * box, and taking the player away reveals the same pixels again.
+   *
+   * ONE slot, because a phone has a handful of decoders and the element that loses
+   * that race is the message modal's (which then reports a codec problem it does
+   * not have). An explicit tap is a user gesture, so the clip plays WITH sound.
    */
   async function toggleInlinePlay(li) {
-    const live = li.querySelector('.media-video');
-    if (live && !live.paused) {
-      inlinePlay.clear();
-      try { live.pause(); } catch { /* already stopped */ }
-      await render();                       // the poster paints again, the decoder is freed
+    const box = li.querySelector('.media-shot');
+    if (!box) return;
+    const live = box.querySelector('.media-player');
+    if (live) {                                  // the same clip: a pure toggle
+      if (live.paused) startInline(live);
+      else pauseInline();
       return;
     }
     const rec = await getMessage(li.dataset.id);
@@ -832,55 +835,79 @@ export function createChat({ client, onHomeRefresh }) {
       if (rec) openMsgModal(rec);
       return;
     }
-    inlinePlay.clear();                     // ONE player at a time (see previewEl)
-    inlinePlay.set(String(row.id), { t: live?.currentTime || 0 });
-    if (live) { startInline(live); return; }
-    await render();                         // paints the player element for this row
-    // render() resumes the one slot itself; this only covers a paint that did not
-    // happen (no open conversation), and never double-starts a running clip
-    const made = [...($('chat-messages')?.querySelectorAll('.media-video') ?? [])]
-      .find((el) => el.dataset?.mediaId === String(row.id));
-    if (made && made.paused) startInline(made);
+    if (inlineEl) dropInlinePlayer();            // one player at a time
+    inlineEl = inlinePlayerEl(row);
+    inlineId = String(row.id);
+    inlineAt = 0;
+    inlineWanted = true;
+    box.append(inlineEl);                        // over the poster, inside its box
+    startInline(inlineEl);
   }
 
   function startInline(v) {
+    inlineWanted = true;
     v.muted = false;
     const p = v.play?.();
     if (p?.catch) {
       p.catch(() => {
-        inlinePlay.clear();
+        inlineWanted = false;
         toast('This browser cannot play that video here — open the message for the details.', 'error');
       });
     }
   }
 
-  /** After a paint: the one clip that was playing is playing again, in the same
-   *  place in it — the element it belonged to was thrown away with the rest. */
+  function pauseInline() {
+    inlineWanted = false;
+    if (!inlineEl) return;
+    inlineAt = inlineEl.currentTime || inlineAt;
+    try { inlineEl.pause(); } catch { /* already stopped */ }
+    const badge = inlineEl.parentNode?.querySelector?.('.media-play-badge');
+    if (badge) paintPlayBadge(badge, false);
+  }
+
+  /** Give the slot back: the overlay goes, the poster underneath never moved. */
+  function dropInlinePlayer() {
+    if (inlineEl) {
+      try { inlineEl.pause(); } catch { /* already stopped */ }
+      try { inlineEl.remove?.(); } catch { /* already out */ }
+    }
+    inlineEl = null;
+    inlineId = null;
+    inlineAt = 0;
+    inlineWanted = false;
+    // the player's URLs live in their own scope, precisely so a repaint cannot
+    // revoke the src of a clip that is playing
+    releaseScope('player');
+  }
+
+  /** After a paint the overlay is gone with the old tree: put the SAME element
+   *  back over the same bubble and carry on where it was. Same node, so the
+   *  buffer survives the move and nothing reloads on screen. */
   function resumeInlinePlay() {
-    if (!inlinePlay.size) return;
+    if (!inlineEl || !inlineId) return;
     const list = $('chat-messages');
     if (!list) return;
-    for (const [id, st] of inlinePlay) {
-      const v = [...list.querySelectorAll('.media-video')].find((el) => el.dataset?.mediaId === id);
-      if (!v) { inlinePlay.delete(id); continue; }
-      try { if (st.t) v.currentTime = st.t; } catch { /* not seekable yet */ }
-      v.muted = false;
-      // refused (autoplay policy, or a codec this engine will not touch): give up
-      // quietly rather than fighting the transcript on every paint
-      const p = v.play?.();
-      if (p?.catch) p.catch(() => inlinePlay.delete(id));
-    }
+    const box = [...list.querySelectorAll('.media-shot')].find((b) => b.dataset?.mediaId === inlineId);
+    if (!box) { dropInlinePlayer(); return; }    // its message is not on screen any more
+    box.append(inlineEl);
+    try { if (inlineAt) inlineEl.currentTime = inlineAt; } catch { /* not seekable yet */ }
+    const badge = box.querySelector?.('.media-play-badge');
+    if (badge) paintPlayBadge(badge, inlineWanted);
+    if (!inlineWanted) return;
+    inlineEl.muted = false;
+    const p = inlineEl.play?.();
+    if (p?.catch) p.catch(() => { inlineWanted = false; });
   }
 
   /** Stop the inline clip and forget the intent, so a re-render cannot restart
    *  it behind a closed pane or underneath an open modal. */
   function stopInlinePlay() {
-    for (const v of ($('chat-messages')?.querySelectorAll('.media-video') ?? [])) {
-      try { v.pause(); } catch { /* already stopped */ }
-    }
-    inlinePlay.clear();
+    dropInlinePlayer();
   }
 
+  // A bubble's Download/Delete press: the message id on the <li> is the only
+  // handle the DOM carries, so the resolve to the row and let the shared action
+  // do the work (the Files tab calls the same function).
   async function runBubbleAction(messageId, action) {
     const rec = messageId ? await getMessage(messageId) : null;
     const row = rec?.mediaId ? await getMedia(rec.mediaId) : null;

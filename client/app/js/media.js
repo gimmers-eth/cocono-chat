@@ -78,6 +78,26 @@ export function releaseScope(scope) {
   set.clear();
 }
 
+/**
+ * Ask a media element for the frame a tenth of a second in, so a clip with no
+ * poster shows a PICTURE instead of a black box.
+ *
+ * This exists because the obvious spelling — a `#t=0.1` media fragment on the
+ * src — is a WebKit trap: Safari answers `MEDIA_ERR_SRC_NOT_SUPPORTED` (code 4)
+ * for a `blob:` URL carrying a fragment, so the element that a phone had just
+ * decoded a poster from refused to load at all. Chromium accepts the fragment,
+ * which is why this looked like "the sender cannot play it, the recipient can".
+ * A seek after `loadedmetadata` is the same request in a form every engine
+ * takes, and it is what the poster ladder has always done on these same phones.
+ * Never fatal: a clip that will not seek still plays from zero.
+ */
+export function seekToFirstFrame(el, at = 0.1) {
+  const go = () => { try { if (!el.currentTime) el.currentTime = at; } catch { /* unseekable */ } };
+  if ((el.readyState ?? 0) >= 1) go();
+  else el.addEventListener?.('loadedmetadata', go, { once: true });
+  return el;
+}
+
 /** m:ss for a video length (shared by the bubble badge and the wall tile —
  *  two call sites that must not disagree about what '0:07' means). */
 export function durationText(sec) {

@@ -1477,6 +1477,18 @@ body[data-view="blocked"] .page-footer { display: none; }
 }
 .media-tile video { height: 100%; }
 .media-shot video.media-thumb { max-height: 260px; min-height: 6rem; border-radius: 6px; }
+/* The inline player is an OVERLAY on the poster, not a replacement for it. The
+   poster stays in the flow and defines the box, so pressing play cannot change
+   the size of the bubble (the report was "the video changes size when I press
+   play"), and taking the player away reveals the same pixels again — no blink.
+   Same crop as the poster (`cover`), so the two are pixel-identical until real
+   frames arrive. */
+.media-player {
+  position: absolute; inset: 0; display: block; width: 100%; height: 100%;
+  object-fit: cover; border-radius: 6px; background: #000; z-index: 1;
+}
+/* the transport and the facts stay above the picture they describe */
+.media-play-badge, .media-duration, .media-blur-hint { z-index: 2; }
 .media-tile-icon {
   display: flex; align-items: center; justify-content: center; height: 100%;
   color: var(--muted); font-size: 1.4rem;

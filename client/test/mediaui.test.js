@@ -139,7 +139,24 @@ test('media: the video preview path is wired end to end', () => {
   // still opens the modal
   assert.match(read('js/components/mediabubble.js'), /badge\.dataset\.act = 'playpause'/);
   assert.match(chat, /toggleInlinePlay\(li\)/, 'chat.js binds the badge by class');
-  assert.match(chat, /inlinePlay\.set\(/, 'and playback survives the re-render loop');
+  assert.match(chat, /inlinePlayerEl\(row\)/, 'and builds the player through the bubble module, not its own copy');
+  assert.match(chat, /resumeInlinePlay\(\);/, 'the same element is handed back after a repaint, not a new one');
+  assert.match(chat, /releaseScope\('player'\)/,
+    'the player’s URLs are their own scope: a repaint must not revoke the src of a playing clip');
+  // the player covers the poster instead of replacing it, so nothing resizes
+  assert.match(read('css/base.css'), /\.media-player \{[^}]*position: absolute/,
+    'the player is an overlay inside the shot box');
+  // WebKit answers MEDIA_ERR_SRC_NOT_SUPPORTED (code 4) for a blob: URL carrying
+  // a media fragment, which is what made every iPhone fail to play in the modal
+  // while desktop Chromium was fine. The frame is asked for with a SEEK.
+  for (const f of ['js/components/mediabubble.js', 'js/components/mediaview.js', 'js/media.js']) {
+    const src = read(f);
+    assert.ok(!/#t=/.test(src.replace(/^\s*\*.*$/gm, '').replace(/\/\/.*$/gm, '')),
+      `${f} must not put a #t= fragment on a media src`);
+  }
+  assert.match(read('js/media.js'), /export function seekToFirstFrame/, 'it seeks for the frame instead');
+  assert.match(read('js/components/mediaview.js'), /seekToFirstFrame\(video\)/, 'the modal does');
+  assert.match(read('js/components/mediaview.js'), /seekToFirstFrame\(v\)/, 'and so does the wall');
   // a clip already on this device with no poster gets one built here
   assert.match(chat, /buildPoster\(row\)/, 'chat.js asks for a poster it does not have');
 });
