@@ -97,6 +97,14 @@ surfaces group rooms reuse)
 * **Pass card**: a sys-style in-chat message (trustworthy because it rides
   the E2EE channel from the giver): `{pass:'adult', rooms:[names the
   recipient GETS]}` — never the withheld room names (req 12).
+* **BLOCKED USERS STILL SPEAK IN SHARED GROUPS (scope note)**: the DM block
+  wall gates DIRECT chats only. If I blocked a user and we share a group
+  room, their messages are STILL DELIVERED to me — the group is their room
+  too, and silently dropping it would make the group lie. What changes is
+  the rendering: the message shows in RED ITALIC text so it is unmistakably
+  from someone I blocked (the P1 mock carries a permanent example in
+  Mortensen Family → general, sender `stoyce`). No push/badge for blocked
+  senders rides the existing mute/push gates (P4 decides per nudge).
 * **Sidebar mechanics**: the slide is the `#msg-panes` carousel pattern;
   the tab bar, tag filter, header and version foot are OUTSIDE the sliding
   track (req 2, 15).
@@ -110,7 +118,7 @@ surfaces group rooms reuse)
 | **P1** | Sidebar icon tabs + sliding panes + group/room list with roles, stars, hide/show, read-only locks + group ROOM chat UI (sender chips w/ trust + badges, composer, conversation tabs). Fake data (10 groups, mixed roles). FE only, no API. | ✅ **complete — awaiting review** (branch `groups-p1`) |
 | **P2** | Group settings example UI: overview, pass types list + editor (read-only view), members tab (**room member roster lives here** — promote/revoke shown, not wired), rooms tab. FE only. | ⬜ next |
 | **P3** | Admin panel UI example: Groups page (paginated list + members), user-panel groups section, pass create/distribute flow — mock data. | ⬜ |
-| **P4** | Backend: collections (groups, rooms, passes, memberships, group key material), wire protocol (rooms fan-out, key rotation, ack-aware media lifecycle), pass cards as sys messages, admin APIs, unit + integration tests. | ⬜ |
+| **P4** | Backend: collections (groups, rooms, passes, memberships, group key material), wire protocol (rooms fan-out, key rotation, ack-aware media lifecycle), pass cards as sys messages, BLOCKED-MEMBER DELIVERY (delivered, client renders red italic), admin APIs, unit + integration tests. | ⬜ |
 | **P5** | Client: replace the mock with real data — group list from the server, room chats through the SDK, key rotation, forwarding to rooms, member-aware media pruning. | ⬜ |
 | **P6** | Admin app wired to the real APIs. | ⬜ |
 
@@ -126,7 +134,19 @@ as quiet glyphs and matched by the PINNED sidebar filter (the shared
 tags.js state — one click filters DMs and rooms together, req 15); room
 rows and the room header share a MUTE speaker (muted = red, mirrored
 between panes); opening/closing a room plays the chat pane's slide, whose
-pacing now MATCHES the settings panel (.22s in / .2s out). Read-only rooms carry NO padlock: their name shows inside
+pacing now MATCHES the settings panel (.22s in / .2s out). The mute speaker
+rides the ROOM TAG STRIP (the DM head's layout). Opening a room CLOSES the
+user chat and vice-versa (one pane of content at a time — the 'duplicated
+tabs' symptom was a DM lingering under a room); clicking the already-open
+room toggles it shut. A COLLAPSED group shows one unread pill: everything
+unread NOT on screen (starred rooms keep their own counts, no double-sum),
+its card tints a step darker (between open-rooms and the sidebar) and the
+star glyphs of the surviving rows go invisible. Mobile got the real
+carousel: the DM pane's chat-open ORDER was fixed (body class first, THEN
+the animation — a slide started while display:none is eaten invisibly, the
+actual reason no animation was visible) and closes now slide back OUT to
+the right; a blocked sender's message example sits in Mortensen → general
+(red italic, delivered). Read-only rooms carry NO padlock: their name shows inside
 (#italic-parens) in the list and the room header spells "#name (read only)".
 The chats/groups SIDEBAR TABS wear unread BADGES — the chats tab counts
 real DM unreads from the local store (same fact the row dots read), the

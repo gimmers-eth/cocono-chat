@@ -36,6 +36,7 @@ const PEOPLE = {
   marlene: { state: PS.TRUSTED, badge: 'premium' },
   petter: { state: PS.GONE, badge: null },
   ida: { state: PS.TRUSTED, badge: 'og' },
+  stoyce: { state: PS.STRANGER, badge: null },
 };
 
 // 10 groups (req: names are NOT unique — suffixes are decoration, not keys).
@@ -49,6 +50,10 @@ const FAKE_GROUPS = [
         { from: 'sofie', text: 'Sunday dinner at ours? @marlene bring the guitar!', t: '09:12' },
         { from: 'marlene', text: 'Always. I found a new example.com/jambook to work through.', t: '09:20' },
         { from: 'mads', text: 'Can I bring the kids? No homework room this weekend.', t: '09:31' },
+        // BLOCKED-SENDER EXAMPLE (docs scope): a user the VIEWER blocked,
+        // but we share this group — the message still arrives, rendered
+        // RED ITALIC (never hidden: the group is their room too).
+        { from: 'stoyce', text: 'Someone left bins by the gate again — was it you?', t: '09:47', blocked: true },
       ] },
       { name: 'weekend-house', unread: 2, tags: ['family'], msgs: [
         { from: 'ida', text: 'The roof patch held through the storm. Firewood stacked.', t: '08:02' },
@@ -172,7 +177,6 @@ function buildTabBar(sidebar, anchorAfter) {
     b.setAttribute('role', 'tab');
     b.setAttribute('aria-selected', String(i === 0));
     b.append(iconEl(icon), el('span', 'side-tab-label', label));
-    b.append(iconEl(icon), el('span', 'side-tab-label', label));
     if (key === 'chats' || key === 'groups') {
       const badge = el('span', 'tab-badge', '0');
       badge.title = key === 'chats' ? 'Unread messages in your chats' : 'Unread messages in your group rooms';
@@ -243,8 +247,10 @@ function renderGroups() {
   for (const g of FAKE_GROUPS) {
     if (!g.rooms.some(roomMatches)) continue; // filtered out entirely
     const li = el('li', 'group-item');
+    li.classList.toggle('collapsed', !g.open);
     li.append(groupRow(g));
     const rooms = el('ul', 'room-list');
+    rooms.classList.toggle('closed', !g.open);
     li.append(rooms);
     // paintRooms owns host.hidden: a COLLAPSED group still shows its
     // STARRED rooms (req 13 — the hidden flag and the star filter must
@@ -265,6 +271,17 @@ function groupRow(g) {
   const roleMeta = ROLE_ICON[g.role];
   const role = iconEl(roleMeta[0], `grp-role role-${g.role}`);
   role.title = roleMeta[1];
+  // collapsed groups carry ONE number: everything unread that the row is
+  // NOT showing (starred rooms keep their own pills, so the two numbers
+  // never double-count the same message)
+  let grpPill = null;
+  if (!g.open) {
+    const hidden = g.rooms.filter((r) => !r.starred).reduce((n, r) => n + (r.unread ?? 0), 0);
+    if (hidden > 0) {
+      grpPill = el('span', 'grp-unread', String(hidden));
+      grpPill.title = `${hidden} unread in the collapsed rooms`;
+    }
+  }
   const nameBtn = el('button', 'grp-name');
   nameBtn.type = 'button';
   nameBtn.textContent = g.name;
@@ -277,21 +294,14 @@ function groupRow(g) {
   settings.type = 'button';
   settings.title = 'Group settings (P2)';
   settings.append(iconEl('settings'));
-  row.append(chev, role, nameBtn, members, settings);
+  row.append(chev, role, ...(grpPill ? [grpPill] : []), nameBtn, members, settings);
 
   // The name TOGGLES the group like the chevron — opening a room happens
   // on the ROOM rows, never on the group itself (P1 review feedback).
   // MY role icon LEADS the row: crown owner / shield admin / user member.
-  const toggle = () => {
-    g.open = !g.open;
-    chev.title = g.open ? 'Hide rooms' : 'Show rooms';
-    chev.replaceChildren(iconEl('viewMore', g.open ? 'chev-up' : ''));
-    chev.setAttribute('aria-expanded', String(!!g.open));
-    nameBtn.title = g.open ? `Collapse ${g.name}` : `Expand ${g.name}`;
-    const li = row.closest('.group-item');
-    const rooms = li.querySelector('.room-list');
-    paintRooms(li, rooms, g); // also decides visibility (stars stay)
-  };
+  // A full re-render keeps the collapsed unread SUM and the cards'
+  // collapsed classes in step with g.open — no half-updated row states
+  const toggle = () => { g.open = !g.open; renderGroups(); };
   chev.addEventListener('click', toggle);
   nameBtn.addEventListener('click', toggle);
   members.addEventListener('click', () => toast('Room member lists are part of P2 — see docs/features/groups.md'));
@@ -311,7 +321,7 @@ function paintRooms(li, host, g) {
     star.type = 'button';
     star.title = r.starred ? 'Un-star room' : 'Star room — it stays visible when the group is collapsed';
     star.append(iconEl(r.starred ? 'tagStar' : 'starRegular', r.starred ? 'star-on' : ''));
-    star.addEventListener('click', () => { r.starred = !r.starred; paintRooms(li, host, g); });
+    star.addEventListener('click', () => { r.starred = !r.starred; renderGroups(); });
     const open = el('button', 'room-open');
     open.type = 'button';
     // READ-ONLY rooms carry NO padlock: the name itself shows inside
@@ -328,7 +338,12 @@ function paintRooms(li, host, g) {
       open.append(ic);
     }
     if (r.unread) open.append(el('span', 'room-unread', String(r.unread)));
-    open.addEventListener('click', () => openRoom(g, r));
+    // TOGGLE (P1 review): clicking the room that is already open closes it
+    // — same gesture the desktop user expects when a room overlays a chat
+    open.addEventListener('click', () => {
+      if (activeCtx && activeCtx.r === r && view && !view.hidden) closeRoom();
+      else openRoom(g, r);
+    });
     // mute/unmute (the DM tagbar speaker's sibling): a quiet grey glyph
     // that turns red while MUTED — same alarm rule as #btn-chat-mute
     const mute = el('button', `room-star room-mute${r.muted ? ' muted-on' : ''}`);
@@ -337,8 +352,8 @@ function paintRooms(li, host, g) {
     mute.append(iconEl(r.muted ? 'volumeXmark' : 'volume'));
     mute.addEventListener('click', () => {
       r.muted = !r.muted;
-      paintRooms(li, host, g);
-      paintHeadMute(); // the open room's header mirrors the state
+      renderGroups();
+      paintHeadMute(); // the open room's tag strip mirrors the state
     });
     rr.append(star, open, mute);
     host.append(rr);
@@ -425,7 +440,7 @@ function buildGroupView(client) {
   // the room's speaker, hugging the header's right edge — the DM chat
   // header's mute button in a different dress (same glyphs, same red
   // muted alarm)
-  headMuteBtn = el('button', 'icon-btn group-head-mute');
+  headMuteBtn = el('button', 'icon-btn tagbar-mute group-head-mute');
   headMuteBtn.type = 'button';
   headMuteBtn.hidden = true;
   headMuteBtn.addEventListener('click', () => {
@@ -434,7 +449,7 @@ function buildGroupView(client) {
     paintHeadMute();
     renderGroups(); // the sidebar row mirrors it
   });
-  head.append(headMuteBtn);
+  // (the speaker joins the ROOM TAG STRIP below — the DM head's layout)
   const msg = document.createElement('p');
   msg.className = 'group-head-note muted small';
   msg.textContent = 'Mock data — the room list, roles and messages are fixtures (docs/features/groups.md, P1).';
@@ -448,7 +463,9 @@ function buildGroupView(client) {
   tagbar.setAttribute('role', 'group');
   tagbar.setAttribute('aria-label', 'Room tags');
   tagIcons = el('span', 'tagbar-icons');
-  tagbar.append(tagIcons);
+  // the mute lives IN the tag area (P1 review) — exactly where the DM chat
+  // head carries #btn-chat-mute: icons left, speaker pushed right
+  tagbar.append(tagIcons, headMuteBtn);
   view.append(tagbar);
 
   msgHost = el('ul', 'messages group-messages');
@@ -533,6 +550,10 @@ function appendMessage(m) {
   chipBtn.addEventListener('click', () => stub('Profile sheets from group messages'));
   const body = el('span', 'gr-body', m.text);
   const meta = el('span', 'meta', m.t ?? '');
+  if (m.blocked) {
+    li.classList.add('msg-blocked');
+    body.title = 'You blocked this user — group messages from them are still delivered (docs scope note)';
+  }
   li.append(chipRow, body, meta);
   chipRow.append(chipBtn);
   msgHost.append(li);

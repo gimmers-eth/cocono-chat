@@ -1918,3 +1918,21 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
   }
   .chat-view.closing, .group-view.closing { animation-name: chat-slide-back; }
 }
+
+/* P1 review round 3: the COLLAPSED group's room card sits a step DARKER
+   than open rooms — halfway between the raised card and the sidebar
+   (between "opened" and the header, as specified) — and its star glyphs
+   go invisible (the row layout never shifts; un-star by reopening). */
+.group-item.collapsed .room-list {
+  background: color-mix(in srgb, var(--panel-raised) 52%, var(--panel));
+}
+.group-item.collapsed .room-star { visibility: hidden; }
+/* the collapsed group's unread SUM pill — the room-unread's sibling */
+.grp-unread {
+  flex: none; min-width: 1.3rem; text-align: center;
+  background: var(--accent); color: var(--on-accent); border-radius: 999px;
+  font-size: .7rem; font-weight: 700; padding: .1rem .4rem;
+}
+/* BLOCKED senders in shared groups (docs scope): delivered, but loud —
+   red italic text inside an otherwise normal bubble */
+.msg-blocked .gr-body { color: var(--danger); font-style: italic; }

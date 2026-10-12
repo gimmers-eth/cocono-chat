@@ -2840,8 +2840,12 @@ export function createChat({ client, onHomeRefresh }) {
       // animate the (possibly already visible — chat SWITCH) pane entering.
       // class + forced reflow restarts it every time; display-toggling alone
       // would not fire when switching A -> B with the pane staying shown.
-      playChatEnter();
+      // ORDER MATTERS (mobile carousel): setChatOpen first — phones keep
+      // .chat-pane display:none until the class lands, and an animation
+      // started while display:none is consumed invisibly (that was the
+      // "no slide on mobile" report). The class, THEN the enter hop.
       setChatOpen(true);
+      playChatEnter();
       const last = await render();
       // history = a real conversation existed at open: something received,
       // or something sent that the server accepted (sent/delivered). A
@@ -2920,7 +2924,9 @@ export function createChat({ client, onHomeRefresh }) {
     hideMentionPop();
     pickedMentions.clear();
     closeProfileView();
-    setChatOpen(false);
+    // setChatOpen(false) is DELAYED into finish(): removing chat-open
+    // synchronously display-nones the pane on mobile and the exit slide
+    // never renders (desktop is unaffected: main is always visible)
     closeMsgModal();
     closeChatOpts();
     closeForward();
@@ -2929,6 +2935,7 @@ export function createChat({ client, onHomeRefresh }) {
       view.classList.remove('closing');
       // never stomp a chat opened while the slide-out was still running
       if (currentPeer) return;
+      setChatOpen(false); // release the mobile layout only now
       view.hidden = true;
       // the empty pane appears ONLY once the sliding pane is gone: it is a
       // flex sibling, so showing it during the slide split main() in two
