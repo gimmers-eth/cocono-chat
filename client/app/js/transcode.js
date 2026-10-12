@@ -33,8 +33,40 @@
 import { logEvent } from './applog.js';
 import { stageMedia, unstageMedia } from './vidstage.js';
 
+/**
+ * IS THE RE-ENCODE ON? No — and that is a decision with evidence behind it,
+ * not a TODO.
+ *
+ * It was written for a real problem (a recipient whose browser cannot decode
+ * HEVC), but that problem was never observed: every "cannot play" report turned
+ * out to be a Content-Security-Policy with no `media-src`, which refused a
+ * `blob:` <video> in EVERY browser before a decoder was consulted. Once the
+ * header was fixed, the phones in this project played the clips — including
+ * desktop Chromium, which decoded the HEVC/.mov well enough to hand back a
+ * poster frame (`captured at 0.1s via bitmap/rvfc` in its own journal), because
+ * Windows ships an HEVC decoder and Chromium uses it.
+ *
+ * What the re-encode DID do, once the CSP stopped masking it, was cost a send:
+ * it records in real time (a 30 s clip is a 30 s wait), on battery, at a quality
+ * loss, and it hangs if the engine leaves `play()` or `onstop` pending — which
+ * is what it did, so the clip never reached the upload at all.
+ *
+ * So the default is: send the file the user's camera made, show its poster,
+ * play it inline, and when an engine genuinely cannot decode it SAY so and offer
+ * Save-to-device (mediaview.js). Flip this to true and everything below is still
+ * here, bounded and journalled — but flip it because a recipient could not play
+ * a clip, not because a codec name looks risky.
+ */
+export const TRANSCODE_ENABLED = false;
+
 /** Max seconds we will re-encode at send time (real-time cost, battery). */
 export const TRANSCODE_MAX_SECONDS = 90;
+/** Hard ceiling on the whole re-encode, whatever the clip claims: a send must
+ *  never be held hostage by an optional compatibility pass. */
+export const TRANSCODE_DEADLINE_MS = 150_000;
+/** Per-await ceilings: any one of these settling late must not stall the send. */
+const PLAY_TIMEOUT_MS = 8_000;
+const STOP_TIMEOUT_MS = 6_000;
 /** Max payload after resizing — the app cap is the other gate, this is politeness. */
 export const TRANSCODE_MAX_BYTES = 100 * 1024 * 1024;
 /** Only transcode clips up to this resolution; beyond it a phone is doing more harm than the codec. */
@@ -168,7 +200,7 @@ export function transcodeDecision({ file, mime, info, dur, width, height, hasRec
  * Re-encode one video to H.264/AAC MP4. Resolves `null` on ANY problem — every
  * caller falls back to the original file — and journals the reason.
  */
-export async function transcodeVideo(file, { onProgress = null, log = null, audioCtx = null } = {}) {
+export async function transcodeVideo(file, { onProgress = null, log = null, audioCtx = null, enabled = TRANSCODE_ENABLED, deadlineMs = null } = {}) {
   // EVERY branch journals: the reason a phone kept sending `.mov` was invisible
   // because the skip paths only warned to a console nobody was watching.
   const note = (m) => {
@@ -180,6 +212,7 @@ export async function transcodeVideo(file, { onProgress = null, log = null, audi
   let audio = null;
   let actx = audioCtx ?? null;      // may have been opened INSIDE the user gesture
   try {
+    if (!enabled) { note('skipped (re-encode off: the camera file is sent as made)'); return null; }
     const mime = String(file?.type ?? '');
     const head = new Uint8Array(await file.slice(0, 64).arrayBuffer());
     const info = sniffVideoFormat(head);
@@ -217,9 +250,27 @@ export async function transcodeVideo(file, { onProgress = null, log = null, audi
 
     // Wall clock is the recorder's clock on BOTH engines, so playbackRate is not
     // a speed-up: at 2× it records a 2× clip half as long. Real time it is.
-    const rec = eng.engine === 'element'
-      ? await recordElement(video, type, onProgress)
-      : await recordCanvas(video, type, onProgress, note, (a) => { audio = a; actx = a?.ctx ?? actx; }, actx);
+    //
+    // DEADLINE around the whole recording, and a kill list the deadline can pull:
+    // `await video.play()` and `await rec.onstop` are both promises an engine is
+    // entitled never to settle (iOS leaves play() pending when it will not play;
+    // a recorder that was never started never fires stop). Without this the
+    // OPTIONAL compatibility pass could hold a user's send open forever — which
+    // is exactly what it did: the clip never reached the upload at all.
+    const ctl = { killed: false, cleanup: [] };
+    const budget = Number(deadlineMs) > 0
+      ? Number(deadlineMs)
+      : Math.min(TRANSCODE_DEADLINE_MS, ((Number(video.duration) || 0) * 1000) + 45_000);
+    const rec = await Promise.race([
+      eng.engine === 'element'
+        ? recordElement(video, type, onProgress, ctl)
+        : recordCanvas(video, type, onProgress, note, (a) => { audio = a; actx = a?.ctx ?? actx; }, actx, ctl),
+      new Promise((resolve) => setTimeout(() => {
+        ctl.killed = true;
+        for (const fn of ctl.cleanup) { try { fn(); } catch { /* best effort */ } }
+        resolve({ blob: null, why: `deadline-${Math.round(budget / 1000)}s` });
+      }, budget)),
+    ]);
     if (!rec.blob) { note(`skipped (${rec.why})`); return null; }
 
     const out = rec.blob;
@@ -256,7 +307,7 @@ export async function transcodeVideo(file, { onProgress = null, log = null, audi
  * canvas. `ondataavailable` every second so a long clip is never held in one
  * unbounded buffer.
  */
-async function recordElement(video, type, onProgress) {
+async function recordElement(video, type, onProgress, ctl) {
   let stream;
   try { stream = video.captureStream(); } catch { return { blob: null, why: 'captureStream threw' }; }
   if (!stream?.getVideoTracks?.().length) return { blob: null, why: 'no captured video track' };
@@ -265,12 +316,21 @@ async function recordElement(video, type, onProgress) {
   const stopped = new Promise((resolve) => { rec.onstop = resolve; });
   rec.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
   rec.onerror = () => { /* the size/format checks in the caller catch a broken output */ };
+  ctl?.cleanup.push(() => { try { rec.stop(); } catch { /* already stopped */ } });
   rec.start(1000);
-  const played = await playThrough(video, onProgress);
-  if (!played) { try { rec.stop(); } catch { /* already stopped */ } await stopped; return { blob: null, why: 'playback never started' }; }
+  const played = await playThrough(video, onProgress, null, ctl);
+  const bail = (why) => ({ blob: null, why });
+  if (!played) { try { rec.stop(); } catch { /* already stopped */ } await withDeadline(stopped, STOP_TIMEOUT_MS); return bail('playback never started'); }
   try { rec.stop(); } catch { /* already stopped */ }
-  await stopped;
+  // bounded: a recorder that never fires onstop must not become a stuck send
+  await withDeadline(stopped, STOP_TIMEOUT_MS);
+  if (ctl?.killed) return bail('deadline');
   return { blob: new Blob(parts, { type: 'video/mp4' }), hadAudio: stream.getAudioTracks?.().length > 0 };
+}
+
+/** A promise, or nothing after `ms` — for the awaits an engine may never settle. */
+function withDeadline(promise, ms) {
+  return Promise.race([promise, new Promise((resolve) => setTimeout(resolve, ms))]);
 }
 
 /**
@@ -282,7 +342,7 @@ async function recordElement(video, type, onProgress) {
  * (`why: 'no audio capture'`) — the caller then sends the original. A silent
  * re-encode of someone's video is a worse loss than a `.mov`.
  */
-async function recordCanvas(video, type, onProgress, note, giveAudio, ctxIn = null) {
+async function recordCanvas(video, type, onProgress, note, giveAudio, ctxIn = null, ctl = null) {
   const w = video.videoWidth || 0, h = video.videoHeight || 0;
   if (!w || !h) return { blob: null, why: 'no dimensions' };
   const scale = Math.min(1, TRANSCODE_MAX_EDGE / Math.max(w, h));
@@ -310,25 +370,33 @@ async function recordCanvas(video, type, onProgress, note, giveAudio, ctxIn = nu
 
   const draw = () => { try { g.drawImage(video, 0, 0, canvas.width, canvas.height); } catch { /* a frame the decoder withheld */ } };
   const painter = startPainter(video, draw);
+  ctl?.cleanup.push(() => { try { painter.stop(); } catch { /* done */ } });
   rec.start(250);
+  ctl?.cleanup.push(() => { try { rec.stop(); } catch { /* already stopped */ } });
   const played = await playThrough(video, onProgress, async () => {
     // A suspended AudioContext records SILENCE, and a silent re-encode of
     // someone's video is worse than the .mov we would otherwise send. Contexts
     // are often handed over suspended until something plays, so ask again now
     // that playback has started — and remember the answer.
     if (audio.ctx && audio.ctx.state !== 'running' && audio.ctx.state !== undefined) {
-      try { await audio.ctx.resume?.(); } catch { /* refused */ }
+      try { await withDeadline(audio.ctx.resume?.() ?? Promise.resolve(), 3_000); } catch { /* refused */ }
       note(`audio context: ${audio.ctx.state}`);
     }
     audio.ran = audioRan(audio.ctx);
-  });
+  }, ctl);
   // the last presented frame, then a beat for the recorder to flush it
   draw();
-  await new Promise((r) => setTimeout(r, 250));
+  await withDeadline(new Promise((r) => setTimeout(r, 250)), 400);
   painter.stop();
-  if (!played) { try { rec.stop(); } catch { /* already stopped */ } await stopped; return { blob: null, why: 'playback never started' }; }
+  if (!played) {
+    try { rec.stop(); } catch { /* already stopped */ }
+    await withDeadline(stopped, STOP_TIMEOUT_MS);
+    return { blob: null, why: ctl?.killed ? 'deadline' : 'playback never started' };
+  }
   try { rec.stop(); } catch { /* already stopped */ }
-  await stopped;
+  // bounded, like the element engine: no onstop, no stuck send
+  await withDeadline(stopped, STOP_TIMEOUT_MS);
+  if (ctl?.killed) return { blob: null, why: 'deadline' };
 
   // A source WITH sound that we could not carry is not a transcode, it is an
   // edit.
@@ -412,8 +480,10 @@ async function audioGraph(video, note, ctxIn = null) {
       const AC = globalThis.AudioContext ?? globalThis.webkitAudioContext;
       if (!AC) { note('no AudioContext here: this engine cannot carry the audio'); return { track: null, ctx: null, ran: true }; }
       ctx = new AC();
-      // A phone may hand us a suspended context; a suspended graph records silence.
-      try { await ctx.resume?.(); } catch { /* some engines refuse without a gesture */ }
+      // A phone may hand us a suspended context; a suspended graph records
+      // silence. BOUNDED: resume() on iOS can stay pending forever without a
+      // gesture, and this runs inside a send.
+      try { await withDeadline(ctx.resume?.() ?? Promise.resolve(), 3_000); } catch { /* some engines refuse */ }
     }
     const src = ctx.createMediaElementSource(video);
     const dest = ctx.createMediaStreamDestination();
@@ -432,16 +502,20 @@ async function audioGraph(video, note, ctxIn = null) {
  * rejecting (autoplay policy, locked screen) is a SKIP, not a failure: the
  * original file goes, unchanged.
  */
-async function playThrough(video, onProgress, onStarted = null) {
+async function playThrough(video, onProgress, onStarted = null, ctl = null) {
   const target = Number(video.duration) || 0;
   const tick = setInterval(() => {
     try { onProgress?.(Math.min(1, (video.currentTime || 0) / (target || 1))); } catch { /* ui hook */ }
   }, 250);
+  ctl?.cleanup.push(() => clearInterval(tick));
   // the recorder is wall-clock, so this is the clip's own length plus slack for
   // a phone that decodes slower than it plays
   const deadline = (target * 1000) + 20_000;
   try {
-    await video.play();
+    // BOUNDED: iOS leaves play() pending when it has decided not to play, and a
+    // pending play() is a send that never happens.
+    await withDeadline(video.play(), PLAY_TIMEOUT_MS);
+    if (video.paused) return false;
   } catch {
     clearInterval(tick);
     return false;
@@ -453,6 +527,7 @@ async function playThrough(video, onProgress, onStarted = null) {
       const chk = setInterval(() => {
         if (video.ended || (target > 0 && (video.currentTime || 0) >= target - 0.05)) { clearInterval(chk); resolve(); }
       }, 150);
+      ctl?.cleanup.push(() => clearInterval(chk));
       setTimeout(() => { clearInterval(chk); resolve(); }, deadline);
     });
   } finally {

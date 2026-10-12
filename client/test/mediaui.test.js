@@ -126,11 +126,39 @@ test('media: the video preview path is wired end to end', () => {
   assert.match(tc, /logEvent\('transcode'/, 'the journal hears about transcodes');
   const noteBody = tc.match(/const note = \(m\) => \{[\s\S]*?\n  \};/)?.[0] ?? '';
   assert.match(noteBody, /logEvent/, 'through the ONE note() every branch uses, so no path is silent');
-  // progress reaches the user: a real-time re-encode with no number is a hang
+  // progress reaches the user IN THE MESSAGE: a real-time job with no number on
+  // screen is indistinguishable from a hang, and a toast expires after 4.5 s
   assert.match(read('js/media.js'), /onPhase\?\.\('transcoding', frac\)/, 'prepareMedia forwards transcode progress');
-  assert.match(read('js/components/chat.js'), /phase === 'transcoding'/, 'and the composer turns it into a percentage');
+  const chat = read('js/components/chat.js');
+  assert.match(chat, /showPrepProgress\(/, 'the composer paints preparation onto the draft row');
+  assert.match(chat, /showUploadProgress\(/, 'and the upload onto the same bar');
+  assert.match(chat, /onProgress: \(got, total\) => \{ showUploadProgress/, 'from the SDK’s own byte count, not a guess');
+  assert.ok(!/toast\(.*Preparing video/.test(chat), 'the prepare phase is not a toast any more');
+  assert.match(chat, /row\.state = 'preparing'/, 'the draft row exists before the work starts');
+  // the badge is the clip's transport in the message; the rest of the bubble
+  // still opens the modal
+  assert.match(read('js/components/mediabubble.js'), /badge\.dataset\.act = 'playpause'/);
+  assert.match(chat, /toggleInlinePlay\(li\)/, 'chat.js binds the badge by class');
+  assert.match(chat, /inlinePlay\.set\(/, 'and playback survives the re-render loop');
   // a clip already on this device with no poster gets one built here
-  assert.match(read('js/components/chat.js'), /buildPoster\(row\)/, 'chat.js asks for a poster it does not have');
+  assert.match(chat, /buildPoster\(row\)/, 'chat.js asks for a poster it does not have');
+});
+
+test('media: the sender-side re-encode is OFF, and the reason is written down', () => {
+  // It was written for a problem that turned out to be a CSP with no media-src.
+  // Once media could load at all, the phones in this project played the camera's
+  // own HEVC/.mov — desktop Chromium included (its journal shows it decoding
+  // frames: `captured at 0.1s via bitmap/rvfc`) — while the re-encode cost a
+  // real-time wait, battery, quality, and a send that never arrived when the
+  // engine left an await pending. Re-enabling it is a deliberate act, so the
+  // default is asserted here rather than left to drift.
+  const tc = read('js/transcode.js');
+  assert.match(tc, /export const TRANSCODE_ENABLED = false;/);
+  assert.match(tc, /TRANSCODE_DEADLINE_MS/, 'the machinery stays, bounded by a deadline');
+  assert.match(tc, /withDeadline\(video\.play\(\), PLAY_TIMEOUT_MS\)/, 'play() can never hold a send open');
+  assert.match(tc, /withDeadline\(stopped, STOP_TIMEOUT_MS\)/, 'and neither can a recorder that never fires onstop');
+  assert.match(read('js/media.js'), /if \(TRANSCODE_ENABLED\)/,
+    'prepareMedia does not even open an AudioContext while the re-encode is off');
 });
 
 test('media: all THREE notification emitters name an attachment, never its JSON', () => {

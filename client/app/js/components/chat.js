@@ -37,6 +37,7 @@ import {
 import {
   prepareMedia, mediaRow, mediaLabel, parseMediaPayload, applyArrivalPolicy,
   retryFailedDownloads, pruneLocalMedia, releaseScope, buildPoster, hasLocalBytes,
+  reapStaleDrafts,
 } from '../media.js';
 import { bubbleNodes } from './mediabubble.js';
 import {
@@ -64,6 +65,12 @@ const STATE_MARK = { sending: 'stateSending', sent: 'stateSent', delivered: 'sta
 // the guard the paint → poster → paint loop would ask again on every event, and
 // a decoder refusal is not something to retry 40 times a minute.
 const posterAsked = new Set();
+
+// Inline playback in the transcript, keyed by media row id. Bubbles are rebuilt
+// atomically on every event, so the element that was playing is thrown away each
+// time: the INTENT lives here and is restored after each paint, or a message
+// arriving mid-clip silently stops someone's video.
+const inlinePlay = new Map();   // mediaId -> { t: seconds }
 
 // Timeline notices: when a security heads-up happens it must not be a
 // fleeting toast — it lands in the conversation timeline (dir:'sys') AND
@@ -467,26 +474,47 @@ export function createChat({ client, onHomeRefresh }) {
   // the bytes to the SDK, which encrypts, uploads and fans out. `localId` is
   // generated HERE for the same reason: the record's id must exist first, and
   // the ack/delivered events come back keyed to it.
-  async function sendMediaTo(peer, prepared) {
-    const localId = crypto.randomUUID();
-    const id = `out:${localId}`;
-    const ts = Date.now();
+  //
+  // `draft` is the row pickAndSend already put on screen: a send is a sequence
+  // (prepare → upload) and the transcript shows both, so the row exists before
+  // this function is reached and is patched rather than created.
+  async function sendMediaTo(peer, prepared, draft = null) {
+    const localId = draft?.localId ?? crypto.randomUUID();
+    const id = draft?.id ?? `out:${localId}`;
+    const ts = draft?.ts ?? Date.now();
     const size = prepared.bytes?.length ?? prepared.bytes?.size ?? 0;
-    const row = mediaRow({
-      key: id, blobId: null, peer, dir: 'out', kind: prepared.kind,
-      media: { name: prepared.name, mime: prepared.mime, size },
-      msgId: id, ts,
-    });
-    row.state = 'stored';          // we hold these bytes already — they came from this device
-    row.blurred = false;           // req 7: a sent image is never blurred
-    row.data = prepared.bytes instanceof Blob ? prepared.bytes : new Blob([prepared.bytes], { type: prepared.mime || 'application/octet-stream' });
-    row.thumb = prepared.thumb ?? null;
-    // recorded, not thrown away: 'why is there no preview' is the question this
-    // feature keeps being asked, and the answer is now on the record
-    row.posterWhy = prepared.posterWhy ?? null;
-    if (prepared.posterWhy) console.warn(`[media] no preview image for this ${prepared.kind}: ${prepared.posterWhy}`);
-    await saveMessage({ id, peer, dir: 'out', text: mediaLabel(prepared.kind, prepared.name), ts, state: 'sending', kind: prepared.kind, mediaId: id });
-    await saveMedia(row);
+    const data = prepared.bytes instanceof Blob
+      ? prepared.bytes
+      : new Blob([prepared.bytes], { type: prepared.mime || 'application/octet-stream' });
+    const patch = {
+      kind: prepared.kind, name: prepared.name, mime: prepared.mime, size,
+      state: 'uploading', progress: 0,
+      data,
+      thumb: prepared.thumb ?? null,
+      // recorded, not thrown away: 'why is there no preview' is the question this
+      // feature keeps being asked, and the answer is now on the record
+      posterWhy: prepared.posterWhy ?? null,
+      blurred: false,           // req 7: a sent image is never blurred
+      animated: prepared.animated === true,
+      ...(prepared.w ? { w: prepared.w, h: prepared.h } : {}),
+      ...(prepared.dur ? { dur: prepared.dur } : {}),
+    };
+    if (draft) {
+      await updateMedia(id, patch);
+      // the descriptor can rename the file (a re-encode says .mp4, not .mov) and
+      // the kind is only certain once the bytes have been read
+      await updateMessage(id, { kind: prepared.kind, text: mediaLabel(prepared.kind, prepared.name) });
+    } else {
+      const row = mediaRow({
+        key: id, blobId: null, peer, dir: 'out', kind: prepared.kind,
+        media: { name: prepared.name, mime: prepared.mime, size },
+        msgId: id, ts,
+      });
+      Object.assign(row, patch);
+      row.state = 'stored';     // we hold these bytes already — they came from this device
+      await saveMessage({ id, peer, dir: 'out', text: mediaLabel(prepared.kind, prepared.name), ts, state: 'sending', kind: prepared.kind, mediaId: id });
+      await saveMedia(row);
+    }
     markRead(peer, ts);
     await render();
     onHomeRefresh?.();
@@ -496,13 +524,18 @@ export function createChat({ client, onHomeRefresh }) {
         name: prepared.name, mime: prepared.mime,
         w: prepared.w ?? null, h: prepared.h ?? null, dur: prepared.dur ?? null,
         animated: prepared.animated === true,
-      }, { localId });
+      }, {
+        localId,
+        // the bar in the bubble is the upload's own byte count, not a guess
+        onProgress: (got, total) => { showUploadProgress(id, got, total); },
+      });
       // the blob id exists only now: repoint the row's wire identity (and keep
       // the crypto fields so this device could re-verify/re-download its own
       // copy — the record is what a report hands the server, too)
       await updateMedia(id, {
         blobId: media.id, key: media.key, iv: media.iv,
         thumbIv: media.thumbIv ?? null, sha256: media.sha256,
+        state: 'stored', storedAt: Date.now(), progress: 1,
       });
       // A SELF-CHAT send routes a copy to this very device, which therefore
       // lands in the blob's `pending` list. We ARE the copy — the bytes came
@@ -511,48 +544,100 @@ export function createChat({ client, onHomeRefresh }) {
       if (String(peer).toLowerCase() === String(client.username ?? '').toLowerCase()) {
         client.ackMedia(media.id, true).catch(() => {});
       }
+      // the bar comes down: this row is a settled local copy now
+      await render();
+      onHomeRefresh?.();
     } catch (err) {
       // upload failed → nothing was ever sent (the SDK throws BEFORE any
-      // envelope). The local copy above is what the user keeps.
+      // envelope). The local copy above is what the user keeps, so the row goes
+      // back to 'stored' (its bytes are here) while the MESSAGE carries failed.
       await updateMessage(id, { state: 'failed' });
+      await updateMedia(id, { state: 'stored', progress: 0 });
       toast(humanError(err), 'error');
       await render();
       throw err;
     }
   }
 
+  // ---- send progress, IN THE BUBBLE ----
+  // A toast expires after 4.5 s; cutting a poster, re-encoding a clip and
+  // pushing 100 MB all outlive that, and a phone that is working with no number
+  // on screen looks frozen. Both phases write `progress` on the row the bubble
+  // is already drawing, throttled because render() rebuilds the transcript.
+  let lastProgressPaint = 0;
+  async function paintProgress(id, patch) {
+    const now = Date.now();
+    if (now - lastProgressPaint < 150) return;
+    lastProgressPaint = now;
+    try {
+      await updateMedia(id, patch);
+      await render();
+    } catch { /* a progress frame is never worth failing a send over */ }
+  }
+  const clamp01 = (n) => Math.min(1, Math.max(0, Number(n) || 0));
+
+  /** Preparing: 0–60% of the bar (reading the file, cutting the poster, any
+   *  re-encode). Uploading: 60–100%. One bar, two phases, no toast. */
+  function showPrepProgress(id, phase, frac) {
+    if (phase === 'transcoding') {
+      paintProgress(id, { state: 'preparing', progress: clamp01(frac) * 0.6 }).catch(() => {});
+      return;
+    }
+    paintProgress(id, { state: 'preparing', progress: 0.02 }).catch(() => {});
+  }
+
+  function showUploadProgress(id, got, total) {
+    const frac = Number(total) > 0 ? clamp01(got / total) : 0;
+    paintProgress(id, { state: 'uploading', progress: 0.6 + (frac * 0.4) }).catch(() => {});
+  }
+
   async function pickAndSend(file) {
     if (!currentPeer || peerGone) return;
-    let prepared;
-    let lastPrepPct = -1;
+    const peer = currentPeer;
+    // The bubble goes up BEFORE any work starts: the file the user just picked
+    // is already a Blob, so the preview is instant and the bar underneath it is
+    // the honest answer to 'is it doing anything?'.
+    const localId = crypto.randomUUID();
+    const id = `out:${localId}`;
+    const ts = Date.now();
+    const kindGuess = String(file?.type ?? '').startsWith('video/') ? 'video'
+      : String(file?.type ?? '').startsWith('image/') ? 'image' : 'file';
+    let draft = null;
     try {
-      // announced, because re-encoding a clip runs at about real time: without a
-      // word, a 6-second video looks like a frozen app on a phone
+      const row = mediaRow({
+        key: id, blobId: null, peer, dir: 'out', kind: kindGuess,
+        media: { name: file?.name ?? '', mime: file?.type ?? '', size: Number(file?.size) || 0 },
+        msgId: id, ts,
+      });
+      row.state = 'preparing';
+      row.blurred = false;
+      row.progress = 0;
+      row.data = file ?? null;
+      await saveMessage({ id, peer, dir: 'out', text: mediaLabel(kindGuess, file?.name ?? ''), ts, state: 'sending', kind: kindGuess, mediaId: id });
+      await saveMedia(row);
+      markRead(peer, ts);
+      await render();
+      draft = { id, localId, ts };
+    } catch { draft = null; }   // no draft is not fatal: the send still works, it just has no bar
+
+    let prepared;
+    try {
       prepared = await prepareMedia(file, {
-        onPhase: (phase, frac) => {
-          if (phase === 'preparing' && String(file.type ?? '').startsWith('video/')) {
-            toast('Preparing video so every device can play it…');
-          }
-          // Re-encoding runs at about real time, and a toast that expires after
-          // 4.5 s leaves a 30-second wait looking like a frozen app. Re-issuing
-          // it with a percentage both restarts the timer and says how far along
-          // the phone is. Throttled to whole tens: this fires every 250 ms.
-          if (phase === 'transcoding' && Number.isFinite(frac)) {
-            const pct = Math.round(Math.min(1, Math.max(0, frac)) * 10) * 10;
-            if (pct !== lastPrepPct) {
-              lastPrepPct = pct;
-              toast(pct >= 100 ? 'Preparing video…' : `Preparing video so every device can play it… ${pct}%`);
-            }
-          }
-        },
+        onPhase: (phase, frac) => { if (draft) showPrepProgress(draft.id, phase, frac); },
       });
     } catch (err) {
-      // a plain sentence from the prep layer (too big, SVG, unreadable image)
+      // a plain sentence from the prep layer (too big, SVG, unreadable image).
+      // The draft promised a message that cannot exist: take it back down.
+      if (draft) {
+        await deleteMessage(draft.id).catch(() => {});
+        await deleteMedia(draft.id).catch(() => {});
+        await render();
+      }
       toast(err?.message ?? 'That file could not be sent.', 'error');
       return;
     }
     try {
-      await sendMediaTo(currentPeer, prepared);
+      await sendMediaTo(peer, prepared, draft);
     } catch { /* reported already: the bubble shows failed, the toast said why */ }
   }
 
@@ -599,6 +684,13 @@ export function createChat({ client, onHomeRefresh }) {
     // for the life of the tab.
     const rows = await mediaWith(currentPeer);
     const mediaById = new Map(rows.map((r) => [r.id, r]));
+    // where an inline clip had got to, read BEFORE its element is thrown away
+    if (inlinePlay.size) {
+      for (const v of list.querySelectorAll('.media-video')) {
+        const id = v.dataset?.mediaId;
+        if (id && inlinePlay.has(id)) inlinePlay.set(id, { t: v.currentTime || 0 });
+      }
+    }
     releaseScope('bubbles');
     const frag = document.createDocumentFragment();
     for (const m of msgs) {
@@ -620,7 +712,8 @@ export function createChat({ client, onHomeRefresh }) {
         // human label ("Photo", "File: spec.pdf") the sidebar and a
         // notification show, never the raw descriptor
         body.className = 'media-body';
-        body.append(...bubbleNodes(m, mediaById.get(m.mediaId), { verified: peerIdentityVerified }));
+        const mRow = mediaById.get(m.mediaId);
+        body.append(...bubbleNodes(m, mRow, { verified: peerIdentityVerified, playing: inlinePlay.has(mRow?.id) }));
       } else {
         body.textContent = m.text;
       }
@@ -636,6 +729,20 @@ export function createChat({ client, onHomeRefresh }) {
       frag.appendChild(li);
     }
     list.replaceChildren(frag);
+    // resume anything that was playing in the transcript when the bubbles were
+    // rebuilt (same clip, same place in it)
+    if (inlinePlay.size) {
+      for (const v of list.querySelectorAll('.media-video')) {
+        const st = inlinePlay.get(v.dataset?.mediaId);
+        if (!st) continue;
+        try { v.currentTime = st.t || 0; } catch { /* not seekable yet */ }
+        v.muted = false;
+        const p = v.play?.();
+        // refused (autoplay policy, or a codec this engine will not touch): give
+        // up quietly rather than fighting the user's transcript every paint
+        if (p?.catch) p.catch(() => inlinePlay.delete(v.dataset.mediaId));
+      }
+    }
     list.scrollTop = list.scrollHeight;
     settleAtBottom(list); // hold the pin through the late-landing chrome
     // A clip whose bytes are on this device but which has no poster: cut one
@@ -697,6 +804,32 @@ export function createChat({ client, onHomeRefresh }) {
   // A bubble's Download/Delete press: the message id on the <li> is the only
   // handle the DOM carries, so resolve it to the row and let the shared
   // action do the work (the Files tab calls the same function).
+  /**
+   * Play/pause the clip IN ITS BUBBLE. The badge is the only thing that does
+   * this; the rest of the message still opens the modal. An explicit tap is a
+   * user gesture, so the clip plays WITH sound — that is what pressing play
+   * means — and a refusal (codec, policy) says so instead of doing nothing.
+   */
+  function toggleInlinePlay(li) {
+    const v = li.querySelector('.media-video');
+    if (!v) return;
+    const id = v.dataset?.mediaId || li.dataset.id;
+    if (!v.paused) {
+      inlinePlay.delete(id);
+      try { v.pause(); } catch { /* already stopped */ }
+      return;
+    }
+    v.muted = false;
+    inlinePlay.set(id, { t: v.currentTime || 0 });
+    const p = v.play?.();
+    if (p?.catch) {
+      p.catch(() => {
+        inlinePlay.delete(id);
+        toast('This browser cannot play that video here — open the message for the details.', 'error');
+      });
+    }
+  }
+
   async function runBubbleAction(messageId, action) {
     const rec = messageId ? await getMessage(messageId) : null;
     const row = rec?.mediaId ? await getMedia(rec.mediaId) : null;
@@ -732,6 +865,14 @@ export function createChat({ client, onHomeRefresh }) {
 
   async function openMsgModal(rec) {
     msgId = rec.id;
+    // the modal is now the place this attachment is looked at: a clip playing in
+    // the transcript behind it would be two soundtracks and one confusing pause
+    // button. Stop inline playback, and forget it so a re-render does not
+    // restart it underneath the modal.
+    for (const v of ($('chat-messages')?.querySelectorAll('.media-video') ?? [])) {
+      try { v.pause(); } catch { /* already stopped */ }
+    }
+    inlinePlay.clear();
     $('msg-modal-title').textContent = rec.dir === 'out' ? 'Sent message' : 'Message';
     $('msg-modal-time').textContent = `${rec.peer} · ${new Date(rec.ts).toLocaleString()}`;
     setStatus($('msg-modal-status'), '');
@@ -2314,6 +2455,18 @@ export function createChat({ client, onHomeRefresh }) {
     pruneLocalMedia().then((n) => { if (n && currentPeer) render().catch(() => {}); }).catch(() => {});
     setInterval(() => { pruneLocalMedia().catch(() => {}); }, 24 * 3600 * 1000);
 
+    // A send this app did not live to finish (tab closed, phone slept, PWA
+    // killed) leaves a draft row with a bar that will never move. Settle it the
+    // way a failed upload is settled: the bytes stay on this device, the MESSAGE
+    // says it never went. A stuck progress bar is worse than a failure — a
+    // failure is a fact the user can act on.
+    reapStaleDrafts()
+      .then(async (ids) => {
+        for (const id of ids) { try { await updateMessage(id, { state: 'failed' }); } catch { /* gone already */ } }
+        if (ids.length && currentPeer) await render();
+      })
+      .catch(() => {});
+
     const sendBtn = $('btn-send');
     // Mobile: a button tap normally moves focus off the input, tearing the
     // soft keyboard down after every send. Suppressing the pointerdown
@@ -2437,6 +2590,13 @@ export function createChat({ client, onHomeRefresh }) {
       if (!li) return;
       // a bubble's own Download/Delete buttons are NOT a tap on the bubble:
       // they act and the modal stays shut (req 6 lives right here)
+      const badge = e.target.closest('.media-play-badge');
+      if (badge && badge.dataset?.act === 'playpause') {
+        // the badge is the clip's transport IN the message: play/pause here,
+        // and the modal stays shut. The rest of the bubble still opens it.
+        toggleInlinePlay(li);
+        return;
+      }
       const act = e.target.closest('.media-dl') ? 'download'
         : e.target.closest('.media-decline') ? 'decline'
           : e.target.closest('.media-save') ? 'save' : null;

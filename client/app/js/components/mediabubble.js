@@ -17,6 +17,12 @@ import { formatSize, objectUrl, isBlurred, durationText, renderableAsImage, hasL
 
 const KIND_ICON = { image: 'tabImages', video: 'tabVideos', file: 'attachFile' };
 
+// States in which the bytes on this device ARE the ones the row points at: the
+// sender's own copy from the moment it is picked ('preparing'), through the
+// upload ('uploading'), to the settled row ('stored'). A draft is worth a real
+// preview — the user is looking at it while the phone works.
+const HAS_OWN_BYTES = new Set(['stored', 'uploading', 'preparing']);
+
 const mk = (tag, cls, text) => {
   const el = document.createElement(tag);
   if (cls) el.className = cls;
@@ -32,6 +38,12 @@ const STATUS = {
   // while it is in flight the percentage IS the message: 'downloading…' with no
   // number is what makes a 100 MB fetch look stuck
   downloading: { image: 'Downloading…', video: 'Downloading…', file: 'Downloading…' },
+  // the OUTGOING half of the same idea. Preparing (reading the file, cutting a
+  // poster, re-encoding if that is switched on) and uploading are phases of the
+  // MESSAGE, and they belong in the bubble the user is looking at — a toast
+  // expires after 4.5 s and a phone that works for 30 s looks frozen.
+  preparing:   { image: 'Preparing…', video: 'Preparing video…', file: 'Preparing…' },
+  uploading:   { image: 'Uploading…', video: 'Uploading…', file: 'Uploading…' },
   declined:    { image: 'Removed from this device', video: 'Removed from this device', file: 'Deleted — not downloaded' },
   expired:     { image: 'No longer available', video: 'No longer available', file: 'No longer available' },
   failed:      { image: 'Download failed', video: 'Download failed', file: 'Download failed' },
@@ -40,6 +52,10 @@ const STATUS = {
   // preview, not the file.
   pruned:      { image: '', video: '', file: '' },
 };
+
+/** States whose bubble carries a determinate bar (bytes moving in OR out). */
+export const PROGRESS_STATES = ['downloading', 'preparing', 'uploading'];
+export const hasProgress = (row) => PROGRESS_STATES.includes(row?.state);
 
 function statusLine(row) {
   if (row?.state === 'pruned') {
@@ -59,32 +75,44 @@ function statusLine(row) {
 /** Preview picture: thumb when present, else the decrypted bytes (a send
  *  without a poster, or an image that could not be thumbnailed). */
 function previewEl(row, blur) {
+  // A VIDEO this device holds is always a <video>, poster or not: the badge on
+  // top of it plays the clip IN PLACE (chat.js owns the tap), which an <img>
+  // cannot do. With a poster the element costs nothing to paint (`preload:none`
+  // shows the JPEG and decodes only on play); without one it decodes frame 0.1 s
+  // so the bubble is a picture rather than a black box.
+  if (row.kind === 'video') {
+    if (hasLocalBytes(row)) return videoPreviewEl(row);
+    const thumb = row.thumb;
+    if (thumb?.size && (!thumb.type || thumb.type.startsWith('image/'))) return imgPreviewEl(thumb, row, blur);
+    return null;
+  }
   // A picture, or nothing. The fallback used to reach for `row.data` on any
   // stored row, which for a VIDEO meant handing MP4 bytes to an <img> — the
-  // engine paints a broken/looping frame instead of a preview. A video with no
-  // poster gets a real <video> below (videoPreviewEl), never an <img>.
-  const blob = row.thumb ?? (renderableAsImage(row) && row.state === 'stored' ? row.data : null);
-  if (blob && blob.size && (!blob.type || blob.type.startsWith('image/'))) {
-    const img = mk('img', `media-thumb media-${row.kind}${blur ? ' is-blurred' : ''}`);
-    img.alt = '';
-    img.decoding = 'async';
-    img.src = objectUrl(blob, 'bubbles');
-    return img;
-  }
-  // A clip this device HOLDS but has no poster for (the sender's browser could
-  // not cut one, or the poster aged out): let the engine paint its own first
-  // frame instead of showing a grey tile that reads as 'never arrived'.
-  if (row.kind === 'video' && hasLocalBytes(row)) return videoPreviewEl(row);
+  // engine paints a broken/looping frame instead of a preview.
+  const blob = row.thumb ?? (renderableAsImage(row) && HAS_OWN_BYTES.has(row.state) ? row.data : null);
+  if (blob && blob.size && (!blob.type || blob.type.startsWith('image/'))) return imgPreviewEl(blob, row, blur);
   return null;
 }
 
+function imgPreviewEl(blob, row, blur) {
+  const img = mk('img', `media-thumb media-${row.kind}${blur ? ' is-blurred' : ''}`);
+  img.alt = '';
+  img.decoding = 'async';
+  img.src = objectUrl(blob, 'bubbles');
+  return img;
+}
+
 /**
- * A paused, muted, control-less <video> used AS A PICTURE. The `#t=0.1` media
- * fragment is the whole trick: without it `preload='metadata'` leaves the box
- * black until someone presses play, and a black box in a transcript is
- * indistinguishable from a broken attachment. Nothing here may start playing
- * (no autoplay, no loop, no controls) — the tap opens the message modal, which
- * owns playback.
+ * The clip itself, as a paused, control-less <video> that the badge on top of
+ * it can play IN PLACE. Two loading shapes, because a re-render must not decode
+ * a whole conversation of video:
+ *   - with a poster: `preload='none'` + the `poster` attribute. The JPEG is what
+ *     paints, nothing is decoded until someone presses play.
+ *   - without one: `preload='metadata'` and a `#t=0.1` media fragment, which is
+ *     what makes an engine decode a frame instead of showing a black box.
+ * Nothing here may start by itself (no autoplay, no loop, no controls): sound
+ * and playback are a person's decision, and the message modal is the other
+ * place this clip can be played.
  */
 function videoPreviewEl(row) {
   const v = mk('video', 'media-thumb media-video');
@@ -95,23 +123,49 @@ function videoPreviewEl(row) {
   v.controls = false;
   v.autoplay = false;
   v.loop = false;
-  v.preload = 'metadata';
-  v.setAttribute?.('tabindex', '-1');
-  v.src = `${objectUrl(row.data, 'bubbles')}#t=0.1`;
+  const url = objectUrl(row.data, 'bubbles');
+  if (row.thumb?.size) {
+    v.poster = objectUrl(row.thumb, 'bubbles');
+    v.preload = 'none';
+    v.src = url;
+  } else {
+    v.preload = 'metadata';
+    v.src = `${url}#t=0.1`;
+  }
+  v.dataset.mediaId = String(row.id ?? '');   // chat.js resumes it across a re-render
   return v;
 }
 
 /** Wrap the shot + its overlays in one positioned box (the bubble itself must
  *  not become the containing block for a play badge). */
-function shot(row, blur) {
+function shot(row, blur, playing = false) {
   const pic = previewEl(row, blur);
   if (!pic) return null;
   const box = mk('span', 'media-shot');
   box.append(pic);
   if (row.kind === 'video') {
-    const badge = mk('span', 'media-play-badge');
-    badge.append(iconEl('mediaPlay'));
+    // A BUTTON when there is something to play: the badge plays the clip IN THE
+    // MESSAGE (chat.js binds it by class), and the rest of the bubble still
+    // opens the modal. Purely decorative — a `<span>` a tap falls through — when
+    // this device does not hold the bytes.
+    const playable = pic.tagName === 'VIDEO';
+    const badge = mk(playable ? 'button' : 'span', `media-play-badge${playing ? ' is-playing' : ''}`);
+    if (playable) {
+      badge.type = 'button';
+      badge.dataset.act = 'playpause';
+      badge.title = playing ? 'Pause this video' : 'Play this video here';
+      badge.setAttribute?.('aria-label', playing ? 'Pause the video in this message' : 'Play the video in this message');
+    }
+    badge.append(iconEl(playing ? 'mediaPause' : 'mediaPlay'));
     box.append(badge);
+    if (playable) {
+      // the badge is the element's own transport: whatever else starts or stops
+      // the clip (a re-render, the end of the file, another tap) has to be
+      // reflected there, or the button lies about what it will do next
+      pic.addEventListener?.('play', () => paintBadge(badge, true));
+      pic.addEventListener?.('pause', () => paintBadge(badge, false));
+      pic.addEventListener?.('ended', () => paintBadge(badge, false));
+    }
     if (row.dur) box.append(mk('span', 'media-duration', durationText(row.dur)));
   }
   if (blur) {
@@ -126,6 +180,15 @@ function shot(row, blur) {
     pic.addEventListener?.('error', () => { box.replaceChildren(plainTile(row, 'mediaUndecodable')); }, { once: true });
   }
   return box;
+}
+
+/** The badge's glyph says what the NEXT tap does: pause while it plays. */
+function paintBadge(badge, playing) {
+  try {
+    badge.replaceChildren(iconEl(playing ? 'mediaPause' : 'mediaPlay'));
+    badge.classList?.toggle?.('is-playing', !!playing);
+    badge.title = playing ? 'Pause this video' : 'Play this video here';
+  } catch { /* a badge that cannot repaint is not worth a thrown render */ }
 }
 
 /** The labelled tile: what a bubble shows when there are no pixels to show.
@@ -150,10 +213,11 @@ function plainTile(row, icon = null) {
  * `verified` is the SENDER's admin identity-verified flag (blur policy, req 7)
  * — 'out' rows are never blurred regardless (isBlurred owns that rule).
  */
-export function bubbleNodes(msg, row, { verified = false } = {}) {
-  // an outgoing send still in flight: the upload IS the status (a media
-  // message that has not been acked has no bytes on the server yet)
-  if (msg.dir === 'out' && msg.state === 'sending' && (!row || !row.data)) {
+export function bubbleNodes(msg, row, { verified = false, playing = false } = {}) {
+  // an outgoing send still in flight: the work IS the status. A draft row
+  // (written the moment the file is picked) carries preparing/uploading and its
+  // progress, so the bubble shows the bar instead of a toast that expires.
+  if (msg.dir === 'out' && msg.state === 'sending' && (!row || (!row.data && !hasProgress(row)))) {
     return [iconEl('attachFile', 'media-gone-ic'), mk('span', 'media-status', 'Uploading…')];
   }
   if (!row) {
@@ -178,7 +242,7 @@ export function bubbleNodes(msg, row, { verified = false } = {}) {
     wrap.append(ic, meta);
     nodes.push(wrap);   // name + size are the whole content of a file bubble
   } else {
-    const box = shot(row, renderableAsImage(row) && isBlurred(row, verified));
+    const box = shot(row, renderableAsImage(row) && isBlurred(row, verified), playing);
     if (box) {
       nodes.push(box);
       if (row.name) nodes.push(mk('span', 'media-name', row.name));
@@ -192,9 +256,10 @@ export function bubbleNodes(msg, row, { verified = false } = {}) {
 
   const status = statusLine(row);
   if (status) nodes.push(status);
-  // a determinate bar while bytes are moving; when a previous session stopped
-  // mid-fetch, say where it stopped — that is what makes 'it resumes' visible
-  if (row.state === 'downloading' || (row.partialBytes > 0 && row.state === 'failed')) {
+  // a determinate bar while bytes are moving — in OR out. When a previous
+  // session stopped mid-fetch, say where it stopped: that is what makes 'it
+  // resumes' visible
+  if (hasProgress(row) || (row.partialBytes > 0 && row.state === 'failed')) {
     const pct = Math.max(0, Math.min(1, Number(row.progress) || 0));
     const bar = mk('span', 'media-progress');
     const fill = mk('span', 'media-progress-fill');
@@ -209,8 +274,7 @@ export function bubbleNodes(msg, row, { verified = false } = {}) {
   // pending / failed video|file: the two choices req 6 puts IN the bubble
   // (chat.js binds them by class on its delegated listener)
   const acts = mk('span', 'media-actions');
-  if (row.state === 'pending' || row.state === 'synced' || row.state === 'failed') {
-    const dl = mk('button', 'media-dl');
+  if (row.state === 'pending' || row.state === 'synced' || row.state === 'failed') {    const dl = mk('button', 'media-dl');
     dl.type = 'button';
     dl.append(iconEl('mediaDownload'), document.createTextNode(` Download${row.size ? ` (${formatSize(row.size)})` : ''}`));
     acts.append(dl);

@@ -78,19 +78,19 @@ test('fallback: no MediaRecorder, no captureStream, no output — and never a lo
   const { transcodeVideo } = await import('../app/js/transcode.js');
   const fake = new Blob([new Uint8Array(64)], { type: 'video/quicktime' });
   fake.arrayBuffer = async () => new Uint8Array(64).buffer;
-  assert.equal(await transcodeVideo(fake), null, 'no MediaRecorder in this environment');
+  assert.equal(await transcodeVideo(fake, { enabled: true }), null, 'no MediaRecorder in this environment');
 
   // with a recorder that cannot produce the target container, same answer
   globalThis.MediaRecorder = class { static isTypeSupported() { return false; } };
   globalThis.HTMLVideoElement = { prototype: { captureStream() { return {}; } } };
-  assert.equal(await transcodeVideo(fake), null, 'webm-only engines leave the file alone');
+  assert.equal(await transcodeVideo(fake, { enabled: true }), null, 'webm-only engines leave the file alone');
 
   // and even with a recorder, no DOM means no element to decode with
   globalThis.MediaRecorder = class {
     static isTypeSupported() { return true; }
     constructor() { throw new Error('nope'); }
   };
-  assert.equal(await transcodeVideo(fake), null, 'a throwing constructor is a fallback, not a failed send');
+  assert.equal(await transcodeVideo(fake, { enabled: true }), null, 'a throwing constructor is a fallback, not a failed send');
   delete globalThis.MediaRecorder; delete globalThis.HTMLVideoElement;
 });
 
@@ -111,7 +111,7 @@ test('cost: an already-playable clip never reaches a decoder', async () => {
   doc.createElement = (tag) => { made.push(String(tag).toLowerCase()); return realCreate(tag); };
   const mp4 = new Blob([new Uint8Array(0)], { type: 'video/mp4' });
   mp4.slice = () => ({ arrayBuffer: async () => ftypBytes('isom', 'avc1', 'mp41') });
-  assert.equal(await transcodeVideo(mp4), null);
+  assert.equal(await transcodeVideo(mp4, { enabled: true }), null);
   assert.deepEqual(made, [], 'no <video>, no canvas: decided from the container alone');
   doc.createElement = realCreate;
 });
@@ -218,7 +218,7 @@ test('engine: the canvas records where the element cannot (WebKit)', async () =>
     assert.equal(support.videoCapture, false, 'WebKit has no HTMLMediaElement.captureStream');
     assert.equal(support.canvasCapture, true);
     assert.deepEqual(captureEngine(support), { engine: 'canvas', why: 'canvas-capture' });
-    const out = await transcodeVideo(movBlob());
+    const out = await transcodeVideo(movBlob(), { enabled: true });
     assert.ok(out instanceof Blob, 'a re-encoded clip came back instead of the .mov');
     assert.equal(out.type, 'video/mp4');
     assert.ok(out.size > 1024, 'and it is a real payload');
@@ -243,20 +243,20 @@ test('audio: a clip WITH a soundtrack is never re-encoded into a silent one', as
   const { transcodeVideo } = await import('../app/js/transcode.js');
   const stub = stubWebkit({ audio: false, sourceHasSound: true });
   try {
-    assert.equal(await transcodeVideo(movBlob()), null,
+    assert.equal(await transcodeVideo(movBlob(), { enabled: true }), null,
       'no audio graph + a source that has sound → send the original, sound and all');
   } finally { stub.restore(); }
 
   const quiet = stubWebkit({ audio: false, sourceHasSound: false });
   try {
-    assert.ok(await transcodeVideo(movBlob()) instanceof Blob,
+    assert.ok(await transcodeVideo(movBlob(), { enabled: true }) instanceof Blob,
       'a silent source loses nothing, so the re-encode is still worth doing');
   } finally { quiet.restore(); }
 
   // a context that will not unsuspend records SILENCE: same answer, same reason
   const stuck = stubWebkit({ audio: true, sourceHasSound: true, suspended: true });
   try {
-    assert.equal(await transcodeVideo(movBlob()), null,
+    assert.equal(await transcodeVideo(movBlob(), { enabled: true }), null,
       'a suspended audio graph must not produce a silent clip');
   } finally { stuck.restore(); }
 });
@@ -273,7 +273,7 @@ test('output: a recorder that hands back WebM is not uploaded as .mp4', async ()
   const stub = stubWebkit({ webm: true });
   try {
     const { transcodeVideo } = await import('../app/js/transcode.js');
-    assert.equal(await transcodeVideo(movBlob()), null, 'a wrong-container output is a skip, not a send');
+    assert.equal(await transcodeVideo(movBlob(), { enabled: true }), null, 'a wrong-container output is a skip, not a send');
   } finally { stub.restore(); }
 });
 
@@ -284,13 +284,13 @@ test('journal: every outcome is sayable, including the skips', async () => {
   const lines = [];
   const stub = stubWebkit();
   try {
-    await transcodeVideo(movBlob(), { log: (m) => lines.push(m) });
+    await transcodeVideo(movBlob(), { enabled: true, log: (m) => lines.push(m) });
   } finally { stub.restore(); }
   assert.ok(lines.some((l) => /transcode: ok /.test(l)), `the success path reports itself: ${lines.join('|')}`);
   const quiet = stubWebkit({ audio: false, sourceHasSound: true });
   const skip = [];
   try {
-    await transcodeVideo(movBlob(), { log: (m) => skip.push(m) });
+    await transcodeVideo(movBlob(), { enabled: true, log: (m) => skip.push(m) });
   } finally { quiet.restore(); }
   assert.ok(skip.some((l) => /skipped \(source has audio, no audio capture\)/.test(l)),
     `the refusal says why: ${skip.join('|')}`);
@@ -303,7 +303,7 @@ test('audio: a context opened inside the gesture is the one used, and it is rele
     const ctx = primeAudioContext();
     assert.ok(ctx, 'this engine has Web Audio');
     assert.equal(ctx.state, 'running');
-    const out = await transcodeVideo(movBlob(), { audioCtx: ctx });
+    const out = await transcodeVideo(movBlob(), { enabled: true, audioCtx: ctx });
     assert.ok(out instanceof Blob, 'the re-encode happened with the borrowed context');
     assert.deepEqual(stub.seen.contexts, [ctx], 'and it did NOT open a second one behind our back');
     assert.equal(ctx.closed, true, 'the borrowed context is closed, not leaked');

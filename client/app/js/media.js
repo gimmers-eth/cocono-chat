@@ -17,7 +17,7 @@
 
 import { getMedia, updateMedia, allMedia } from './store.js';
 import { logEvent } from './applog.js';
-import { transcodeVideo, transcodedName, primeAudioContext } from './transcode.js';
+import { transcodeVideo, transcodedName, primeAudioContext, TRANSCODE_ENABLED } from './transcode.js';
 import { stageMedia, unstageMedia } from './vidstage.js';
 
 // STARTING values only. The server advertises the real ones in
@@ -432,28 +432,30 @@ export async function prepareMedia(file, { onPhase = null } = {}) {
   }
 
   if (kind === 'video') {
-    // NORMALISE THE CODEC BEFORE ANYTHING ELSE (transcode.js): a phone records
-    // HEVC/.mov, which Safari plays and most other browsers cannot, so the
-    // recipient's 'this video could not be played here' starts here. Doing it
-    // first also means the poster below is cut from a stream THIS engine chose.
-    // A null (unsupported, too long, no recorder, any failure) falls back to the
-    // original file — a clip must never be lost to make it compatible.
+    // The camera's own file is what gets sent (see TRANSCODE_ENABLED for the
+    // evidence): the re-encode is off, so no decoder, no AudioContext and no
+    // real-time wait sit between the tap and the upload. When it is switched on
+    // it runs FIRST, so the poster below is cut from a stream this engine chose,
+    // and a null (unsupported, too long, any failure) falls back to the original
+    // file — a clip must never be lost, or delayed forever, to make it
+    // compatible.
     let source = file;
     let outMime = mime;
     let outName = name;
     onPhase?.('preparing');
-    // Opened HERE, as close to the user's tap as we can get: engines may refuse
-    // an AudioContext created later inside an awaited transcode, and a suspended
-    // context records silence (which we refuse to send).
-    const audioCtx = primeAudioContext();
-    // progress is forwarded: on WebKit the re-encode records the canvas in real
-    // time, so a 30-second clip is 30 seconds of "Preparing video…" — a number
-    // is the difference between a wait and a hang.
-    const re = await transcodeVideo(file, { audioCtx, onProgress: (frac) => onPhase?.('transcoding', frac) });
-    if (re) {
-      source = re;
-      outMime = 'video/mp4';                  // the descriptor must not lie about
-      outName = transcodedName(name);         // what the recipient is being sent
+    if (TRANSCODE_ENABLED) {
+      // Opened HERE, as close to the user's tap as we can get: engines may refuse
+      // an AudioContext created later inside an awaited transcode, and a suspended
+      // context records silence (which we refuse to send).
+      const audioCtx = primeAudioContext();
+      // progress is forwarded: a re-encode records in real time, so a 30-second
+      // clip is 30 seconds of work the user has to be able to see.
+      const re = await transcodeVideo(file, { audioCtx, onProgress: (frac) => onPhase?.('transcoding', frac) });
+      if (re) {
+        source = re;
+        outMime = 'video/mp4';                  // the descriptor must not lie about
+        outName = transcodedName(name);         // what the recipient is being sent
+      }
     }
     const bytes = await readBytes(source);
     assertWithinLimits('video', bytes.length);
@@ -669,6 +671,31 @@ export async function shareToDevice(row) {
     if (error?.name === 'AbortError') return { ok: false, how: 'cancelled' };
     return { ok: false, how: 'failed', error };
   }
+}
+
+/**
+ * A send the app did not live to finish. The draft row still says
+ * preparing/uploading and its message still says sending, but nothing is running
+ * any more — the tab closed, the phone slept, the PWA was killed. Left alone it
+ * is a progress bar that never moves, which is worse than a failure: a failure
+ * is a fact the user can act on.
+ *
+ * The bytes are still on this device, so the row settles the way a failed upload
+ * does (the local copy is kept) and the MESSAGE is marked failed by the caller —
+ * that mark is what says "this never went". Returns the message ids to settle.
+ */
+export async function reapStaleDrafts() {
+  const rows = await allMedia();
+  const stale = (rows ?? []).filter((r) => r && (r.state === 'preparing' || r.state === 'uploading'));
+  const ids = [];
+  for (const r of stale) {
+    try {
+      await updateMedia(r.id, { state: hasLocalBytes(r) ? 'stored' : 'failed', progress: 0 });
+      if (r.msgId) ids.push(r.msgId);
+    } catch { /* one bad row must not stop the rest */ }
+  }
+  if (ids.length) logEvent('media', `reaped ${ids.length} unfinished send(s)`);
+  return ids;
 }
 
 /**

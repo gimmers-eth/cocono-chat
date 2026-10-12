@@ -699,15 +699,57 @@ test('bubble: a video this device does NOT hold is a labelled tile with a downlo
   assert.match(nodes.map((x) => x.textContent).join(' '), /Download/, 'with the tap that fetches it');
 });
 
-test('bubble: a poster wins over a <video> element (cheaper, and it survives a re-paint)', async () => {
+test('bubble: a poster is the <video>’s poster attribute — cheap to paint, and the clip still plays in place', async () => {
   await fresh();
   const mp4 = new Blob([new Uint8Array([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70])], { type: 'video/mp4' });
   const poster = new Blob(['JPEG'], { type: 'image/jpeg' });
   const v = { ...row({ id: 'vPosterBubble', kind: 'video' }), state: 'stored', data: mp4, thumb: poster };
   await store.saveMedia(v);
   const nodes = bubbleNodes({ dir: 'in', kind: 'video', state: 'delivered' }, v, {});
-  assert.equal(findTag(nodes, 'VIDEO'), null);
-  assert.ok(has(nodes, /media-thumb/), 'the JPEG poster is the preview');
+  const clip = findTag(nodes, 'VIDEO');
+  assert.ok(clip, 'bytes on this device → a real <video>, so the badge has something to play');
+  assert.match(clip.poster, /^blob:local\//, 'the JPEG poster paints it');
+  assert.equal(clip.preload, 'none', 'and nothing is decoded until someone presses play');
+  assert.equal(findTag(nodes, 'IMG'), null, 'the poster is an attribute, not a second element');
+  const badge = nodes.flatMap((n) => walkTags([n])).find((el) => el.className.includes('media-play-badge'));
+  assert.equal(badge.tagName, 'BUTTON', 'the badge is a control when there is a clip to play');
+  assert.equal(badge.dataset.act, 'playpause');
+  assert.equal(clip.muted, true, 'it still starts silent and still: nothing autoplays');
+  assert.equal(clip.autoplay, false);
+});
+
+test('bubble: a poster with no bytes is a picture, and the badge is decoration', async () => {
+  await fresh();
+  const poster = new Blob(['JPEG'], { type: 'image/jpeg' });
+  const v = { ...row({ id: 'vPosterOnly', kind: 'video' }), state: 'pending', data: null, thumb: poster };
+  await store.saveMedia(v);
+  const nodes = bubbleNodes({ dir: 'in', kind: 'video', state: 'delivered' }, v, {});
+  assert.equal(findTag(nodes, 'VIDEO'), null, 'there is nothing here to play');
+  assert.ok(findTag(nodes, 'IMG'), 'so the poster is what shows');
+  const badge = nodes.flatMap((n) => walkTags([n])).find((el) => el.className.includes('media-play-badge'));
+  assert.equal(badge.tagName, 'SPAN', 'a badge that cannot play must not look like a button');
+  assert.equal(badge.dataset.act, undefined);
+});
+
+test('bubble: an outgoing draft carries its progress in the message, not in a toast', async () => {
+  await fresh();
+  const f = new Blob([new Uint8Array(2048)], { type: 'video/quicktime' });
+  const draft = { ...row({ id: 'out:d1', kind: 'video', name: 'IMG_0001.MOV' }), state: 'preparing', data: f, thumb: null, progress: 0.4 };
+  await store.saveMedia(draft);
+  const nodes = bubbleNodes({ dir: 'out', kind: 'video', state: 'sending' }, draft, {});
+  const text = nodes.map((x) => x.textContent ?? '').join(' ');
+  assert.match(text, /Preparing video/, 'the bubble says what the phone is doing');
+  const fill = nodes.flatMap((n) => walkTags([n])).find((el) => el.className.includes('media-progress-fill'));
+  assert.ok(fill, 'with a determinate bar');
+  assert.equal(fill.style.width, '40%', 'showing how far along it is');
+
+  // and the upload phase reuses the same bar, from the SDK's own byte count
+  const up = { ...draft, state: 'uploading', progress: 0.8 };
+  await store.saveMedia(up);
+  const upNodes = bubbleNodes({ dir: 'out', kind: 'video', state: 'sending' }, up, {});
+  assert.match(upNodes.map((x) => x.textContent ?? '').join(' '), /Uploading/);
+  const upFill = upNodes.flatMap((n) => walkTags([n])).find((el) => el.className.includes('media-progress-fill'));
+  assert.equal(upFill.style.width, '80%');
 });
 
 test('poster: the recipient draws its own frame once the bytes land, typed correctly', async () => {
@@ -795,4 +837,25 @@ test('bubble: a video with no poster is a labelled tile, not a lone glyph', asyn
   assert.match(text, /0:08/, 'and the clip length, so it reads as a video');
   const cls = nodes.flatMap((n) => [n.className, ...(n.childNodes ?? []).map((c) => c.className)]).join(' ');
   assert.match(cls, /media-plain/, 'as a tile, not a bare icon');
+});
+
+test('drafts: a send the app did not finish is settled, not left spinning', async () => {
+  await fresh();
+  const bytes = new Blob([new Uint8Array(64)], { type: 'video/mp4' });
+  // mid-prepare, bytes on this device: the user keeps their clip, the message
+  // is what says it never went
+  await store.saveMedia({ ...row({ id: 'out:d1', kind: 'video', msgId: 'out:d1' }), state: 'preparing', data: bytes, progress: 0.4 });
+  // mid-upload with nothing local: a failure, and no claim to bytes we do not have
+  await store.saveMedia({ ...row({ id: 'out:d2', kind: 'image', msgId: 'out:d2' }), state: 'uploading', data: null, progress: 0.6 });
+  // a settled row is none of this function's business
+  await store.saveMedia({ ...row({ id: 'b-kept', kind: 'image' }), state: 'stored', data: bytes });
+
+  const ids = await M.reapStaleDrafts();
+  assert.deepEqual(ids.sort(), ['out:d1', 'out:d2'], 'both unfinished sends are reported for their message to be marked');
+  const d1 = await store.getMedia('out:d1');
+  assert.equal(d1.state, 'stored', 'the bytes were here, so the copy is kept');
+  assert.equal(d1.progress, 0, 'and the bar comes down');
+  const d2 = await store.getMedia('out:d2');
+  assert.equal(d2.state, 'failed', 'no bytes, no claim: failed');
+  assert.equal((await store.getMedia('b-kept')).state, 'stored', 'a settled row is untouched');
 });
