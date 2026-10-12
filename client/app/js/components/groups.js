@@ -591,7 +591,9 @@ function openRoom(g, r) {
 
 function closeRoom() {
   activeCtx = null;
-  paintRoomTags(); // hides the room's tag strip with the room
+  // the tag strip is NOT repainted here: it belongs to the pane and rides
+  // out WITH it. Hiding it eagerly made the tags visibly vanish a beat
+  // before the room itself left (P1 review). Re-opening repaints.
   // MOBILE CAROUSEL EXIT: ride the pane OUT to the right (the same
   // chat-sliding-out ride chat.js runs), then the transition-free reset
   if (!reducedMotion() && window.matchMedia?.('(max-width: 899px)').matches && !view.hidden) {

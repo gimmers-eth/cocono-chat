@@ -1897,7 +1897,12 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
 
 /* ---- the room chat overlay: sits OVER main's empty/chat pane, the chat
    header/composer/tabstrip rhythms reused verbatim (req 16) ---- */
-.chat-pane { position: relative; } /* the overlay anchors here */
+/* the room overlay anchors on the pane — DESKTOP only: the pane is
+   static there. On mobile .chat-pane is ALREADY position:absolute (the
+   carousel); an unscaled `relative` here overrode it, the pane stayed in
+   flow BELOW the fold and every mobile open "did nothing" (the bug this
+   comment buys its keep with) */
+@media (min-width: 900px) { .chat-pane { position: relative; } }
 .group-view {
   position: absolute; inset: 0; z-index: 12; background: var(--bg);
   display: flex; flex-direction: column; min-width: 0;
