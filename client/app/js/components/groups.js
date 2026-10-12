@@ -218,38 +218,40 @@ function groupRow(g) {
   chev.title = g.open ? 'Hide rooms' : 'Show rooms';
   chev.append(iconEl('viewMore', g.open ? 'chev-up' : ''));
   chev.setAttribute('aria-expanded', String(!!g.open));
-  const nameBtn = el('button', 'grp-name');
-  nameBtn.type = 'button';
-  nameBtn.textContent = g.name;
-  nameBtn.title = `Open ${g.name} — general`;
   const roleMeta = ROLE_ICON[g.role];
   const role = iconEl(roleMeta[0], `grp-role role-${g.role}`);
   role.title = roleMeta[1];
+  const nameBtn = el('button', 'grp-name');
+  nameBtn.type = 'button';
+  nameBtn.textContent = g.name;
+  nameBtn.title = g.open ? `Collapse ${g.name}` : `Expand ${g.name}`;
   const members = el('button', 'grp-btn');
   members.type = 'button';
-  members.title = 'Room members';
+  members.title = 'Room members (P2)';
   members.append(iconEl('users'));
   const settings = el('button', 'grp-btn');
   settings.type = 'button';
   settings.title = 'Group settings (P2)';
   settings.append(iconEl('settings'));
-  row.append(chev, nameBtn, role, members, settings);
+  row.append(chev, role, nameBtn, members, settings);
 
-  chev.addEventListener('click', () => {
+  // The name TOGGLES the group like the chevron — opening a room happens
+  // on the ROOM rows, never on the group itself (P1 review feedback).
+  // MY role icon LEADS the row: crown owner / shield admin / user member.
+  const toggle = () => {
     g.open = !g.open;
     chev.title = g.open ? 'Hide rooms' : 'Show rooms';
     chev.replaceChildren(iconEl('viewMore', g.open ? 'chev-up' : ''));
     chev.setAttribute('aria-expanded', String(!!g.open));
+    nameBtn.title = g.open ? `Collapse ${g.name}` : `Expand ${g.name}`;
     const li = row.closest('.group-item');
     const rooms = li.querySelector('.room-list');
     rooms.hidden = !g.open;
     paintRooms(li, rooms, g);
-  });
-  nameBtn.addEventListener('click', () => {
-    const general = g.rooms.find((r) => r.name === 'general') ?? g.rooms[0];
-    openRoom(g, general);
-  });
-  members.addEventListener('click', () => stub('Member lists'));
+  };
+  chev.addEventListener('click', toggle);
+  nameBtn.addEventListener('click', toggle);
+  members.addEventListener('click', () => toast('Room member lists are part of P2 — see docs/features/groups.md'));
   settings.addEventListener('click', () => toast('Group settings are P2 — see docs/features/groups.md'));
   return row;
 }

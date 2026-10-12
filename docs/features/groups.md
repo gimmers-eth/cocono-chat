@@ -108,15 +108,16 @@ surfaces group rooms reuse)
 | Phase | Scope | State |
 |---|---|---|
 | **P1** | Sidebar icon tabs + sliding panes + group/room list with roles, stars, hide/show, read-only locks + group ROOM chat UI (sender chips w/ trust + badges, composer, conversation tabs). Fake data (10 groups, mixed roles). FE only, no API. | ✅ **complete — awaiting review** (branch `groups-p1`) |
-| **P2** | Group settings example UI: overview, pass types list + editor (read-only view), members tab (promote/revoke shown, not wired), rooms tab. FE only. | ⬜ next |
+| **P2** | Group settings example UI: overview, pass types list + editor (read-only view), members tab (**room member roster lives here** — promote/revoke shown, not wired), rooms tab. FE only. | ⬜ next |
 | **P3** | Admin panel UI example: Groups page (paginated list + members), user-panel groups section, pass create/distribute flow — mock data. | ⬜ |
 | **P4** | Backend: collections (groups, rooms, passes, memberships, group key material), wire protocol (rooms fan-out, key rotation, ack-aware media lifecycle), pass cards as sys messages, admin APIs, unit + integration tests. | ⬜ |
 | **P5** | Client: replace the mock with real data — group list from the server, room chats through the SDK, key rotation, forwarding to rooms, member-aware media pruning. | ⬜ |
 | **P6** | Admin app wired to the real APIs. | ⬜ |
 
 P1 review checklist for the dev box: tab bar slides the sidebar body
-(chat/groups/search); group rows show MY role icon (crown/shield/user);
-chevron hides/shows rooms; starred rooms stay when collapsed; locked rooms
+(chat/groups/search); group rows lead with MY role icon (crown/shield/user)
+BEFORE the name; clicking the chevron OR the group name hides/shows rooms
+(the name never opens a chat — rooms open from room rows only); starred rooms stay when collapsed; locked rooms
 are read-only; opening a room shows the chat with sender chips (trust icon
 + badge per sender, viewer-side state), conversation tab strip, and a
 composer that echoes locally. Settings/members icons are honest stubs
