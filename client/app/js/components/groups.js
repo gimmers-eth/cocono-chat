@@ -9,13 +9,14 @@
 //   * 3 sidebar tabs above the username search; the sidebar BODY slides
 //     (header + filter bar + version foot never move — reqs 2 & 15);
 //   * group rows with MY role icon (req 18), rooms under them, hide/show
-//     toggle, per-room star (starred rooms survive a collapse — req 13),
+//     toggle, per-room PIN (pinned rooms survive a collapse — req 13; a pin
+//     is NOT the 'starred' tag and never shows under that filter),
 //     read-only locks (req 11);
 //   * a room chat whose messages carry the SENDER as the single-line
 //     component — trust icon + worn badge, viewer-side state (req 19);
 //   * the conversation tab strip (req 16) and a working echo composer.
 
-import { $, toast } from '../ui.js';
+import { $, toast, animateSheetClose } from '../ui.js';
 import { iconEl } from '../icons.js';
 import { mountLine } from './userline.js';
 import { PS } from './peername.js';
@@ -41,12 +42,13 @@ const PEOPLE = {
 
 // 10 groups (req: names are NOT unique — suffixes are decoration, not keys).
 // role = MY pass level (reqs 6/18). ro = read-only for me (req 11).
-// starred rooms stay visible when the group is collapsed (req 13).
+// pinned rooms stay visible when the group is collapsed (req 13) — the pin
+// is a navigation state, NOT the 'starred' tag (they never mix).
 const FAKE_GROUPS = [
   {
     name: 'Mortensen Family', role: 'owner', open: true,
     rooms: [
-      { name: 'general', starred: true, msgs: [
+      { name: 'general', pinned: true, tags: ['starred'], msgs: [
         { from: 'sofie', text: 'Sunday dinner at ours? @marlene bring the guitar!', t: '09:12' },
         { from: 'marlene', text: 'Always. I found a new example.com/jambook to work through.', t: '09:20' },
         { from: 'mads', text: 'Can I bring the kids? No homework room this weekend.', t: '09:31' },
@@ -67,7 +69,7 @@ const FAKE_GROUPS = [
   {
     name: 'Team Aurora', role: 'admin', open: true,
     rooms: [
-      { name: 'general', starred: true, tags: ['work'], msgs: [
+      { name: 'general', pinned: true, tags: ['work', 'starred'], msgs: [
         { from: 'jens', text: 'Deploy window moved to Thursday. @karl owns the runbook.', t: '10:15' },
         { from: 'karl', text: 'Acknowledged. Staging is green: aurora.example.com/status', t: '10:22' },
       ] },
@@ -86,7 +88,7 @@ const FAKE_GROUPS = [
         { from: 'petter', text: 'See you all at the trailhead 7am…', t: 'June' },
         { from: 'sofie', text: 'RIP the boots I ruined for that ridge photo.', t: '06:45' },
       ] },
-      { name: 'gear-talk', starred: true, tags: ['personal'], msgs: [
+      { name: 'gear-talk', pinned: true, tags: ['personal'], msgs: [
         { from: 'mads', text: 'The new ultralight tent is example.com/tent-x — worth it.', t: 'Tues' },
       ] },
     ],
@@ -100,7 +102,7 @@ const FAKE_GROUPS = [
     { name: 'alerts', ro: true, unread: 1, tags: ['personal'], msgs: [{ from: 'marlene', text: 'Tool van on Birch St — logged, no action needed.', t: '21:41' }] },
   ] },
   { name: 'Old Jazz Vinyl', role: 'member', rooms: [
-    { name: 'general', starred: true, msgs: [{ from: 'petter', text: 'Blue Note reissue pressing question…', t: 'May' }] },
+    { name: 'general', pinned: true, tags: ['personal'], msgs: [{ from: 'petter', text: 'Blue Note reissue pressing question…', t: 'May' }] },
     { name: 'marketplace', msgs: [{ from: 'sofie', text: 'Selling my duplicate Kind of Blue — DM me.', t: 'Sun' }] },
   ] },
   { name: 'Ghibli Fans', role: 'member', rooms: [
@@ -136,6 +138,134 @@ const ROLE_ICON = { owner: ['crown', 'You are an OWNER of this group'], admin: [
 // wears one) — req 19.
 
 const stub = (what) => toast(`${what} arrives with the group API (P4/P5).`);
+
+// ---------------------------------------------------------------- the sheet
+// One right-slide sheet for EVERYTHING that opens 'like the settings drawer'
+// (create group, discover, members lists): same .side-menu skin (in/out
+// animations and scrim included), content swapped per call. P2 replaces the
+// placeholders with the real settings panel on this same rail.
+let sheet = null;
+let sheetOverlay = null;
+let sheetTitle = null;
+let sheetBody = null;
+let sheetIsOpen = false;
+
+function ensureSheet() {
+  if (sheet) return;
+  sheetOverlay = el('div', 'overlay group-sheet-overlay');
+  sheetOverlay.hidden = true;
+  sheet = el('aside', 'side-menu group-sheet');
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-modal', 'true');
+  sheet.hidden = true;
+  sheet.tabIndex = -1;
+  const head = el('header', 'drawer-head');
+  sheetTitle = el('h2');
+  const x = el('button', 'icon-btn');
+  x.type = 'button';
+  x.title = 'Close';
+  x.append(iconEl('close'));
+  x.addEventListener('click', closeSheet);
+  head.append(sheetTitle, x);
+  sheetBody = el('div', 'drawer-body group-sheet-body');
+  sheet.append(head, sheetBody);
+  sheetOverlay.addEventListener('click', closeSheet);
+  document.body.append(sheetOverlay, sheet);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && sheetIsOpen) closeSheet();
+  });
+}
+
+function openSheet(title, kids) {
+  ensureSheet();
+  sheetTitle.textContent = title;
+  sheetBody.replaceChildren(...kids);
+  sheet.classList.remove('closing');
+  sheetOverlay.classList.remove('closing');
+  sheetIsOpen = true;
+  sheetOverlay.hidden = false;
+  sheet.hidden = false;
+  sheet.focus?.();
+}
+
+function closeSheet() {
+  if (!sheet || !sheetIsOpen) return;
+  sheetIsOpen = false; // the FLAG is the truth; the sheet paints out (P1 review)
+  animateSheetClose(sheet, sheetOverlay, { reopenCheck: () => sheetIsOpen });
+}
+
+const sheetField = (label, ...kids) => {
+  const sec = el('div', 'sheet-field');
+  sec.append(el('h3', 'sheet-field-label', label), ...kids);
+  return sec;
+};
+const note = (t) => el('p', 'muted small', t);
+
+function openCreateSheet() {
+  const name = el('input');
+  name.type = 'text';
+  name.placeholder = 'Group name';
+  name.maxLength = 64;
+  const desc = el('textarea');
+  desc.rows = 3;
+  desc.placeholder = 'What is this group about?';
+  const vis = el('div', 'sheet-vis');
+  for (const [v, label] of [
+    ['searchable', 'Publicly searchable — anyone can find it'],
+    ['link', 'Public invite link only — found by the link'],
+    ['private', 'Private — visible only to members'],
+  ]) {
+    const r = el('input');
+    r.type = 'radio';
+    r.name = 'grp-vis';
+    r.value = v;
+    r.checked = v === 'searchable';
+    const row = el('label', 'vis-row');
+    row.append(r, el('span', null, label));
+    vis.append(row);
+  }
+  const btn = el('button', 'btn btn-accent sheet-go');
+  btn.type = 'button';
+  btn.textContent = 'Create group';
+  btn.addEventListener('click', () => toast('Creating groups lands with the API (P4/P5) — this is the P1 placeholder'));
+  openSheet('New group', [
+    sheetField('Name', name),
+    sheetField('Description', desc),
+    sheetField('Visibility', vis),
+    btn,
+    note('Placeholder UI (P1) — fleshed out in P2, wired in P4/P5. New groups start with the Owner / Admin / Member passes and a #general room.'),
+  ]);
+}
+
+function openDiscoverSheet() {
+  const q = el('input');
+  q.type = 'text';
+  q.placeholder = 'Search public groups…';
+  q.className = 'discover-q';
+  const list = el('ul', 'member-list discover-list');
+  for (const g of [
+    { name: 'Run Club', about: 'Tuesday loop, 5k easy, coffee after', members: 12 },
+    { name: 'Tool Library', about: 'Borrow the good saw back', members: 6 },
+    { name: 'Stargazers', about: 'Dark-sky drives and telescopes', members: 21 },
+  ]) {
+    const li = el('li', 'member-row discover-row');
+    const b = el('button', 'discover-btn');
+    b.type = 'button';
+    b.append(mountLine(document.createElement('span'), { peer: g.name.toLowerCase().replace(/\W+/g, '-'), state: PS.TRUSTED }),
+      el('span', 'discover-meta', `${g.members} members · ${g.about}`));
+    b.addEventListener('click', () => toast('Joining a group needs a pass — discover/search is P4/P5'));
+    li.append(b);
+    list.append(li);
+  }
+  openSheet('Discover groups', [sheetField('Search', q), list,
+    note('Placeholder results (P1) — the real search reads public group listings in P5.')]);
+}
+
+function openMembersSheet(title, people, extra) {
+  openSheet(title, [memberRows(people), note(extra)]);
+}
+
+const groupRoster = (g) => [...new Set(g.rooms.flatMap((r) => (r.msgs ?? []).map((m) => m.from)))];
 
 // ---------------------------------------------------------------- sidebar
 
@@ -219,7 +349,23 @@ function buildPanes(sidebar) {
   const p1 = el('div', 'side-pane pane-groups');
   listHost = el('ul', 'group-list');
   listHost.id = 'group-list';
-  p1.append(listHost);
+  // CREATE + DISCOVER ride the bottom of the groups pane, pinned ABOVE the
+  // tag filter (P1 review). Placeholders today; P2 fleshes create out, P4/P5
+  // wire them.
+  const gbar = el('div', 'group-actions');
+  const act = (iconKey, label, title, fn) => {
+    const b = el('button', 'group-action-btn');
+    b.type = 'button';
+    b.title = title;
+    b.append(iconEl(iconKey), el('span', null, label));
+    b.addEventListener('click', fn);
+    return b;
+  };
+  gbar.append(
+    act('grpCreate', 'Create', 'Create a new group', openCreateSheet),
+    act('grpDiscover', 'Discover', 'Discover public groups', openDiscoverSheet),
+  );
+  p1.append(listHost, gbar);
   const p2 = el('div', 'side-pane pane-search');
   const note = el('p', 'search-soon', 'Search — coming soon. It will find users, groups and messages, with the tag filter already pinned under the sliders.');
   p2.append(note);
@@ -234,11 +380,12 @@ function buildPanes(sidebar) {
 
 // The pinned sidebar tag filter drives the group list too (req 15) — the
 // SAME shared state the DM list filters by (tags.js currentFilter), so the
-// two panes can never disagree. 'starred' rides the room star itself.
+// two panes can never disagree. 'starred' matches the TAG only — a PIN is
+// navigation, not a tag (P1 review).
 function roomMatches(r) {
   const f = currentFilter();
   if (f === 'all') return true;
-  if (f === 'starred') return !!r.starred;
+  if (f === 'starred') return (r.tags ?? []).includes('starred');
   return (r.tags ?? []).includes(f);
 }
 
@@ -272,11 +419,11 @@ function groupRow(g) {
   const role = iconEl(roleMeta[0], `grp-role role-${g.role}`);
   role.title = roleMeta[1];
   // collapsed groups carry ONE number: everything unread that the row is
-  // NOT showing (starred rooms keep their own pills, so the two numbers
+  // NOT showing (pinned rooms keep their own pills, so the two numbers
   // never double-count the same message)
   let grpPill = null;
   if (!g.open) {
-    const hidden = g.rooms.filter((r) => !r.starred).reduce((n, r) => n + (r.unread ?? 0), 0);
+    const hidden = g.rooms.filter((r) => !r.pinned).reduce((n, r) => n + (r.unread ?? 0), 0);
     if (hidden > 0) {
       grpPill = el('span', 'grp-unread', String(hidden));
       grpPill.title = `${hidden} unread in the collapsed rooms`;
@@ -288,7 +435,7 @@ function groupRow(g) {
   nameBtn.title = g.open ? `Collapse ${g.name}` : `Expand ${g.name}`;
   const members = el('button', 'grp-btn');
   members.type = 'button';
-  members.title = 'Room members (P2)';
+  members.title = 'Group members';
   members.append(iconEl('users'));
   const settings = el('button', 'grp-btn');
   settings.type = 'button';
@@ -304,9 +451,37 @@ function groupRow(g) {
   const toggle = () => { g.open = !g.open; renderGroups(); };
   chev.addEventListener('click', toggle);
   nameBtn.addEventListener('click', toggle);
-  members.addEventListener('click', () => toast('Room member lists are part of P2 — see docs/features/groups.md'));
+  // (P1 review) the SIDEBAR's roster control is the GROUP's people —
+  // labelled 'Group members'; the ROOM's members live in the room header
+  members.addEventListener('click', () => openMembersSheet('Group members', groupRoster(g),
+    'Promote, revoke and pass management arrive with group settings (P2/P4).'));
   settings.addEventListener('click', () => toast('Group settings are P2 — see docs/features/groups.md'));
   return row;
+}
+
+// GROUP members sheets read this roster; a room's members are its senders.
+function roomRoster(r) {
+  return [...new Set((r.msgs ?? []).map((m) => m.from))];
+}
+
+function memberRows(people) {
+  const ul = el('ul', 'member-list');
+  for (const who of people) {
+    const li = el('li', 'member-row');
+    li.append(mountLine(document.createElement('span'), memberOpts(who)));
+    ul.append(li);
+  }
+  return ul;
+}
+
+function memberOpts(who) {
+  const p = PEOPLE[who] ?? { state: PS.STRANGER };
+  const chip = nameChipEl(p.badge ?? null);
+  if (chip) chip.classList.add('name-chip-inline');
+  return {
+    peer: who, state: p.state, chipEl: chip,
+    unverified: p.unverified ?? null, gone: p.state === PS.GONE,
+  };
 }
 
 function paintRooms(li, host, g) {
@@ -315,13 +490,15 @@ function paintRooms(li, host, g) {
   // every state further (req 15)
   for (const r of g.rooms) {
     if (!roomMatches(r)) continue;
-    if (!g.open && !r.starred) continue;
+    if (!g.open && !r.pinned) continue;
     const rr = el('li', 'room-row');
-    const star = el('button', 'room-star');
-    star.type = 'button';
-    star.title = r.starred ? 'Un-star room' : 'Star room — it stays visible when the group is collapsed';
-    star.append(iconEl(r.starred ? 'tagStar' : 'starRegular', r.starred ? 'star-on' : ''));
-    star.addEventListener('click', () => { r.starred = !r.starred; renderGroups(); });
+    const pin = el('button', `room-pin${r.pinned ? ' pin-on' : ''}`);
+    pin.type = 'button';
+    pin.title = r.pinned
+      ? 'Un-pin room — it collapses with the group again'
+      : 'Pin room — it stays open when the group is collapsed (a pin is NOT the starred tag)';
+    pin.append(iconEl(r.pinned ? 'pin' : 'pinRegular'));
+    pin.addEventListener('click', () => { r.pinned = !r.pinned; renderGroups(); });
     const open = el('button', 'room-open');
     open.type = 'button';
     // READ-ONLY rooms carry NO padlock: the name itself shows inside
@@ -341,7 +518,7 @@ function paintRooms(li, host, g) {
     // TOGGLE (P1 review): clicking the room that is already open closes it
     // — same gesture the desktop user expects when a room overlays a chat
     open.addEventListener('click', () => {
-      if (activeCtx && activeCtx.r === r && view && !view.hidden) closeRoom();
+      if (activeCtx && activeCtx.r === r && view && !view.hidden) closeRoom(); // a dismissal RIDES (instant is for switches)
       else openRoom(g, r);
     });
     // mute/unmute (the DM tagbar speaker's sibling): a quiet grey glyph
@@ -355,7 +532,7 @@ function paintRooms(li, host, g) {
       renderGroups();
       paintHeadMute(); // the open room's tag strip mirrors the state
     });
-    rr.append(star, open, mute);
+    rr.append(pin, open, mute);
     host.append(rr);
   }
   // visible whenever anything would render: open rooms OR kept stars
@@ -449,7 +626,18 @@ function buildGroupView(client) {
     paintHeadMute();
     renderGroups(); // the sidebar row mirrors it
   });
-  // (the speaker joins the ROOM TAG STRIP below — the DM head's layout)
+  // ROOM members, right edge of the header (P1 review) — the sheet animates
+  // like the settings drawer
+  const headMembers = el('button', 'icon-btn group-head-members');
+  headMembers.type = 'button';
+  headMembers.title = 'Room members';
+  headMembers.append(iconEl('users'));
+  headMembers.addEventListener('click', () => {
+    if (!activeCtx) return;
+    openMembersSheet('Room members', roomRoster(activeCtx.r),
+      'Who posts here. Group-wide management lives under the group (P2/P4).');
+  });
+  head.append(headMembers);
   // (no 'Mock data' strip: it was noise over the UI under review — the
   // fixtures are documented here and in docs/features/groups.md)
   view.append(head);
@@ -582,7 +770,7 @@ function openRoom(g, r) {
   bubble(r.msgs ?? []);
 }
 
-function closeRoom() {
+function closeRoom(opts = {}) {
   activeCtx = null;
   // the tag strip is NOT repainted here: it belongs to the pane and rides
   // out WITH it. Hiding it eagerly made the tags visibly vanish a beat
@@ -596,7 +784,7 @@ function closeRoom() {
     setTimeout(() => { view.hidden = true; }, 300);
     return;
   }
-  if (reducedMotion() || view.hidden) {
+  if (opts.instant || reducedMotion() || view.hidden) {
     view.hidden = true;
     document.body.classList.remove('group-open');
     return;
@@ -640,7 +828,10 @@ export function mountGroups({ client, chat = null }) {
   // from EVERY path (sidebar row, share link, notification click) without
   // touching home.js or chat.js.
   new MutationObserver(() => {
-    if (document.body.classList.contains('chat-open') && view && !view.hidden) closeRoom();
+    // Switching room -> user chat must FEEL like a chat swap: the room
+    // vanishes at once (no exit ride under the arriving chat) exactly like
+    // switching from one user chat to another
+    if (document.body.classList.contains('chat-open') && view && !view.hidden) closeRoom({ instant: true });
   }).observe(document.body, { attributeFilter: ['class'] });
   // main.js calls this whenever the DM list repaints (open/read/send), so
   // the chats-tab number tracks the same truth the rows dot from

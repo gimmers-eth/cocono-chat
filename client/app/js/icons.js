@@ -116,7 +116,11 @@ export const ICONS = {
   crown: 'fa-crown',                 // my role: owner
   groupAdmin: 'fa-user-shield',      // my role: admin
   groupMember: 'fa-user',           // my role: member
-  starRegular: 'fa-regular fa-star', // un-starred room
+  starRegular: 'fa-regular fa-star', // un-starred room (the TAG)
+  pin: 'fa-solid fa-thumbtack',      // room PIN (keeps it open when collapsed)
+  pinRegular: 'fa-regular fa-thumbtack',
+  grpCreate: 'fa-solid fa-pen-to-square',   // create a group (P1 placeholder)
+  grpDiscover: 'fa-solid fa-compass',       // discover groups (P1 placeholder)
   tabSearch: 'fa-magnifying-glass',  // sidebar search tab (coming soon)
 };
 

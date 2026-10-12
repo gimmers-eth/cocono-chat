@@ -1860,12 +1860,14 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
      the group name (the name row keeps its existing colour) */
   background: var(--panel-raised); border-radius: 10px; }
 .room-row { display: flex; align-items: center; gap: .2rem; }
-.room-star {
+/* the PIN button (P1 review): a pin keeps the room open under a collapsed
+   group — it is NAVIGATION, deliberately not the starred tag's gold */
+.room-pin {
   flex: none; width: 1.7rem; height: 1.7rem; display: grid; place-items: center;
   border: 0; background: none; cursor: pointer; color: var(--muted); border-radius: 6px;
 }
-.room-star:hover { background: var(--panel); }
-.room-star .star-on { color: var(--warning); }
+.room-pin:hover { background: var(--panel); }
+.room-pin.pin-on { color: var(--accent); }
 .room-open {
   flex: 1; min-width: 0; display: flex; align-items: center; gap: .4rem;
   border: 0; background: none; cursor: pointer; color: var(--text); font: inherit;
@@ -1941,7 +1943,7 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
 .group-item.collapsed .room-list {
   background: color-mix(in srgb, var(--panel-raised) 52%, var(--panel));
 }
-.group-item.collapsed .room-star { visibility: hidden; }
+.group-item.collapsed .room-pin { visibility: hidden; }
 /* the collapsed group's unread SUM pill — the room-unread's sibling */
 .grp-unread {
   flex: none; min-width: 1.3rem; text-align: center;
@@ -1951,3 +1953,51 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
 /* BLOCKED senders in shared groups (docs scope): delivered, but loud —
    red italic text inside an otherwise normal bubble */
 .msg-blocked .gr-body { color: var(--danger); font-style: italic; }
+
+
+/* ---- groups P1 review round: pane action bar + the sheet rail ---- */
+/* Create/Discover pin the BOTTOM of the groups pane, above the tag filter;
+   the list scrolls between the head and this bar. */
+.pane-groups { overflow: hidden; }
+.group-list { flex: 1; min-height: 0; overflow-y: auto; }
+.group-actions {
+  flex: none; display: flex; gap: .5rem; padding: .5rem .6rem calc(.5rem + var(--sa-b, 0px));
+  border-top: 1px solid var(--border);
+}
+.group-action-btn {
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: .45rem;
+  background: var(--panel-raised); border: 1px solid var(--border); border-radius: 10px;
+  color: var(--text); font: inherit; font-size: .85rem; padding: .5rem; cursor: pointer;
+  transition: border-color .12s, color .12s;
+}
+.group-action-btn:hover { border-color: var(--accent); color: var(--accent); }
+.group-action-btn i { font-size: .95rem; }
+
+/* the right-slide sheet (settings-drawer rail) for create/discover/members */
+.group-sheet-body { padding: .2rem .9rem 1.1rem; }
+.sheet-field { margin: .55rem 0 0; }
+.sheet-field-label { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 .35rem; }
+.sheet-field input[type=text], .sheet-field textarea {
+  width: 100%; background: var(--panel-raised); color: var(--text);
+  border: 1px solid var(--border); border-radius: 10px; padding: .5rem .7rem; font: inherit;
+}
+.sheet-vis { display: flex; flex-direction: column; gap: .3rem; }
+.vis-row { display: flex; align-items: center; gap: .55rem; font-size: .9rem; cursor: pointer; }
+.vis-row input { accent-color: var(--accent); }
+.sheet-go { margin-top: .8rem; width: 100%; }
+
+/* member / discover rosters */
+.member-list { list-style: none; margin: .3rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .1rem; }
+.member-row > button, .member-row { display: flex; align-items: center; gap: .5rem; }
+.member-row .uname { font-size: .95rem; min-width: 0; }
+.discover-btn {
+  width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: .1rem;
+  background: none; border: 0; color: inherit; font: inherit; cursor: pointer;
+  padding: .45rem .4rem; border-radius: 8px; text-align: left;
+}
+.discover-btn:hover { background: var(--panel-raised); }
+.discover-meta { color: var(--muted); font-size: .8rem; }
+
+/* room header: members rides the right edge */
+.group-head-members { margin-left: auto; flex: none; color: var(--muted); }
+.group-head-members:hover { color: var(--accent); }

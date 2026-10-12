@@ -153,7 +153,17 @@ delayed past the ride, so exits need no reset choreography at all; message
 options (the bubble modal AND the chat-options menu) animate closed like
 the settings menu (animateSheetClose + reopen flags); the 'Mock data'
 strip is gone from the room UI. A blocked sender's message example sits in
-Mortensen → general (red italic, delivered). Read-only rooms carry NO padlock: their name shows inside
+Mortensen → general (red italic, delivered). ROUND 5 (review): room rows PIN (thumbtack) —
+a pin keeps a room open under a collapsed group and is NOT the 'starred'
+tag (pinned rooms never appear under the star filter); the groups pane
+carries CREATE + DISCOVER pinned above the tag filter, opening placeholder
+sheets on the settings-drawer rail (name / description / visibility:
+searchable · link-only · private); the ROOM header's right edge holds a
+members button (sheet titled 'Room members'), the sidebar group-row roster
+button is labelled 'Group members'; switching room -> user chat closes the
+room INSTANTLY (a chat swap, not an exit ride), while dismissing a room
+(back / clicking the open room) still rides out to the right. New groups'
+three built-in passes and #general are noted in the placeholder copy. Read-only rooms carry NO padlock: their name shows inside
 (#italic-parens) in the list and the room header spells "#name (read only)".
 The chats/groups SIDEBAR TABS wear unread BADGES — the chats tab counts
 real DM unreads from the local store (same fact the row dots read), the
