@@ -1914,7 +1914,9 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
   padding: .6rem .9rem .4rem; border-bottom: 1px solid var(--border);
 }
 .group-back { flex: none; }
-.group-head-name { display: inline-flex; align-items: center; gap: .45rem; font-weight: 700; min-width: 0; }
+.group-head-name { display: inline-flex; align-items: center; gap: .45rem; font-weight: 700; min-width: 0; flex: 0 1 auto; overflow: hidden; }
+.gh-group { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-head-room { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .group-head-name .gh-ic { color: var(--accent); font-size: .9rem; }
 .group-head-room { color: var(--muted); font-size: .85rem; }
 /* the header speaker hugs the right edge (same rhythm as the profile
@@ -2007,6 +2009,14 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
 .group-head-members:hover { color: var(--accent); }
 
 /* ---- groups P2: the management DRAWER (members + passes + details) ---- */
+/* the sheet's grid children each carry min-width:0 — grid/flex auto-min is
+   min-content, and one wide row used to widen the WHOLE grid (off-screen
+   content). Every direct child shrinks instead. */
+.group-sheet-body { min-width: 0; }
+.group-sheet-body > * { min-width: 0; }
+.member-list { min-width: 0; }
+.member-row { min-width: 0; }
+.sheet-field { min-width: 0; }
 .gd-about { margin: 0; font-size: .92rem; line-height: 1.45; }
 .gd-head { display: flex; gap: .45rem; margin-top: .5rem; flex-wrap: wrap; }
 .gd-vis, .gd-role {
@@ -2020,7 +2030,7 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
 }
 .gd-sec .sheet-field-label { margin: 0; }
 .gd-add { flex: none; }
-.gd-member { display: flex; align-items: center; gap: .45rem; }
+.gd-member { display: flex; align-items: center; gap: .45rem; min-width: 0; }
 .gd-member .uname { flex: 1; min-width: 0; }
 .member-pass {
   flex: none; font-size: .7rem; font-weight: 700; color: var(--accent);
@@ -2033,13 +2043,16 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
 }
 .member-tool:hover { background: var(--panel-raised); color: var(--text); }
 .member-tool-danger:hover { color: var(--danger); }
-.pass-row { display: flex; align-items: center; gap: .45rem; min-width: 0; }
+.pass-row { display: flex; align-items: center; gap: .45rem; min-width: 0; flex-wrap: wrap; }
 .pass-name { font-weight: 600; flex: none; }
 .pass-builtin {
   flex: none; font-size: .66rem; text-transform: uppercase; letter-spacing: .05em;
   color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: .1rem .4rem;
 }
-.pass-rooms { flex: 1; min-width: 0; color: var(--muted); font-size: .78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* WRAPS (never nowrap): a flex/grid item's min-content floor is the full
+   length of an unbreakable line — one long pass-access row blew the sheet's
+   grid to 534px inside a 319px drawer (the 'UI off the screen' report). */
+.pass-rooms { flex: 1; min-width: 0; color: var(--muted); font-size: .78rem; overflow-wrap: anywhere; }
 .pass-rooms-grid { display: flex; flex-direction: column; gap: .25rem; }
 .pass-room-row { display: flex; align-items: center; gap: .5rem; font-size: .88rem; cursor: pointer; }
 .pass-room-row input { accent-color: var(--accent); }
