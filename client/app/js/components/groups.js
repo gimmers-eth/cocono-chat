@@ -47,6 +47,19 @@ const PEOPLE = {
 const FAKE_GROUPS = [
   {
     name: 'Mortensen Family', role: 'owner', open: true,
+    about: 'The whole tribe: house, holidays, and who is feeding the dog.',
+    vis: 'private',
+    passes: [
+      { name: 'Family', rooms: ['general'], ro: [] },
+      { name: 'Adult', rooms: ['general', 'weekend-house', 'adults-only'], ro: [] },
+    ],
+    members: [
+      { ul: 'sofie', pass: 'Adult', admin: true },
+      { ul: 'marlene', pass: 'Adult' },
+      { ul: 'mads', pass: 'Family' },
+      { ul: 'karl', pass: 'Family' },
+      { ul: 'stoyce', pass: 'Family' },
+    ],
     rooms: [
       { name: 'general', pinned: true, tags: ['starred'], msgs: [
         { from: 'sofie', text: 'Sunday dinner at ours? @marlene bring the guitar!', t: '09:12' },
@@ -68,6 +81,14 @@ const FAKE_GROUPS = [
   },
   {
     name: 'Team Aurora', role: 'admin', open: true,
+    about: 'Product crew for Aurora — deploys, designs, and the coffee log.',
+    vis: 'link',
+    members: [
+      { ul: 'jens', pass: 'Member', admin: true },
+      { ul: 'karl', pass: 'Member' },
+      { ul: 'ida', pass: 'Member' },
+      { ul: 'mads', pass: 'Member' },
+    ],
     rooms: [
       { name: 'general', pinned: true, tags: ['work', 'starred'], msgs: [
         { from: 'jens', text: 'Deploy window moved to Thursday. @karl owns the runbook.', t: '10:15' },
@@ -83,6 +104,7 @@ const FAKE_GROUPS = [
   },
   {
     name: 'Hikers Trail', role: 'member',
+    about: 'Trailheads, routes, and boot recommendations.', vis: 'searchable',
     rooms: [
       { name: 'general', msgs: [
         { from: 'petter', text: 'See you all at the trailhead 7am…', t: 'June' },
@@ -108,7 +130,14 @@ const FAKE_GROUPS = [
   { name: 'Ghibli Fans', role: 'member', rooms: [
     { name: 'general', msgs: [{ from: 'ida', text: 'Marshi watch-along Saturday, bring snacks.', t: '8:14' }] },
   ] },
-  { name: 'Night-Shift Nurses', role: 'admin', rooms: [
+  { name: 'Night-Shift Nurses', role: 'admin',
+    about: 'Ward 4 night crew. Handover is read-only for students.', vis: 'link',
+    passes: [{ name: 'Student', rooms: ['general'], ro: ['handover'] }],
+    members: [
+      { ul: 'mads', pass: 'Member', admin: true },
+      { ul: 'karl', pass: 'Student' },
+      { ul: 'sofie', pass: 'Student' },
+    ], rooms: [
     { name: 'general', msgs: [{ from: 'mads', text: 'Ward 4 short-staffed tomorrow — anyone swap?', t: '23:50' }] },
     { name: 'handover', ro: true, unread: 3, tags: ['work'], msgs: [{ from: 'karl', text: 'Handover log template updated. Read-only for students.', t: '22:07' }] },
   ] },
@@ -130,6 +159,30 @@ const el = (tag, cls, text) => {
   if (text !== undefined) e.textContent = text;
   return e;
 };
+
+const VIS_LABEL = { searchable: 'Publicly searchable', link: 'Invite link only', private: 'Private' };
+
+// built-ins EVERY group carries (req 6): Owner / Admin / Member. Custom
+// passes ride the fixture's `passes` list; groups without explicit rosters
+// derive members from their senders (all plain Members).
+function passesFor(g) {
+  return [
+    { name: 'Owner', builtin: true },
+    { name: 'Admin', builtin: true },
+    { name: 'Member', builtin: true, rooms: g.rooms.map((r) => r.name) },
+    ...(g.passes ?? []),
+  ];
+}
+function membersFor(g) {
+  const me = String(clientRef?.username ?? 'me').toLowerCase();
+  const own = { ul: me, pass: ROLE_PASS[g.role], me: true };
+  const list = g.members ?? [...new Set(g.rooms.flatMap((r) => (r.msgs ?? []).map((m) => m.from)))]
+    .filter((u) => u !== me)
+    .map((ul) => ({ ul, pass: 'Member' }));
+  return [own, ...list];
+}
+const ROLE_PASS = { owner: 'Owner', admin: 'Admin', member: 'Member' };
+let clientRef = null;
 
 const ROLE_ICON = { owner: ['crown', 'You are an OWNER of this group'], admin: ['groupAdmin', 'You are an ADMIN of this group'], member: ['groupMember', 'You are a MEMBER of this group'] };
 
@@ -211,15 +264,16 @@ function openCreateSheet() {
   desc.placeholder = 'What is this group about?';
   const vis = el('div', 'sheet-vis');
   for (const [v, label] of [
-    ['searchable', 'Publicly searchable — anyone can find it'],
-    ['link', 'Public invite link only — found by the link'],
     ['private', 'Private — visible only to members'],
+    ['link', 'Public invite link only — found by the link'],
+    ['searchable', 'Publicly searchable — anyone can find it'],
   ]) {
     const r = el('input');
     r.type = 'radio';
     r.name = 'grp-vis';
     r.value = v;
-    r.checked = v === 'searchable';
+    // NEW GROUPS DEFAULT TO PRIVATE (P2 review): openness must be chosen
+    r.checked = v === 'private';
     const row = el('label', 'vis-row');
     row.append(r, el('span', null, label));
     vis.append(row);
@@ -263,6 +317,218 @@ function openDiscoverSheet() {
 
 function openMembersSheet(title, people, extra) {
   openSheet(title, [memberRows(people), note(extra)]);
+}
+
+// ---------- GROUP DRAWER (P2) ----------
+// Review redirection: passes and adding users are managed HERE — the group
+// members drawer — not in a separate settings panel. The drawer also carries
+// the GROUP DETAILS (description + who can find it), because that is exactly
+// when you are looking at the group. Interactions mutate the mock locally;
+// anything server-shaped (key rotation, real membership, pass cards) toasts
+// its phase honestly.
+function openGroupDrawer(g) {
+  const canManage = g.role === 'owner' || g.role === 'admin';
+  const members = membersFor(g);
+  const body = [];
+
+  body.push(sheetField('About', el('p', 'gd-about', g.about ?? 'No description yet.')));
+  const head = el('div', 'gd-head');
+  const vis = el('span', 'gd-vis', VIS_LABEL[g.vis ?? 'private']);
+  vis.title = 'Who can find this group';
+  const role = el('span', 'gd-role', `You: ${g.role}`);
+  role.title = 'Your pass in this group';
+  head.append(vis, role);
+  body.push(head);
+
+  const mSec = el('div', 'gd-sec');
+  mSec.append(el('h3', 'sheet-field-label', 'Members'));
+  if (canManage) {
+    const add = el('button', 'btn btn-small gd-add');
+    add.type = 'button';
+    add.textContent = 'Add people';
+    add.title = 'Add a user and give them a pass';
+    add.addEventListener('click', () => openAddPersonSheet(g));
+    mSec.append(add);
+  }
+  body.push(mSec);
+  const list = el('ul', 'member-list gd-members');
+  for (const m of members) list.append(memberToolRow(g, m, canManage));
+  body.push(list);
+
+  const pSec = el('div', 'gd-sec');
+  pSec.append(el('h3', 'sheet-field-label', 'Pass types'));
+  body.push(pSec);
+  const plist = el('ul', 'member-list gd-passes');
+  for (const ps of passesFor(g)) plist.append(passRow(g, ps, canManage));
+  body.push(plist);
+  body.push(note('P2 mock: changes live locally on this device. Membership writes, pass cards and room-key rotation arrive with the API (P4/P5).'));
+  openSheet(g.name, body);
+}
+
+function memberToolRow(g, m, canManage) {
+  const li = el('li', 'member-row gd-member');
+  li.append(mountLine(document.createElement('span'), memberOpts(m.ul)));
+  const chip = el('span', 'member-pass', m.me ? `${m.pass} (you)` : m.pass);
+  chip.title = `Pass: ${m.pass}`;
+  li.append(chip);
+  if (canManage && !m.me) {
+    const tools = el('span', 'member-tools');
+    const key = el('button', 'member-tool');
+    key.type = 'button';
+    key.title = 'Give this person a different pass';
+    key.append(iconEl('key'));
+    key.addEventListener('click', () => openPassPicker(g, m));
+    tools.append(key);
+    if (g.role === 'owner') {
+      const shield = el('button', 'member-tool');
+      shield.type = 'button';
+      shield.title = m.admin ? 'Revoke admin' : 'Make admin';
+      shield.append(iconEl(m.admin ? 'friendRemove' : 'friendVerify'));
+      shield.addEventListener('click', () => {
+        m.admin = !m.admin;
+        m.pass = m.admin ? 'Admin' : 'Member';
+        toast('Admin changes rotate keys with the API (P4/P5) — mock updated');
+        openGroupDrawer(g);
+      });
+      tools.append(shield);
+      const rm = el('button', 'member-tool member-tool-danger');
+      rm.type = 'button';
+      rm.title = 'Remove from group';
+      rm.append(iconEl('userGone'));
+      rm.addEventListener('click', () => {
+        if (m.pass === 'Owner' && membersFor(g).filter((x) => x.pass === 'Owner').length <= 1) {
+          toast('The LAST owner may only TRANSFER ownership — a group is never ownerless');
+          return;
+        }
+        toast('Removing members rotates the room keys (P4/P5) — mock only removes here');
+      });
+      tools.append(rm);
+    }
+    li.append(tools);
+  }
+  return li;
+}
+
+function openPassPicker(g, m) {
+  const list = el('ul', 'member-list');
+  for (const ps of passesFor(g)) {
+    const li = el('li', 'member-row');
+    const b = el('button', 'discover-btn');
+    b.type = 'button';
+    b.append(el('span', 'pass-name', ps.name),
+      el('span', 'discover-meta', passAccess(g, ps)));
+    b.addEventListener('click', () => {
+      m.pass = ps.name;
+      m.admin = ps.name === 'Admin' || ps.name === 'Owner';
+      toast('Pass changes rotate room keys (P4/P5) — mock updated');
+      openGroupDrawer(g);
+    });
+    li.append(b);
+    list.append(li);
+  }
+  openSheet(`Pass for ${m.ul}`, [list, note('The new pass takes effect immediately; the room keys rotate (req 7). Pass CARDS are delivered in chats (P4/P5).')]);
+}
+
+function passAccess(g, ps) {
+  if (ps.builtin && (ps.name === 'Owner' || ps.name === 'Admin')) return 'every room · management';
+  const rooms = (ps.rooms ?? g.rooms.map((r) => r.name)).join(', ');
+  const ro = ps.ro?.length ? ` · read-only: ${ps.ro.join(', ')}` : '';
+  return `rooms: ${rooms || 'general'}${ro}`;
+}
+
+function passRow(g, ps, canManage) {
+  const li = el('li', 'member-row pass-row');
+  const label = el('span', 'pass-name', ps.name);
+  li.append(label);
+  if (ps.builtin) {
+    const tag = el('span', 'pass-builtin', 'built-in');
+    tag.title = 'Every group starts with Owner, Admin and Member';
+    li.append(tag);
+  }
+  li.append(el('span', 'pass-rooms', passAccess(g, ps)));
+  if (canManage) {
+    const edit = el('button', 'member-tool');
+    edit.type = 'button';
+    edit.title = ps.builtin ? 'Built-in passes always exist; their room access is shown here' : 'Edit this pass';
+    edit.append(iconEl('settings'));
+    edit.addEventListener('click', () => openPassEditor(g, ps));
+    li.append(edit);
+  }
+  return li;
+}
+
+function openPassEditor(g, ps) {
+  const name = el('input');
+  name.type = 'text';
+  name.value = ps.name;
+  name.maxLength = 32;
+  name.disabled = !!ps.builtin;
+  const rows = el('div', 'pass-rooms-grid');
+  const wanted = new Set(ps.rooms ?? g.rooms.map((r) => r.name));
+  const wantedRo = new Set(ps.ro ?? []);
+  for (const r of g.rooms) {
+    const row = el('label', 'pass-room-row');
+    const a = el('input');
+    a.type = 'checkbox';
+    a.checked = wanted.has(r.name);
+    a.disabled = !!ps.builtin;
+    const o = el('input');
+    o.type = 'checkbox';
+    o.checked = wantedRo.has(r.name);
+    o.disabled = !!ps.builtin;
+    o.title = 'Read-only: holders can read, never post';
+    row.append(a, el('span', 'pass-room-name', `#${r.name}`), el('span', 'pass-ro-label', 'read only'), o);
+    rows.append(row);
+  }
+  const save = el('button', 'btn btn-accent sheet-go');
+  save.type = 'button';
+  save.textContent = ps.builtin ? 'Built-in passes are fixed — this is the view' : 'Save pass';
+  save.disabled = !!ps.builtin;
+  if (!ps.builtin) {
+    save.addEventListener('click', () => {
+      ps.name = name.value.trim() || ps.name;
+      // rows were built in g.rooms ORDER, so positional reads are exact
+      ps.rooms = g.rooms.filter((r, i) => [...rows.children][i].querySelector('input').checked).map((r) => r.name);
+      ps.ro = g.rooms.filter((r, i) => [...rows.children][i].querySelectorAll('input')[1].checked).map((r) => r.name);
+      toast('Saving a pass rotates its rooms’ keys (P4/P5) — mock updated');
+      openGroupDrawer(g);
+    });
+  }
+  openSheet(`${ps.builtin ? 'Pass' : 'Edit pass'}: ${ps.name}`, [
+    sheetField('Name', name),
+    sheetField('Rooms', rows),
+    save,
+    note('A room without a checkbox is INVISIBLE to holders (req 10); “read only” blocks posting (reqs 5/11). Access is the UNION of a holder’s passes (req 21).'),
+  ]);
+}
+
+function openAddPersonSheet(g) {
+  const user = el('input');
+  user.type = 'text';
+  user.placeholder = 'username';
+  user.maxLength = 64;
+  const go = el('button', 'btn btn-accent sheet-go');
+  go.type = 'button';
+  go.textContent = 'Give a pass';
+  go.addEventListener('click', () => toast('Adding a person sends them a pass CARD in chat and rotates the keys (P4/P5)'));
+  openSheet('Add people', [
+    sheetField('Username', user),
+    sheetField('Pass', ...(() => {
+      const wrap = el('div', 'sheet-vis');
+      for (const ps of passesFor(g)) {
+        const r = el('input');
+        r.type = 'radio';
+        r.name = 'pass-pick';
+        r.checked = ps.name === 'Member';
+        const row = el('label', 'vis-row');
+        row.append(r, el('span', null, `${ps.name} — ${passAccess(g, ps)}`));
+        wrap.append(row);
+      }
+      return [wrap];
+    })()),
+    go,
+    note('The recipient sees ONLY what the pass grants — withheld rooms are never named (req 12).'),
+  ]);
 }
 
 const groupRoster = (g) => [...new Set(g.rooms.flatMap((r) => (r.msgs ?? []).map((m) => m.from)))];
@@ -453,9 +719,8 @@ function groupRow(g) {
   nameBtn.addEventListener('click', toggle);
   // (P1 review) the SIDEBAR's roster control is the GROUP's people —
   // labelled 'Group members'; the ROOM's members live in the room header
-  members.addEventListener('click', () => openMembersSheet('Group members', groupRoster(g),
-    'Promote, revoke and pass management arrive with group settings (P2/P4).'));
-  settings.addEventListener('click', () => toast('Group settings are P2 — see docs/features/groups.md'));
+  members.addEventListener('click', () => openGroupDrawer(g));
+  settings.addEventListener('click', () => openGroupDrawer(g)); // the drawer IS the settings surface (P2)
   return row;
 }
 
@@ -809,6 +1074,7 @@ function closeRoom(opts = {}) {
 
 export function mountGroups({ client, chat = null }) {
   chatRef = chat;
+  clientRef = client;
   const sidebar = document.querySelector('.sidebar');
   // idempotent on BOTH evidence — the tab bar itself AND the list host:
   // a double mount can never build a second tab bar

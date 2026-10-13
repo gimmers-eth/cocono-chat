@@ -2005,3 +2005,43 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
 /* room header: members rides the right edge */
 .group-head-members { margin-left: auto; flex: none; color: var(--muted); }
 .group-head-members:hover { color: var(--accent); }
+
+/* ---- groups P2: the management DRAWER (members + passes + details) ---- */
+.gd-about { margin: 0; font-size: .92rem; line-height: 1.45; }
+.gd-head { display: flex; gap: .45rem; margin-top: .5rem; flex-wrap: wrap; }
+.gd-vis, .gd-role {
+  font-size: .72rem; font-weight: 700; border-radius: 999px; padding: .16rem .55rem;
+  background: var(--panel); border: 1px solid var(--border); color: var(--muted);
+}
+.gd-vis { color: var(--accent); border-color: var(--accent); }
+.gd-sec {
+  display: flex; align-items: center; justify-content: space-between; gap: .5rem;
+  margin: .9rem 0 .2rem; padding-top: .5rem; border-top: 1px solid var(--divider);
+}
+.gd-sec .sheet-field-label { margin: 0; }
+.gd-add { flex: none; }
+.gd-member { display: flex; align-items: center; gap: .45rem; }
+.gd-member .uname { flex: 1; min-width: 0; }
+.member-pass {
+  flex: none; font-size: .7rem; font-weight: 700; color: var(--accent);
+  background: rgba(125, 108, 224, 0.14); border-radius: 999px; padding: .14rem .5rem;
+}
+.member-tools { flex: none; display: inline-flex; gap: .1rem; }
+.member-tool {
+  width: 1.8rem; height: 1.8rem; display: grid; place-items: center;
+  border: 0; background: none; color: var(--muted); cursor: pointer; border-radius: 8px;
+}
+.member-tool:hover { background: var(--panel-raised); color: var(--text); }
+.member-tool-danger:hover { color: var(--danger); }
+.pass-row { display: flex; align-items: center; gap: .45rem; min-width: 0; }
+.pass-name { font-weight: 600; flex: none; }
+.pass-builtin {
+  flex: none; font-size: .66rem; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: .1rem .4rem;
+}
+.pass-rooms { flex: 1; min-width: 0; color: var(--muted); font-size: .78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pass-rooms-grid { display: flex; flex-direction: column; gap: .25rem; }
+.pass-room-row { display: flex; align-items: center; gap: .5rem; font-size: .88rem; cursor: pointer; }
+.pass-room-row input { accent-color: var(--accent); }
+.pass-room-name { font-weight: 600; }
+.pass-ro-label { color: var(--muted); font-size: .78rem; margin-left: auto; }

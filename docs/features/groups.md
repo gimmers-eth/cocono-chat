@@ -116,7 +116,7 @@ surfaces group rooms reuse)
 | Phase | Scope | State |
 |---|---|---|
 | **P1** | Sidebar icon tabs + sliding panes + group/room list with roles, stars, hide/show, read-only locks + group ROOM chat UI (sender chips w/ trust + badges, composer, conversation tabs). Fake data (10 groups, mixed roles). FE only, no API. | ✅ **complete — awaiting review** (branch `groups-p1`) |
-| **P2** | Group settings example UI: overview, pass types list + editor (read-only view), members tab (**room member roster lives here** — promote/revoke shown, not wired), rooms tab. FE only. | ⬜ next |
+| **P2** | Group management DRAWER (review redirection: passes + add-people live in the GROUP MEMBERS drawer, not a separate settings panel): group details (description, visibility), members with pass chips and owner tools (pick pass, promote, guarded remove), pass types list + editor (room checkboxes, read-only per room), add-person sheet, built-in Owner/Admin/Member noted. Create defaults to PRIVATE. FE only, mock-local changes, API steps toast. | 🔄 in review |
 | **P3** | Admin panel UI example: Groups page (paginated list + members), user-panel groups section, pass create/distribute flow — mock data. | ⬜ |
 | **P4** | Backend: collections (groups, rooms, passes, memberships, group key material), wire protocol (rooms fan-out, key rotation, ack-aware media lifecycle), pass cards as sys messages, BLOCKED-MEMBER DELIVERY (delivered, client renders red italic), admin APIs, unit + integration tests. | ⬜ |
 | **P5** | Client: replace the mock with real data — group list from the server, room chats through the SDK, key rotation, forwarding to rooms, member-aware media pruning. | ⬜ |

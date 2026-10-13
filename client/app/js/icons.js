@@ -123,6 +123,7 @@ export const ICONS = {
   pinSlash: 'fa-solid fa-thumbtack-slash',
   grpCreate: 'fa-solid fa-pen-to-square',   // create a group (P1 placeholder)
   grpDiscover: 'fa-solid fa-compass',       // discover groups (P1 placeholder)
+  key: 'fa-solid fa-key',                   // a member's PASS (change it)
   tabSearch: 'fa-magnifying-glass',  // sidebar search tab (coming soon)
 };
 
