@@ -90,6 +90,14 @@ surfaces group rooms reuse)
   access to a room is the UNION of role and passes; passes can only add
   (req 21). The members drawer shows roles; its PASSES tab shows the
   grants; settings owns both definitions.
+* **#general is untouchable (P2 review):** no pass can REMOVE general
+  access — every pass holder always sees #general (req 11); the only dial
+  there is READ ONLY. The pass editor renders general's access checkbox
+  locked-on and disabled, and saving always re-adds general.
+* **Role logos:** the members drawer's section titles wear the owner crown
+  and admin shield to the LEFT of the words; room-members rows carry the
+  same logo on the RIGHT of the row, so owners/admins are recognisable in
+  any list.
 * **Room = the chat unit.** All existing DM machinery (composer, drafts,
   mentions/links, media lifecycle, tabs, notices) attaches to a room;
   group-level UI is just navigation + administration.

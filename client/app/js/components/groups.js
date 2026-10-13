@@ -392,7 +392,7 @@ function openMembersDrawer(g) {
   for (const roleName of ['Owner', 'Admin', 'Member']) {
     const holders = membersFor(g).filter((m) => m.role === roleName);
     const sec = el('div', 'gd-sec');
-    sec.append(el('h3', 'sheet-field-label', roleName));
+    sec.append(secTitle(roleName, roleName));
     // P2 review: GROUP MEMBERS CAN ONLY BE ADDED AS A MEMBER — only the
     // Member section offers the add button; Admin/Owner are reached by
     // promoting someone who is already in.
@@ -439,6 +439,21 @@ function openMembersDrawer(g) {
   body.push(panels);
   body.push(note('P2 mock: changes live locally. Membership writes, pass cards and key rotation arrive with the API (P4/P5).'));
   openSheet(`${g.name} — members`, body);
+}
+
+// Section headers with their role logo to the LEFT of the title (P2 review):
+// owner crown gold, admin shield purple — Member stays plain.
+const ROLE_SEC_ICON = { Owner: ['crown', 'role-owner'], Admin: ['groupAdmin', 'role-admin'] };
+function secTitle(text, role) {
+  const wrap = el('span', 'gd-sec-title');
+  const ic = ROLE_SEC_ICON[role];
+  if (ic) {
+    const i = iconEl(ic[0], `sec-role-ic ${ic[1]}`);
+    i.setAttribute('aria-hidden', 'true');
+    wrap.append(i);
+  }
+  wrap.append(el('h3', 'sheet-field-label', text));
+  return wrap;
 }
 
 // A member row: the FACE (single-line component) opens their profile; the
@@ -689,7 +704,12 @@ function openPassEditor(g, ps, isNew = false) {
     const row = el('label', 'pass-room-row');
     const a = el('input');
     a.type = 'checkbox';
-    a.checked = wanted.has(r.name);
+    // P2 review: MEMBERS CANNOT BE REMOVED FROM #GENERAL — every pass
+    // reaches it (req 11); the only dial there is READ ONLY.
+    const isGeneral = r.name === 'general';
+    a.checked = wanted.has(r.name) || isGeneral;
+    a.disabled = isGeneral;
+    if (isGeneral) a.title = '#general is visible to every pass holder (req 11) — make it read-only instead of removing it';
     const o = el('input');
     o.type = 'checkbox';
     o.checked = wantedRo.has(r.name);
@@ -701,7 +721,7 @@ function openPassEditor(g, ps, isNew = false) {
   save.type = 'button';
   save.textContent = isNew ? 'Create pass' : 'Save pass';
   save.addEventListener('click', () => {
-    const rooms = g.rooms.filter((r, i) => [...rows.children][i].querySelector('input').checked).map((r) => r.name);
+    const rooms = [...new Set(['general', ...g.rooms.filter((r, i) => [...rows.children][i].querySelector('input').checked).map((r) => r.name)])];
     const ro = g.rooms.filter((r, i) => [...rows.children][i].querySelectorAll('input')[1].checked).map((r) => r.name);
     if (ps.builtin && ps.name === 'Member') {
       g.memberAccess = { rooms, ro }; // the built-in Member pass is editable like any other (P2 review)
@@ -773,6 +793,14 @@ function openRoomMembers(g, r) {
       const ro = el('span', 'member-ro', 'read only');
       ro.title = 'Their role and passes read this room but cannot post';
       li.append(ro);
+    }
+    // P2 review: owners/admins are recognisable in the ROOM list too —
+    // their role logo rides the right of the row
+    const roleIc = ROLE_SEC_ICON[m.role];
+    if (roleIc) {
+      const i = iconEl(roleIc[0], `member-role-ic ${roleIc[1]}`);
+      i.title = `${m.role} of this group`;
+      li.append(i);
     }
     ul.append(li);
   }

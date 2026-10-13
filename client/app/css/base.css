@@ -2092,3 +2092,13 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
 /* the last-owner lock: an explanation, not a button (P2 review) */
 .gd-locked { color: var(--muted); cursor: default; }
 .gd-locked:hover { background: none; color: var(--muted); }
+
+/* ---- groups P2 round 3: role logos ---- */
+/* section titles wear the role logo to their LEFT (owner crown, admin
+   shield); room lists wear it on the RIGHT of the row */
+.gd-sec-title { display: inline-flex; align-items: center; gap: .4rem; min-width: 0; }
+.gd-sec-title h3 { margin: 0; }
+.sec-role-ic { font-size: .85rem; }
+.member-role-ic { flex: none; font-size: .9rem; margin-left: .15rem; }
+/* #general's locked access checkbox in the pass editor: visible, inert */
+.pass-room-row input:disabled { opacity: .55; cursor: not-allowed; }
