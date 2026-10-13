@@ -16,7 +16,7 @@
 //     component — trust icon + worn badge, viewer-side state (req 19);
 //   * the conversation tab strip (req 16) and a working echo composer.
 
-import { $, toast, animateSheetClose } from '../ui.js';
+import { $, toast, animateSheetClose, confirmModal } from '../ui.js';
 import { iconEl } from '../icons.js';
 import { mountLine } from './userline.js';
 import { PS } from './peername.js';
@@ -54,6 +54,7 @@ const FAKE_GROUPS = [
       { name: 'Adult', rooms: ['general', 'weekend-house', 'adults-only'], ro: [] },
     ],
     members: [
+      { ul: 'ida', role: 'Owner' },
       { ul: 'sofie', role: 'Admin', extra: ['Adult'] },
       { ul: 'marlene', role: 'Member', extra: ['Adult'] },
       { ul: 'mads', role: 'Member', extra: ['Family'] },
@@ -445,22 +446,71 @@ function memberRoleRow(g, m, canManage) {
   const li = el('li', 'member-row gd-member');
   li.append(faceBtn(g, m.ul));
   const tools = el('span', 'member-tools');
+  // OWN row: the relinquish path (P2 review) — available whenever another
+  // owner exists to carry the group; the last owner may only TRANSFER.
+  if (m.me && m.role === 'Owner') {
+    const owners = membersFor(g).filter((x) => x.role === 'Owner').length;
+    if (owners > 1) {
+      tools.append(tool('friendRemove', 'Relinquish ownership', () => {
+        confirmModal({
+          title: 'Relinquish your ownership?',
+          body: `You will keep access to ${g.name} as a plain Member, and the other owners can grant ownership back.`,
+          warning: 'You lose the owner tools: transfers, admin revocation and owner protection.',
+          okLabel: 'Relinquish', danger: true,
+        }).then((yes) => {
+          if (!yes) return;
+          m.role = 'Member';
+          g.role = 'member';
+          toast('Ownership relinquished — you are a Member now (P4/P5)');
+          renderGroups();
+          openMembersDrawer(g);
+        });
+      }));
+    } else {
+      const lock = el('span', 'member-tool gd-locked');
+      lock.append(iconEl('crown'));
+      lock.title = 'You are the ONLY owner — the last owner may only transfer ownership, never relinquish';
+      tools.append(lock);
+    }
+  }
   if (canManage && !m.me) {
+    // EVERY elevation and removal goes through an "are you sure" modal —
+    // these are the decisions that rotate keys and hand out power
     if (m.role === 'Admin' && g.role === 'owner') tools.append(tool('crown', 'Make owner', () => {
-      m.role = 'Owner';
-      toast('Ownership moved — the last owner may never leave (P4/P5 enforce)');
-      openMembersDrawer(g);
+      confirmModal({
+        title: `Make ${m.ul} an owner?`,
+        body: `Owners see everything in ${g.name} and cannot be removed by admins. Ownership can only be given by another owner.`,
+        warning: 'Make sure you trust this person with the whole group.',
+        okLabel: 'Make owner', danger: true,
+      }).then((yes) => {
+        if (!yes) return;
+        m.role = 'Owner';
+        toast('Ownership given — room keys rotate with the API (P4/P5)');
+        openMembersDrawer(g);
+      });
     }));
     if (m.role === 'Member') tools.append(tool('friendVerify', 'Make admin', () => {
-      m.role = 'Admin';
-      toast('Admins can rename rooms and give passes (P4/P5 enforce)');
-      openMembersDrawer(g);
+      confirmModal({
+        title: `Make ${m.ul} an admin?`,
+        body: 'Admins can rename rooms, manage passes, and add or remove members. They cannot remove owners or grant ownership.',
+        okLabel: 'Make admin', danger: true,
+      }).then((yes) => {
+        if (!yes) return;
+        m.role = 'Admin';
+        toast('Admin granted (P4/P5 enforce)');
+        openMembersDrawer(g);
+      });
     }));
-    if (m.role === 'Admin') tools.append(tool('userGone', 'Delete', () => {
-      removeMember(g, m, 'Removed');
-    }));
-    if (m.role === 'Member') tools.append(tool('userGone', 'Remove', () => {
-      removeMember(g, m, 'Removed');
+    if (m.role === 'Admin' || m.role === 'Member') tools.append(tool('userGone', m.role === 'Admin' ? 'Delete' : 'Remove', () => {
+      confirmModal({
+        title: `Remove ${m.ul} from the group?`,
+        body: `They lose ${g.name} entirely and can no longer see its rooms.`,
+        warning: 'EVERY pass they hold is removed too — the revoke cannot be partial.',
+        okLabel: m.role === 'Admin' ? 'Delete' : 'Remove', danger: true,
+      }).then((yes) => {
+        if (!yes) return;
+        removeMember(g, m, 'Removed');
+      });
     }));
   }
   li.append(tools);

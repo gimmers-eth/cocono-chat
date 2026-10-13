@@ -2088,3 +2088,7 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
 .gd-face:hover .uname-text { text-decoration: underline; text-underline-offset: 2px; }
 .pf-face .uname { font-size: 1.05rem; }
 .pf-rooms .member-pass, .pf-rooms .member-ro { margin-left: auto; }
+
+/* the last-owner lock: an explanation, not a button (P2 review) */
+.gd-locked { color: var(--muted); cursor: default; }
+.gd-locked:hover { background: none; color: var(--muted); }
