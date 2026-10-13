@@ -2036,6 +2036,13 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
   flex: none; font-size: .7rem; font-weight: 700; color: var(--accent);
   background: rgba(125, 108, 224, 0.14); border-radius: 999px; padding: .14rem .5rem;
 }
+/* the room-members read-only marker (pass grants view, not posting) */
+.member-ro {
+  flex: none; font-size: .68rem; font-weight: 700; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 999px; padding: .12rem .45rem;
+}
+.gd-empty { color: var(--muted); font-style: italic; font-size: .85rem; padding: .3rem .2rem; }
+.gd-roomline { margin: 0 0 .3rem; font-weight: 700; color: var(--muted); }
 .member-tools { flex: none; display: inline-flex; gap: .1rem; }
 .member-tool {
   width: 1.8rem; height: 1.8rem; display: grid; place-items: center;
