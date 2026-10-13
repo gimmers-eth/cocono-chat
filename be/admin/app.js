@@ -1408,7 +1408,8 @@ const MOCK_GROUPS = [
       { ul: 'friendly-4', role: 'Member', passes: ['Student'] },
     ] },
   { id: 'g-5', name: 'Chess Club', vis: 'searchable', created: '2026-02-11',
-    rooms: ['general', 'tournament'], passes: [{ name: 'Player', rooms: ['general', 'tournament'], ro: [] }],
+    rooms: ['general', 'tournament'], frozen: ['tournament'],
+    passes: [{ name: 'Player', rooms: ['general', 'tournament'], ro: [] }],
     members: [
       { ul: 'normal-7', role: 'Owner', passes: ['Player'] },
       { ul: 'normal-8', role: 'Member', passes: [] },
@@ -1463,14 +1464,13 @@ function renderGroups() {
         <strong>${esc(g.name)}</strong> <span class="dim mono">${esc(g.id)}</span></td>
       <td><button class="linkish" data-view-user="${esc(owner)}">@${esc(owner)}</button></td>
       <td>${g.members.length}</td>
-      <td class="dim">${g.rooms.map((r) => `#${esc(r)}`).join(' ')}</td>
+      <td class="dim">${g.rooms.map((r) => `#${esc(r)}${g.frozen?.includes(r) ? ' ❄' : ''}`).join(' ')}</td>
       <td>${esc(VIS_ADMIN[g.vis] ?? g.vis)}</td>
       <td class="dim">${esc(g.created)}</td>
       <td><button class="tiny" data-grp-manage="${esc(g.id)}">rename (staff)</button></td>
     </tr>
     ${expanded ? `<tr class="grp-detail"><td colspan="7">${groupDetail(g)}</td></tr>` : ''}`;
   }).join('');
-  fillGroupPassSelects();
 }
 
 function groupDetail(g) {
@@ -1480,7 +1480,21 @@ function groupDetail(g) {
   return `
     <div class="grp-cols">
       <div>
-        <h4>Members — role + passes</h4>
+        <h4>Rooms</h4>
+        <table class="mini">
+          <thead><tr><th>Room</th><th>State</th><th></th></tr></thead>
+          <tbody>${g.rooms.map((r) => {
+    const frozen = (g.frozen ?? []).includes(r);
+    return `<tr>
+              <td>#${esc(r)}</td>
+              <td>${frozen ? '<span class="badge frozen-badge">❄ frozen</span>' : '<span class="dim">active</span>'}</td>
+              <td><button class="tiny" data-grp-freeze="${esc(g.id)}:${esc(r)}">${frozen ? 'unfreeze' : 'freeze'}</button></td>
+            </tr>`;
+  }).join('')}</tbody>
+        </table>
+        <p class="dim small-note">FREEZE keeps the room and its history visible but stops new messages,
+          joins and leaves — the staff brake for a room that turned (P3 mock; the server enforces it in P4).</p>
+        <h4 style="margin-top:.9rem">Members — role + passes</h4>
         <table class="mini">
           <thead><tr><th>User</th><th>Role</th><th>Passes</th><th></th></tr></thead>
           <tbody>${g.members.map((m) => `<tr>
@@ -1502,20 +1516,6 @@ function groupDetail(g) {
         <p class="dim small-note">#general is every pass's floor — staff passes add rooms, never remove general (req 11).</p>
       </div>
     </div>`;
-}
-
-// pass-desk selects: group + pass lists follow the fixtures
-function fillGroupPassSelects() {
-  const opts = MOCK_GROUPS.map((g) => `<option value="${esc(g.id)}">${esc(g.name)}</option>`).join('');
-  for (const id of ['passdesk-group', 'passdesk-give-group']) {
-    const sel = $(id);
-    const keep = sel.value;
-    sel.innerHTML = opts;
-    if (keep && MOCK_GROUPS.some((g) => g.id === keep)) sel.value = keep;
-  }
-  const g = MOCK_GROUPS.find((x) => x.id === $('passdesk-give-group').value);
-  $('passdesk-give-pass').innerHTML = (g?.passes ?? []).map((ps) => `<option>${esc(ps.name)}</option>`).join('')
-    || '<option value="">(no custom passes)</option>';
 }
 
 // ---- user panel: the GROUPS tab (req 22: see the groups a user is in) ----
@@ -1552,6 +1552,22 @@ document.addEventListener('click', (e) => {
     if (name && name.trim()) { g.name = name.trim(); setStatus(`Group renamed to “${g.name}” (mock — staff rename is a P6 call)`, 'ok'); renderGroups(); }
     return;
   }
+  const fz = e.target.closest?.('[data-grp-freeze]');
+  if (fz) {
+    const [gid, room] = fz.dataset.grpFreeze.split(':');
+    const g = MOCK_GROUPS.find((x) => x.id === gid);
+    const frozen = (g.frozen ??= []);
+    const on = frozen.includes(room);
+    const ok = window.confirm?.(on
+      ? `Unfreeze #${room} in ${g.name}?\n\nPosting, joins and leaves resume.`
+      : `Freeze #${room} in ${g.name}?\n\nThe room and its history stay VISIBLE, but no new messages can be sent and no one can join or leave. Owners keep seeing everything.`);
+    if (!ok) return;
+    if (on) g.frozen = frozen.filter((x) => x !== room);
+    else frozen.push(room);
+    setStatus(`#${room} ${on ? 'unfrozen' : 'frozen'} in ${g.name} (mock — the freeze is enforced server-side in P4)`, 'ok');
+    renderGroups();
+    return;
+  }
   const rem = e.target.closest?.('[data-grp-remove]');
   if (rem) {
     const [gid, ul] = rem.dataset.grpRemove.split(':');
@@ -1574,30 +1590,7 @@ document.addEventListener('click', (e) => {
   const openTab = e.target.closest?.('[data-uptab="groups"]');
   if (openTab) renderPanel(); // the tab dispatcher reads PANEL_SECTIONS.groups
 });
-$('btn-pass-create').addEventListener('click', () => {
-  const g = MOCK_GROUPS.find((x) => x.id === $('passdesk-group').value);
-  const name = $('passdesk-name').value.trim();
-  if (!g || !name) { setStatus('Pick a group and name the pass first', 'error'); return; }
-  if (g.passes.some((ps) => ps.name === name)) { setStatus(`“${name}” already exists in ${g.name}`, 'error'); return; }
-  g.passes.push({ name, rooms: ['general'], ro: [] });
-  $('passdesk-name').value = '';
-  setStatus(`Pass type “${name}” created for ${g.name} (mock — staff pass creation is a P6 call)`, 'ok');
-  renderGroups();
-});
-$('btn-pass-give').addEventListener('click', () => {
-  const g = MOCK_GROUPS.find((x) => x.id === $('passdesk-give-group').value);
-  const pass = $('passdesk-give-pass').value;
-  const ul = $('passdesk-give-user').value.trim().toLowerCase();
-  if (!g || !ul || !pass) { setStatus('Group, pass and username are all required', 'error'); return; }
-  const m = g.members.find((x) => x.ul === ul);
-  if (!m) { setStatus(`@${ul} is not a member of ${g.name} — add them there first (P6: the pass card invites them in)`, 'error'); return; }
-  if (!m.passes.includes(pass)) m.passes.push(pass);
-  $('passdesk-give-user').value = '';
-  setStatus(`@${ul} now holds the ${pass} pass in ${g.name} (mock — distribution + key rotation are P6)`, 'ok');
-  renderGroups();
-});
-$('passdesk-give-group').addEventListener('change', fillGroupPassSelects);
-renderGroups(); // build once so the selects exist before first show
+renderGroups(); // build once so the page is warm before the first show
 
 const PAGES = ['users', 'groups', 'godview', 'app', 'traffic', 'reports', 'diagnostics', 'ops'];
 // set by the user panel's "search rate limits" button: the subjects to load

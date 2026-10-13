@@ -272,24 +272,13 @@
           </table>
           <p id="groups-empty" class="dim" hidden>No groups match.</p>
         </div>
-        <div class="panel">
-          <div class="row">
-            <h3 style="margin:0">Staff pass desk</h3>
-            <span class="dim">create a pass type for a group, and hand it out —
-              the staff shortcut around the owners’ own tools (P3 mock)</span>
-          </div>
-          <div class="row">
-            <select id="passdesk-group"></select>
-            <input id="passdesk-name" type="text" size="18" placeholder="new pass name (e.g. Chaperone)" />
-            <button id="btn-pass-create" class="tiny">Create pass type</button>
-          </div>
-          <div class="row">
-            <select id="passdesk-give-group"></select>
-            <select id="passdesk-give-pass"></select>
-            <input id="passdesk-give-user" type="text" size="18" placeholder="username" />
-            <button id="btn-pass-give" class="tiny">Distribute pass</button>
-          </div>
-        </div>
+        <p class="dim small-note" style="margin-top:.6rem">
+          Staff do NOT join groups, create passes, or hand them out — passes are
+          granted by each group’s OWN owners and admins in the app. The admin
+          panel sees groups and moderates them (rename, room freeze); room
+          traffic is end-to-end encrypted to the entitled members, so staff
+          never read messages.
+        </p>
       </section>
 
       <section class="page" data-page="diagnostics" hidden>

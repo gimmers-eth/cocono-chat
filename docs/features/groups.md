@@ -30,8 +30,9 @@ surfaces group rooms reuse)
 5. **Passes**: group admins create/edit pass types and give/revoke user
    passes. A pass grants access to specific rooms; example: a family group
    with a `family` pass (family rooms only — great for kids) and an `adult`
-   pass (every room). Passes can grant READ-ONLY access to a room. Staff
-   admins (the admin panel) can create and DISTRIBUTE group passes.
+   pass (every room). Passes can grant READ-ONLY access to a room.
+   "Admin" here means the GROUP'S OWN admins — platform staff never create
+   or distribute passes (P3 review; see §2 staff scope).
 6. A new group starts with 3 built-in pass types: **Owner / Admin / Member**.
    * Owner: highest access, cannot be removed from the group, sees
      everything. May transfer ownership or relinquish it — but at least one
@@ -112,6 +113,19 @@ surfaces group rooms reuse)
 * **Pass card**: a sys-style in-chat message (trustworthy because it rides
   the E2EE channel from the giver): `{pass:'adult', rooms:[names the
   recipient GETS]}` — never the withheld room names (req 12).
+* **STAFF SCOPE (P3 review):** platform staff NEVER join a group, create a
+  pass, or hand one out — those are the group's own owner/admin powers inside
+  the app. Staff SEE groups (list, members, pass types), RENAME them (req 3)
+  and FREEZE rooms: a frozen room keeps its name, history and visibility, but
+  the server accepts no new messages in it and blocks joins and leaves until
+  unfrozen (enforcement in P4). Staff hold no decryption path at all.
+* **EVERY ROOM IS E2EE — including from staff.** A room's messages are
+  encrypted to the entitled audience only: the sender encrypts one copy per
+  member DEVICE of that room (the existing pairwise device keys wrap the
+  room key), so the server stores N opaque copies per message and platform
+  staff — or anyone without a pass — cannot read room traffic any more than
+  they can read a DM. Pass changes rotate the room key: removed members lose
+  FUTURE messages (req 7) without the already-delivered copies changing.
 * **BLOCKED USERS STILL SPEAK IN SHARED GROUPS (scope note)**: the DM block
   wall gates DIRECT chats only. If I blocked a user and we share a group
   room, their messages are STILL DELIVERED to me — the group is their room
@@ -130,10 +144,10 @@ surfaces group rooms reuse)
 
 | Phase | Scope | State |
 |---|---|---|
-| **P1** | Sidebar icon tabs + sliding panes + group/room list with roles, stars, hide/show, read-only locks + group ROOM chat UI (sender chips w/ trust + badges, composer, conversation tabs). Fake data (10 groups, mixed roles). FE only, no API. | ✅ **complete — awaiting review** (branch `groups-p1`) |
-| **P2** | Group management, split by review: the MEMBERS drawer has TWO TABS — MEMBERS (the three ROLES Owner/Admin/Member as sections; every member is always one of them; admin rows get MAKE OWNER + DELETE, member rows MAKE ADMIN + REMOVE, owner rows inert) and PASSES (custom passes as sections with their holders and a REMOVE-PASS tool — passes are additive grants, taking one back never touches the role). Only the MEMBER section (and the pass sections, which also admit with the pass attached) offer ADD MEMBER: **everyone joins as a Member** — Admin/Owner are reached by promoting someone already in, never at the door. SETTINGS (gear) owns ABOUT (editable), PERMISSIONS (visibility) and PASS TYPES — including NEW PASS creation and a room-access/read-only EDITOR that also governs the built-in Member pass (default: #general only). Tapping any member face (group or room list) opens their profile (mock until P5). EVERY elevation and removal asks first (the app's confirm modal — removal spells out that ALL passes go with the member), and an owner with a fellow owner gets a RELINQUISH OWNERSHIP button (confirmed; drops them to Member) — the sole owner instead sees a lock explaining transfer-only. Room-members sheets list ONLY those whose role ∪ passes reach the room, READ-ONLY marked (reqs 10/21). Create defaults to PRIVATE. FE only, mock-local changes, API steps toast. | 🔄 in review |
-| **P3** | Admin panel UI example: Groups page (paginated list + members), user-panel groups section, pass create/distribute flow — mock data. | ⬜ |
-| **P4** | Backend: collections (groups, rooms, passes, memberships, group key material), wire protocol (rooms fan-out, key rotation, ack-aware media lifecycle), pass cards as sys messages, BLOCKED-MEMBER DELIVERY (delivered, client renders red italic), admin APIs, unit + integration tests. | ⬜ |
+| **P1** | Sidebar icon tabs + sliding panes + group/room list with roles, stars, hide/show, read-only locks + group ROOM chat UI (sender chips w/ trust + badges, composer, conversation tabs). Fake data (10 groups, mixed roles). FE only, no API. | ✅ merged (`acf4a59`) |
+| **P2** | Group management, split by review: the MEMBERS drawer has TWO TABS — MEMBERS (the three ROLES Owner/Admin/Member as sections; every member is always one of them; admin rows get MAKE OWNER + DELETE, member rows MAKE ADMIN + REMOVE, owner rows inert) and PASSES (custom passes as sections with their holders and a REMOVE-PASS tool — passes are additive grants, taking one back never touches the role). Only the MEMBER section (and the pass sections, which also admit with the pass attached) offer ADD MEMBER: **everyone joins as a Member** — Admin/Owner are reached by promoting someone already in, never at the door. SETTINGS (gear) owns ABOUT (editable), PERMISSIONS (visibility) and PASS TYPES — including NEW PASS creation and a room-access/read-only EDITOR that also governs the built-in Member pass (default: #general only). Tapping any member face (group or room list) opens their profile (mock until P5). EVERY elevation and removal asks first (the app's confirm modal — removal spells out that ALL passes go with the member), and an owner with a fellow owner gets a RELINQUISH OWNERSHIP button (confirmed; drops them to Member) — the sole owner instead sees a lock explaining transfer-only. Room-members sheets list ONLY those whose role ∪ passes reach the room, READ-ONLY marked (reqs 10/21). Create defaults to PRIVATE. FE only, mock-local changes, API steps toast. | ✅ merged (`acf4a59`) |
+| **P3** | Admin panel UI example: Groups page (paginated, searchable, expandable rows: ROOMS with staff FREEZE/UNFREEZE ❄, members with role badges + passes, pass types with built-in tags), user-panel GROUPS tab (jumps to the group), staff rename. NO staff pass desk, no staff joins (P3 review): passes belong to the group's own admins; staff see, rename, freeze — and never read (rooms are E2EE). Mock data only — P6 wires it. | 🔄 in review |
+| **P4** | Backend: collections (groups, rooms, passes, memberships, per-room E2EE key material), wire protocol (per-device room fan-out, key rotation, ack-aware media lifecycle), pass cards as sys messages, BLOCKED-MEMBER DELIVERY (delivered, client renders red italic), staff ROOM FREEZE enforcement (no sends / joins / leaves while frozen), admin APIs, unit + integration tests. | ⬜ |
 | **P5** | Client: replace the mock with real data — group list from the server, room chats through the SDK, key rotation, forwarding to rooms, member-aware media pruning. | ⬜ |
 | **P6** | Admin app wired to the real APIs. | ⬜ |
 
