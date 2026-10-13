@@ -393,12 +393,15 @@ function openMembersDrawer(g) {
     const holders = membersFor(g).filter((m) => m.role === roleName);
     const sec = el('div', 'gd-sec');
     sec.append(el('h3', 'sheet-field-label', roleName));
-    if (canManage) {
+    // P2 review: GROUP MEMBERS CAN ONLY BE ADDED AS A MEMBER — only the
+    // Member section offers the add button; Admin/Owner are reached by
+    // promoting someone who is already in.
+    if (canManage && roleName === 'Member') {
       const add = el('button', 'btn btn-small gd-add');
       add.type = 'button';
       add.textContent = 'Add member';
-      add.title = `Add a person with the ${roleName} role`;
-      add.addEventListener('click', () => openAddPersonSheet(g, roleName));
+      add.title = 'Add a person (they join as a Member)';
+      add.addEventListener('click', () => openAddPersonSheet(g));
       sec.append(add);
     }
     membersPanel.append(sec);
@@ -407,7 +410,7 @@ function openMembersDrawer(g) {
     for (const m of holders) list.append(memberRoleRow(g, m, canManage));
     membersPanel.append(list);
   }
-  membersPanel.append(note('Roles: every member is an Owner, Admin or Member. Room access beyond #general comes from PASSES (next tab).'));
+  membersPanel.append(note('Everyone joins as a MEMBER — promote from the list afterwards. Room access beyond #general comes from PASSES (next tab).'));
 
   // --- PASSES tab: custom passes and their holders ---
   const customs = passesFor(g).filter((ps) => !ps.builtin);
@@ -423,7 +426,7 @@ function openMembersDrawer(g) {
       add.type = 'button';
       add.textContent = 'Add member';
       add.title = `Give the ${ps.name} pass to a person`;
-      add.addEventListener('click', () => openAddPersonSheet(g, null, ps.name));
+      add.addEventListener('click', () => openAddPersonSheet(g, ps.name));
       sec.append(add);
     }
     passesPanel.append(sec);
@@ -722,44 +725,36 @@ function openPassEditor(g, ps, isNew = false) {
   ]);
 }
 
-function openAddPersonSheet(g, defaultRole = 'Member', defaultPass = null) {
+function openAddPersonSheet(g, passName = null) {
   const user = el('input');
   user.type = 'text';
   user.placeholder = 'username';
   user.maxLength = 64;
   const go = el('button', 'btn btn-accent sheet-go');
   go.type = 'button';
-  go.textContent = defaultPass ? `Give the ${defaultPass} pass` : 'Add member';
+  go.textContent = passName ? `Add as Member + ${passName} pass` : 'Add as Member';
   go.addEventListener('click', () => {
     const ul = user.value.trim().toLowerCase();
     if (!ul) { toast('Type a username first'); return; }
-    if (defaultPass) {
-      const m = ensureMembers(g).find((x) => x.ul === ul);
-      if (m) {
-        (m.extra ??= []).includes(defaultPass) || m.extra.push(defaultPass);
-        toast('Pass cards are delivered in chat with the API (P4/P5) — mock updated');
-        openMembersDrawer(g);
-        return;
-      }
+    const existing = ensureMembers(g).find((x) => x.ul === ul);
+    if (existing) {
+      if (passName && !(existing.extra ?? []).includes(passName)) (existing.extra ??= []).push(passName);
+      toast('Pass cards are delivered in chat with the API (P4/P5) — mock updated');
+    } else {
+      // THE RULE: joining is always as a Member; promotion happens in the
+      // list afterwards, never at the door
+      ensureMembers(g).push({ ul, role: 'Member', extra: passName ? [passName] : [] });
+      toast(`${ul} joined as a MEMBER${passName ? ` with the ${passName} pass` : ''} — the pass card is delivered in chat (P4/P5)`);
     }
-    toast('Adding a person sends them a pass CARD in chat and rotates the keys (P4/P5)');
+    openMembersDrawer(g);
   });
-  const wrap = el('div', 'sheet-vis');
-  for (const ps of passesFor(g)) {
-    const r = el('input');
-    r.type = 'radio';
-    r.name = 'pass-pick';
-    r.checked = defaultPass ? ps.name === defaultPass : ps.name === (defaultRole ?? 'Member');
-    const row = el('label', 'vis-row');
-    row.append(r, el('span', null, `${ps.name} — ${passAccess(g, ps)}`));
-    wrap.append(row);
-  }
-  openSheet(defaultPass ? `Add member — ${defaultPass} pass` : `Add member — ${defaultRole}`, [
+  openSheet(passName ? `Add member — ${passName} pass` : 'Add member', [
     sheetField('Username', user),
-    sheetField(defaultPass ? 'Pass' : 'Role', wrap),
+    sheetField('Role', el('p', 'gd-about', 'Member — fixed on join. Promote to Admin or Owner from the members list afterwards.')),
+    passName ? sheetField('Pass', el('p', 'gd-about', `${passName} — ${passAccess(g, passesFor(g).find((x) => x.name === passName))}`)) : null,
     go,
     note('The recipient sees ONLY what the grant gives — withheld rooms are never named (req 12).'),
-  ]);
+  ].filter(Boolean));
 }
 
 // ---------- ROOM MEMBERS (room header) ----------
