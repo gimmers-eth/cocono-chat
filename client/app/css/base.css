@@ -1961,7 +1961,11 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
 .pane-groups { overflow: hidden; }
 .group-list { flex: 1; min-height: 0; overflow-y: auto; }
 .group-actions {
-  flex: none; display: flex; gap: .5rem; padding: .5rem .6rem calc(.5rem + var(--sa-b, 0px));
+  /* NO safe-area padding here: this bar is NOT the bottom of the stack —
+     the tag filter and the version foot live under it and already carry the
+     inset; doubling it opened a large dead gap under the buttons (mobile
+     report). One rhythm like the bars above: a flat .5rem. */
+  flex: none; display: flex; gap: .5rem; padding: .5rem .6rem;
   border-top: 1px solid var(--border);
 }
 .group-action-btn {
