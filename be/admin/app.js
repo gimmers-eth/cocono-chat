@@ -497,6 +497,7 @@ const moderationSection = (u) => `
     </div>`;
 
 const PANEL_SECTIONS = {
+  groups: (u) => userGroupsSection(u),
   // What the world (well — mutual friends) sees: the client's public profile.
   details: (u) => `${accountHead(u)}
     ${moderationSection(u)}
@@ -1362,7 +1363,243 @@ const godView = initGodView({
 // cheaply and the side panel lives outside the pager.
 // God View is the exception: its snapshot is fetched when the page opens and
 // rebuilt ONLY on demand, so the 10s refresh never touches it.
-const PAGES = ['users', 'godview', 'app', 'traffic', 'reports', 'diagnostics', 'ops'];
+// ================= GROUPS — P3 MOCK (docs/features/groups.md) =================
+// Fixture data ONLY: the real admin API (GET /api/admin/groups …) lands in
+// P6 and replaces MOCK_GROUPS + the pass desk with server calls. Shapes
+// mirror the client's model: every member holds exactly one ROLE
+// (Owner/Admin/Member) plus any number of additive PASSES; passes name the
+// rooms they reach, with a read-only subset; #general is every-pass's floor.
+const MOCK_GROUPS = [
+  { id: 'g-1', name: 'Mortensen Family', vis: 'private', created: '2026-06-02',
+    rooms: ['general', 'weekend-house', 'adults-only'],
+    passes: [
+      { name: 'Family', rooms: ['general', 'weekend-house'], ro: ['weekend-house'] },
+      { name: 'Adult', rooms: ['general', 'weekend-house', 'adults-only'], ro: [] },
+    ],
+    members: [
+      { ul: 'friendly-1', role: 'Owner', passes: ['Adult'] },
+      { ul: 'friendly-2', role: 'Admin', passes: ['Adult'] },
+      { ul: 'normal-3', role: 'Member', passes: ['Family'] },
+      { ul: 'normal-4', role: 'Member', passes: ['Family'] },
+      { ul: 'referred-5', role: 'Member', passes: [] },
+    ] },
+  { id: 'g-2', name: 'Team Aurora', vis: 'link', created: '2026-05-14',
+    rooms: ['general', 'design', 'ops-alerts'],
+    passes: [{ name: 'On-call', rooms: ['general', 'ops-alerts'], ro: [] }],
+    members: [
+      { ul: 'verified-1', role: 'Owner', passes: ['On-call'] },
+      { ul: 'normal-2', role: 'Admin', passes: [] },
+      { ul: 'referred-3', role: 'Member', passes: ['On-call'] },
+    ] },
+  { id: 'g-3', name: 'Hikers Trail', vis: 'searchable', created: '2026-04-01',
+    rooms: ['general', 'gear-talk'], passes: [],
+    members: [
+      { ul: 'normal-5', role: 'Owner', passes: [] },
+      { ul: 'friendly-3', role: 'Member', passes: [] },
+      { ul: 'verified-2', role: 'Member', passes: [] },
+    ] },
+  { id: 'g-4', name: 'Night-Shift Nurses', vis: 'link', created: '2026-03-20',
+    rooms: ['general', 'handover'],
+    passes: [{ name: 'Student', rooms: ['general'], ro: ['handover'] }],
+    members: [
+      { ul: 'verified-3', role: 'Owner', passes: [] },
+      { ul: 'normal-6', role: 'Admin', passes: [] },
+      { ul: 'referred-4', role: 'Member', passes: ['Student'] },
+      { ul: 'friendly-4', role: 'Member', passes: ['Student'] },
+    ] },
+  { id: 'g-5', name: 'Chess Club', vis: 'searchable', created: '2026-02-11',
+    rooms: ['general', 'tournament'], passes: [{ name: 'Player', rooms: ['general', 'tournament'], ro: [] }],
+    members: [
+      { ul: 'normal-7', role: 'Owner', passes: ['Player'] },
+      { ul: 'normal-8', role: 'Member', passes: [] },
+    ] },
+  { id: 'g-6', name: 'Old Jazz Vinyl', vis: 'searchable', created: '2026-01-30',
+    rooms: ['general', 'marketplace'], passes: [],
+    members: [
+      { ul: 'friendly-5', role: 'Admin', passes: [] },
+      { ul: 'referred-6', role: 'Member', passes: [] },
+      { ul: 'normal-9', role: 'Member', passes: [] },
+    ] },
+  { id: 'g-7', name: 'Block Watch', vis: 'private', created: '2026-01-12',
+    rooms: ['general', 'alerts'], passes: [{ name: 'Warden', rooms: ['general', 'alerts'], ro: [] }],
+    members: [
+      { ul: 'verified-4', role: 'Owner', passes: ['Warden'] },
+      { ul: 'normal-10', role: 'Member', passes: [] },
+    ] },
+  { id: 'g-8', name: 'Code Guild', vis: 'link', created: '2025-12-19',
+    rooms: ['general', 'code-review'], passes: [],
+    members: [
+      { ul: 'referred-7', role: 'Owner', passes: [] },
+      { ul: 'friendly-6', role: 'Admin', passes: [] },
+      { ul: 'normal-11', role: 'Member', passes: [] },
+    ] },
+];
+
+const GROUPS_PAGE_SIZE = 5;
+let groupsPage = 1;
+let openGroupId = null; // the expanded row
+
+const VIS_ADMIN = { private: 'private', link: 'invite link', searchable: 'public' };
+const roleBadge = (r) => `<span class="badge role-badge role-${r.toLowerCase()}">${r}</span>`;
+
+function renderGroups() {
+  const term = $('groups-search').value.trim().toLowerCase();
+  const matched = !term ? MOCK_GROUPS : MOCK_GROUPS.filter((g) =>
+    g.name.toLowerCase().includes(term) || g.members.some((m) => m.ul.includes(term)));
+  const pages = Math.max(1, Math.ceil(matched.length / GROUPS_PAGE_SIZE));
+  if (groupsPage > pages) groupsPage = pages;
+  const view = matched.slice((groupsPage - 1) * GROUPS_PAGE_SIZE, groupsPage * GROUPS_PAGE_SIZE);
+  $('groups-count').textContent = `${matched.length} group${matched.length === 1 ? '' : 's'}${term ? ` matching “${term}”` : ''} (mock — live with P6)`;
+  $('groups-page-label').textContent = `page ${groupsPage} / ${pages}`;
+  $('btn-groups-prev').disabled = groupsPage <= 1;
+  $('btn-groups-next').disabled = groupsPage >= pages;
+  $('groups-empty').hidden = matched.length > 0;
+  const body = $('groups-body');
+  body.innerHTML = view.map((g) => {
+    const owner = g.members.find((m) => m.role === 'Owner')?.ul ?? '—';
+    const expanded = openGroupId === g.id;
+    return `<tr class="grp-row${expanded ? ' open' : ''}" data-grp="${esc(g.id)}">
+      <td><button class="linkish grp-toggle" data-grp="${esc(g.id)}" aria-expanded="${expanded}">${expanded ? '▾' : '▸'}</button>
+        <strong>${esc(g.name)}</strong> <span class="dim mono">${esc(g.id)}</span></td>
+      <td><button class="linkish" data-view-user="${esc(owner)}">@${esc(owner)}</button></td>
+      <td>${g.members.length}</td>
+      <td class="dim">${g.rooms.map((r) => `#${esc(r)}`).join(' ')}</td>
+      <td>${esc(VIS_ADMIN[g.vis] ?? g.vis)}</td>
+      <td class="dim">${esc(g.created)}</td>
+      <td><button class="tiny" data-grp-manage="${esc(g.id)}">rename (staff)</button></td>
+    </tr>
+    ${expanded ? `<tr class="grp-detail"><td colspan="7">${groupDetail(g)}</td></tr>` : ''}`;
+  }).join('');
+  fillGroupPassSelects();
+}
+
+function groupDetail(g) {
+  const builtins = [{ name: 'Owner', note: 'sees everything, cannot be removed by admins' },
+    { name: 'Admin', note: 'every room, no owner powers' },
+    { name: 'Member', note: '#general by default (editable)' }];
+  return `
+    <div class="grp-cols">
+      <div>
+        <h4>Members — role + passes</h4>
+        <table class="mini">
+          <thead><tr><th>User</th><th>Role</th><th>Passes</th><th></th></tr></thead>
+          <tbody>${g.members.map((m) => `<tr>
+            <td><button class="linkish" data-view-user="${esc(m.ul)}">@${esc(m.ul)}</button></td>
+            <td>${roleBadge(m.role)}</td>
+            <td class="dim">${m.passes.length ? m.passes.map((x) => esc(x)).join(', ') : '—'}</td>
+            <td>${m.role === 'Owner' ? '<span class="dim small-note">protected</span>'
+              : `<button class="tiny" data-grp-remove="${esc(g.id)}:${esc(m.ul)}">remove</button>`}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>
+      <div>
+        <h4>Pass types</h4>
+        <ul class="pass-list">
+          ${builtins.map((b) => `<li><span class="pass-name">${b.name}</span> <span class="badge role-badge built-in">built-in</span><br /><span class="dim small-note">${b.note}</span></li>`).join('')}
+          ${g.passes.map((ps) => `<li><span class="pass-name">${esc(ps.name)}</span><br />
+            <span class="dim small-note">rooms: ${ps.rooms.map((r) => '#' + esc(r)).join(', ')}${ps.ro.length ? ` · read-only: ${ps.ro.map(esc).join(', ')}` : ''}</span></li>`).join('')}
+        </ul>
+        <p class="dim small-note">#general is every pass's floor — staff passes add rooms, never remove general (req 11).</p>
+      </div>
+    </div>`;
+}
+
+// pass-desk selects: group + pass lists follow the fixtures
+function fillGroupPassSelects() {
+  const opts = MOCK_GROUPS.map((g) => `<option value="${esc(g.id)}">${esc(g.name)}</option>`).join('');
+  for (const id of ['passdesk-group', 'passdesk-give-group']) {
+    const sel = $(id);
+    const keep = sel.value;
+    sel.innerHTML = opts;
+    if (keep && MOCK_GROUPS.some((g) => g.id === keep)) sel.value = keep;
+  }
+  const g = MOCK_GROUPS.find((x) => x.id === $('passdesk-give-group').value);
+  $('passdesk-give-pass').innerHTML = (g?.passes ?? []).map((ps) => `<option>${esc(ps.name)}</option>`).join('')
+    || '<option value="">(no custom passes)</option>';
+}
+
+// ---- user panel: the GROUPS tab (req 22: see the groups a user is in) ----
+function userGroupsSection(u) {
+  const mine = MOCK_GROUPS.filter((g) => g.members.some((m) => m.ul === u.ul));
+  return `<div class="sec">
+    <h3>Groups <span class="dim">(mock — live with P6)</span></h3>
+    ${mine.length ? `<table class="mini"><thead><tr><th>Group</th><th>Role</th><th>Passes</th></tr></thead><tbody>
+      ${mine.map((g) => {
+    const m = g.members.find((x) => x.ul === u.ul);
+    return `<tr><td><button class="linkish" data-open-group="${esc(g.id)}">${esc(g.name)}</button></td>
+        <td>${roleBadge(m.role)}</td><td class="dim">${m.passes.length ? m.passes.map((x) => esc(x)).join(', ') : '—'}</td></tr>`;
+  }).join('')}</tbody></table>` : '<p class="dim">not a member of any group.</p>'}
+  </div>`;
+}
+
+// ---- P3 wiring: pagination, expand, pass desk (all mock-local) ----
+$('btn-groups-prev').addEventListener('click', () => { groupsPage = Math.max(1, groupsPage - 1); renderGroups(); });
+$('btn-groups-next').addEventListener('click', () => { groupsPage += 1; renderGroups(); });
+$('groups-search').addEventListener('input', () => { groupsPage = 1; renderGroups(); });
+document.addEventListener('click', (e) => {
+  const tog = e.target.closest?.('[data-grp-toggle], .grp-toggle');
+  const grpId = e.target.closest?.('.grp-toggle')?.dataset.grp;
+  if (grpId) {
+    openGroupId = openGroupId === grpId ? null : grpId;
+    renderGroups();
+    return;
+  }
+  void tog;
+  const manage = e.target.closest?.('[data-grp-manage]');
+  if (manage) {
+    const g = MOCK_GROUPS.find((x) => x.id === manage.dataset.grpManage);
+    const name = window.prompt?.(`Rename “${g.name}” (staff override — P3 mock)`, g.name);
+    if (name && name.trim()) { g.name = name.trim(); setStatus(`Group renamed to “${g.name}” (mock — staff rename is a P6 call)`, 'ok'); renderGroups(); }
+    return;
+  }
+  const rem = e.target.closest?.('[data-grp-remove]');
+  if (rem) {
+    const [gid, ul] = rem.dataset.grpRemove.split(':');
+    const g = MOCK_GROUPS.find((x) => x.id === gid);
+    g.members = g.members.filter((m) => m.ul !== ul);
+    setStatus(`@${ul} removed from ${g.name} with ALL their passes (mock — keys rotate in P6)`, 'ok');
+    renderGroups();
+    return;
+  }
+  const og = e.target.closest?.('[data-open-group]');
+  if (og) {
+    closePanel();
+    location.hash = 'groups';
+    openGroupId = og.dataset.openGroup;
+    const g = MOCK_GROUPS.find((x) => x.id === openGroupId);
+    groupsPage = 1 + Math.floor(Math.max(0, MOCK_GROUPS.indexOf(g)) / GROUPS_PAGE_SIZE);
+    renderGroups();
+    return;
+  }
+  const openTab = e.target.closest?.('[data-uptab="groups"]');
+  if (openTab) renderPanel(); // the tab dispatcher reads PANEL_SECTIONS.groups
+});
+$('btn-pass-create').addEventListener('click', () => {
+  const g = MOCK_GROUPS.find((x) => x.id === $('passdesk-group').value);
+  const name = $('passdesk-name').value.trim();
+  if (!g || !name) { setStatus('Pick a group and name the pass first', 'error'); return; }
+  if (g.passes.some((ps) => ps.name === name)) { setStatus(`“${name}” already exists in ${g.name}`, 'error'); return; }
+  g.passes.push({ name, rooms: ['general'], ro: [] });
+  $('passdesk-name').value = '';
+  setStatus(`Pass type “${name}” created for ${g.name} (mock — staff pass creation is a P6 call)`, 'ok');
+  renderGroups();
+});
+$('btn-pass-give').addEventListener('click', () => {
+  const g = MOCK_GROUPS.find((x) => x.id === $('passdesk-give-group').value);
+  const pass = $('passdesk-give-pass').value;
+  const ul = $('passdesk-give-user').value.trim().toLowerCase();
+  if (!g || !ul || !pass) { setStatus('Group, pass and username are all required', 'error'); return; }
+  const m = g.members.find((x) => x.ul === ul);
+  if (!m) { setStatus(`@${ul} is not a member of ${g.name} — add them there first (P6: the pass card invites them in)`, 'error'); return; }
+  if (!m.passes.includes(pass)) m.passes.push(pass);
+  $('passdesk-give-user').value = '';
+  setStatus(`@${ul} now holds the ${pass} pass in ${g.name} (mock — distribution + key rotation are P6)`, 'ok');
+  renderGroups();
+});
+$('passdesk-give-group').addEventListener('change', fillGroupPassSelects);
+renderGroups(); // build once so the selects exist before first show
+
+const PAGES = ['users', 'groups', 'godview', 'app', 'traffic', 'reports', 'diagnostics', 'ops'];
 // set by the user panel's "search rate limits" button: the subjects to load
 // into the traffic page when it opens (cleared on use)
 let pendingTrafficSearch = null;

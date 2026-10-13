@@ -12,6 +12,7 @@
       <div class="nav-brand" id="admin-title">CoCoNo</div>
       <nav aria-label="Sections">
         <button class="nav-item" data-page="users" aria-current="page">Users</button>
+        <button class="nav-item" data-page="groups">Groups</button>
         <button class="nav-item" data-page="godview">God View</button>
         <button class="nav-item" data-page="app">App</button>
         <button class="nav-item" data-page="traffic">Traffic</button>
@@ -247,6 +248,50 @@
       </section>
 
       <!-- ===== Diagnostics ===== -->
+      <!-- ===== GROUPS (P3 mock — docs/features/groups.md) ===== -->
+      <!-- Pure UI over fixture data: the real admin API lands with P6. The
+           list is paginated like Users; a row expands to the group's ROOMS,
+           PASS TYPES (staff creates/distributes those) and its MEMBERS. -->
+      <section class="page" data-page="groups" hidden>
+        <h2>Groups</h2>
+        <div class="panel">
+          <div class="row">
+            <input id="groups-search" type="text" size="28" autocomplete="off"
+                   placeholder="group or member contains…" />
+            <span id="groups-count" class="dim"></span>
+            <span class="pager-space"></span>
+            <button id="btn-groups-prev" class="tiny" disabled>← prev</button>
+            <span id="groups-page-label" class="dim"></span>
+            <button id="btn-groups-next" class="tiny">next →</button>
+          </div>
+          <table>
+            <thead>
+              <tr><th>Group</th><th>Owner</th><th>Members</th><th>Rooms</th><th>Visibility</th><th>Created</th><th></th></tr>
+            </thead>
+            <tbody id="groups-body"></tbody>
+          </table>
+          <p id="groups-empty" class="dim" hidden>No groups match.</p>
+        </div>
+        <div class="panel">
+          <div class="row">
+            <h3 style="margin:0">Staff pass desk</h3>
+            <span class="dim">create a pass type for a group, and hand it out —
+              the staff shortcut around the owners’ own tools (P3 mock)</span>
+          </div>
+          <div class="row">
+            <select id="passdesk-group"></select>
+            <input id="passdesk-name" type="text" size="18" placeholder="new pass name (e.g. Chaperone)" />
+            <button id="btn-pass-create" class="tiny">Create pass type</button>
+          </div>
+          <div class="row">
+            <select id="passdesk-give-group"></select>
+            <select id="passdesk-give-pass"></select>
+            <input id="passdesk-give-user" type="text" size="18" placeholder="username" />
+            <button id="btn-pass-give" class="tiny">Distribute pass</button>
+          </div>
+        </div>
+      </section>
+
       <section class="page" data-page="diagnostics" hidden>
         <h2>Diagnostics</h2>
         <div class="panel">
@@ -303,6 +348,7 @@
           <button class="uptab" data-uptab="devices" role="tab" aria-selected="false">Devices</button>
           <button class="uptab" data-uptab="traffic" role="tab" aria-selected="false">Traffic</button>
           <button class="uptab" data-uptab="shares" role="tab" aria-selected="false">Shares</button>
+          <button class="uptab" data-uptab="groups" role="tab" aria-selected="false">Groups</button>
           <button class="uptab" data-uptab="relations" role="tab" aria-selected="false">Relationships</button>
           <button class="uptab" data-uptab="blockers" role="tab" aria-selected="false">Blocked&nbsp;by</button>
         </div>

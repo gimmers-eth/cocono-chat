@@ -634,3 +634,26 @@ button.gv-big { padding: .6rem 1.4rem; font-size: .95rem; border-radius: 10px; }
 .mod-actions .mod-live { border-color: var(--danger); color: var(--danger); }
 /* the panel's countdown line rides the existing .small-note rhythm */
 .mod-remaining { color: var(--danger); }
+
+/* ================= GROUPS page — P3 mock (docs/features/groups.md) ================= */
+/* Role badges: the client's rank colours (gold crown owner, purple shield
+   admin) translated onto the admin palette so ranks read the same in both
+   apps; Member stays quiet grey. */
+.role-badge {
+  display: inline-block; font-size: 0.68rem; font-weight: 700; letter-spacing: .04em;
+  border-radius: 999px; padding: .1rem .5rem; text-transform: uppercase;
+}
+.role-badge.role-owner { background: rgba(240, 192, 74, .18); color: #f0c04a; }
+.role-badge.role-admin { background: rgba(125, 108, 224, .2); color: #a99cf0; }
+.role-badge.role-member { background: var(--line); color: var(--muted, #9aa3b2); }
+.role-badge.built-in { background: none; border: 1px solid var(--line); color: inherit; }
+.grp-row.open td { background: rgba(127, 127, 127, 0.06); }
+.grp-toggle { background: none; border: 0; color: inherit; font-size: .8rem; padding: 0 .35rem; }
+.grp-detail > td { background: rgba(127, 127, 127, 0.04); padding: .8rem 1rem 1rem; }
+.grp-cols { display: grid; grid-template-columns: 1.3fr 1fr; gap: 1.4rem; }
+.grp-cols h4 { margin: 0 0 .4rem; font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted, #9aa3b2); }
+table.mini { width: 100%; border-collapse: collapse; font-size: .85rem; }
+table.mini th { text-align: left; color: var(--muted, #9aa3b2); font-weight: 500; padding: .2rem .5rem .2rem 0; border-bottom: 1px solid var(--line); }
+table.mini td { padding: .3rem .5rem .3rem 0; border-bottom: 1px solid rgba(127, 127, 127, .12); }
+.pass-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .45rem; font-size: .85rem; }
+.pass-name { font-weight: 700; }
