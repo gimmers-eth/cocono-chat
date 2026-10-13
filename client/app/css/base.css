@@ -2065,3 +2065,26 @@ button.media-play-badge:focus-visible { outline: 2px solid var(--accent); outlin
 .pass-room-row input { accent-color: var(--accent); }
 .pass-room-name { font-weight: 600; }
 .pass-ro-label { color: var(--muted); font-size: .78rem; margin-left: auto; }
+
+/* ---- groups P2 round 2: MEMBERS/PASSES tabs, role tools, faces ---- */
+.gd-tabs {
+  display: flex; gap: .3rem; margin-top: .7rem;
+  border-bottom: 1px solid var(--border); padding-bottom: .35rem;
+}
+.gd-tab {
+  border: 0; background: none; cursor: pointer; font: inherit; font-size: .85rem;
+  color: var(--muted); padding: .3rem .7rem; border-radius: 999px;
+}
+.gd-tab:hover { background: var(--panel-raised); }
+.gd-tab.active { color: var(--accent); background: rgba(125, 108, 224, 0.14); font-weight: 700; }
+/* the member face: the single-line component AS a button — tap opens the
+   profile (group lists and room lists alike) */
+.gd-face {
+  flex: 1; min-width: 0; display: flex; align-items: center;
+  border: 0; background: none; color: inherit; font: inherit; cursor: pointer;
+  padding: .2rem .3rem; border-radius: 8px; text-align: left;
+}
+.gd-face:hover { background: var(--panel-raised); }
+.gd-face:hover .uname-text { text-decoration: underline; text-underline-offset: 2px; }
+.pf-face .uname { font-size: 1.05rem; }
+.pf-rooms .member-pass, .pf-rooms .member-ro { margin-left: auto; }

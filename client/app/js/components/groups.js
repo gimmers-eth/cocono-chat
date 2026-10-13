@@ -54,11 +54,11 @@ const FAKE_GROUPS = [
       { name: 'Adult', rooms: ['general', 'weekend-house', 'adults-only'], ro: [] },
     ],
     members: [
-      { ul: 'sofie', pass: 'Adult', admin: true },
-      { ul: 'marlene', pass: 'Adult' },
-      { ul: 'mads', pass: 'Family' },
-      { ul: 'karl', pass: 'Family' },
-      { ul: 'stoyce', pass: 'Family' },
+      { ul: 'sofie', role: 'Admin', extra: ['Adult'] },
+      { ul: 'marlene', role: 'Member', extra: ['Adult'] },
+      { ul: 'mads', role: 'Member', extra: ['Family'] },
+      { ul: 'karl', role: 'Member', extra: ['Family'] },
+      { ul: 'stoyce', role: 'Member', extra: ['Family'] },
     ],
     rooms: [
       { name: 'general', pinned: true, tags: ['starred'], msgs: [
@@ -84,10 +84,10 @@ const FAKE_GROUPS = [
     about: 'Product crew for Aurora — deploys, designs, and the coffee log.',
     vis: 'link',
     members: [
-      { ul: 'jens', pass: 'Member', admin: true },
-      { ul: 'karl', pass: 'Member' },
-      { ul: 'ida', pass: 'Member' },
-      { ul: 'mads', pass: 'Member' },
+      { ul: 'jens', role: 'Admin' },
+      { ul: 'karl', role: 'Member' },
+      { ul: 'ida', role: 'Member' },
+      { ul: 'mads', role: 'Member' },
     ],
     rooms: [
       { name: 'general', pinned: true, tags: ['work', 'starred'], msgs: [
@@ -134,9 +134,9 @@ const FAKE_GROUPS = [
     about: 'Ward 4 night crew. Handover is read-only for students.', vis: 'link',
     passes: [{ name: 'Student', rooms: ['general'], ro: ['handover'] }],
     members: [
-      { ul: 'mads', pass: 'Member', admin: true },
-      { ul: 'karl', pass: 'Student' },
-      { ul: 'sofie', pass: 'Student' },
+      { ul: 'mads', role: 'Admin' },
+      { ul: 'karl', role: 'Member', extra: ['Student'] },
+      { ul: 'sofie', role: 'Member', extra: ['Student'] },
     ], rooms: [
     { name: 'general', msgs: [{ from: 'mads', text: 'Ward 4 short-staffed tomorrow — anyone swap?', t: '23:50' }] },
     { name: 'handover', ro: true, unread: 3, tags: ['work'], msgs: [{ from: 'karl', text: 'Handover log template updated. Read-only for students.', t: '22:07' }] },
@@ -165,21 +165,32 @@ const VIS_LABEL = { searchable: 'Publicly searchable', link: 'Invite link only',
 // built-ins EVERY group carries (req 6): Owner / Admin / Member. Custom
 // passes ride the fixture's `passes` list; groups without explicit rosters
 // derive members from their senders (all plain Members).
+// A member is ALWAYS one of the three roles (P2 review); custom passes are
+// ADDITIVE grants on top. The built-in Member pass defaults to #general
+// only — its room access is editable in settings (like any custom pass).
+function memberAccessOf(g) {
+  return g.memberAccess ?? { rooms: ['general'], ro: [] };
+}
 function passesFor(g) {
+  const ma = memberAccessOf(g);
   return [
     { name: 'Owner', builtin: true },
     { name: 'Admin', builtin: true },
-    { name: 'Member', builtin: true, rooms: g.rooms.map((r) => r.name) },
+    { name: 'Member', builtin: true, editable: true, rooms: ma.rooms, ro: ma.ro },
     ...(g.passes ?? []),
   ];
 }
+function ensureMembers(g) {
+  if (!g.members) {
+    g.members = [...new Set(g.rooms.flatMap((r) => (r.msgs ?? []).map((m) => m.from)))]
+      .map((ul) => ({ ul, role: 'Member', extra: [] }));
+  }
+  return g.members;
+}
 function membersFor(g) {
   const me = String(clientRef?.username ?? 'me').toLowerCase();
-  const own = { ul: me, pass: ROLE_PASS[g.role], me: true };
-  const list = g.members ?? [...new Set(g.rooms.flatMap((r) => (r.msgs ?? []).map((m) => m.from)))]
-    .filter((u) => u !== me)
-    .map((ul) => ({ ul, pass: 'Member' }));
-  return [own, ...list];
+  const own = { ul: me, role: ROLE_PASS[g.role], extra: [], me: true };
+  return [own, ...ensureMembers(g).filter((m) => m.ul !== me)];
 }
 const ROLE_PASS = { owner: 'Owner', admin: 'Admin', member: 'Member' };
 let clientRef = null;
@@ -321,6 +332,22 @@ function passGrants(ps, roomName) {
   if (!rooms.includes(roomName)) return null;
   return (ps.ro ?? []).includes(roomName) ? 'ro' : 'rw';
 }
+// a member's access to a room = the UNION of their role and every pass they
+// hold; passes can only ADD, never reduce (req 21)
+function memberGrant(g, m, roomName) {
+  let best = null;
+  const rolePass = { Owner: 'Owner', Admin: 'Admin', Member: 'Member' }[m.role];
+  const all = passesFor(g);
+  const rp = all.find((x) => x.name === rolePass);
+  best = passGrants(rp, roomName) ?? best;
+  for (const name of m.extra ?? []) {
+    const ps = all.find((x) => x.name === name);
+    const gr = ps ? passGrants(ps, roomName) : null;
+    if (gr === 'rw') return 'rw';
+    if (gr === 'ro') best = best ?? 'ro';
+  }
+  return best;
+}
 
 // ---------- GROUP MEMBERS DRAWER (P2, restructured in review) ----------
 // MEMBERS lists the PASSES as sections with their holders UNDER each key
@@ -335,39 +362,205 @@ function openMembersDrawer(g) {
   const vis = el('span', 'gd-vis', VIS_LABEL[g.vis ?? 'private']);
   vis.title = 'Who can find this group — managed in settings';
   const role = el('span', 'gd-role', `You: ${g.role}`);
-  role.title = 'Your pass in this group';
+  role.title = 'Your role in this group';
   head.append(vis, role);
   body.push(head);
-  for (const ps of passesFor(g)) {
-    const holders = membersFor(g).filter((m) => m.pass === ps.name);
+
+  // TWO TABS (P2 review): MEMBERS = the three roles and who holds them;
+  // PASSES = the custom passes and their holders. Role and passes are
+  // different jobs — roles govern management, passes govern room access.
+  const tabs = el('div', 'gd-tabs');
+  const panels = el('div', 'gd-tabpanels');
+  const membersPanel = el('div', 'gd-tabpanel');
+  const passesPanel = el('div', 'gd-tabpanel');
+  passesPanel.hidden = true;
+  for (const [key, label] of [['members', 'Members'], ['passes', 'Passes']]) {
+    const b = el('button', `gd-tab${key === 'members' ? ' active' : ''}`);
+    b.type = 'button';
+    b.textContent = label;
+    b.addEventListener('click', () => {
+      for (const x of tabs.children) x.classList.toggle('active', x === b);
+      membersPanel.hidden = key !== 'members';
+      passesPanel.hidden = key !== 'passes';
+    });
+    tabs.append(b);
+  }
+  body.push(tabs);
+
+  // --- MEMBERS tab: Owner / Admin / Member sections ---
+  for (const roleName of ['Owner', 'Admin', 'Member']) {
+    const holders = membersFor(g).filter((m) => m.role === roleName);
+    const sec = el('div', 'gd-sec');
+    sec.append(el('h3', 'sheet-field-label', roleName));
+    if (canManage) {
+      const add = el('button', 'btn btn-small gd-add');
+      add.type = 'button';
+      add.textContent = 'Add member';
+      add.title = `Add a person with the ${roleName} role`;
+      add.addEventListener('click', () => openAddPersonSheet(g, roleName));
+      sec.append(add);
+    }
+    membersPanel.append(sec);
+    const list = el('ul', 'member-list gd-members');
+    if (!holders.length) list.append(el('li', 'member-row gd-empty', 'No one holds this role yet.'));
+    for (const m of holders) list.append(memberRoleRow(g, m, canManage));
+    membersPanel.append(list);
+  }
+  membersPanel.append(note('Roles: every member is an Owner, Admin or Member. Room access beyond #general comes from PASSES (next tab).'));
+
+  // --- PASSES tab: custom passes and their holders ---
+  const customs = passesFor(g).filter((ps) => !ps.builtin);
+  if (!customs.length) {
+    passesPanel.append(el('p', 'gd-empty', 'No custom passes yet — create them in settings.'));
+  }
+  for (const ps of customs) {
+    const holders = membersFor(g).filter((m) => (m.extra ?? []).includes(ps.name));
     const sec = el('div', 'gd-sec');
     sec.append(el('h3', 'sheet-field-label', ps.name));
     if (canManage) {
       const add = el('button', 'btn btn-small gd-add');
       add.type = 'button';
       add.textContent = 'Add member';
-      add.title = `Add a person with the ${ps.name} pass`;
-      add.addEventListener('click', () => openAddPersonSheet(g, ps.name));
+      add.title = `Give the ${ps.name} pass to a person`;
+      add.addEventListener('click', () => openAddPersonSheet(g, null, ps.name));
       sec.append(add);
     }
-    body.push(sec);
+    passesPanel.append(sec);
     const list = el('ul', 'member-list gd-members');
     if (!holders.length) list.append(el('li', 'member-row gd-empty', 'No one holds this pass yet.'));
-    for (const m of holders) list.append(memberToolRow(g, m, canManage));
-    body.push(list);
+    for (const m of holders) list.append(passHolderRow(g, m, ps, canManage));
+    passesPanel.append(list);
   }
-  body.push(note('Pass types and permissions are managed in the group SETTINGS (gear). Membership writes and key rotation arrive with the API (P4/P5).'));
+  panels.append(membersPanel, passesPanel);
+  body.push(panels);
+  body.push(note('P2 mock: changes live locally. Membership writes, pass cards and key rotation arrive with the API (P4/P5).'));
   openSheet(`${g.name} — members`, body);
 }
 
-// ---------- GROUP SETTINGS DRAWER (P2, restructured in review) ----------
-// SETTINGS owns the PASSES and PERMISSIONS: who can find the group
-// (visibility radios) and the pass-type list with its editor. Members are
-// listed and managed in the members drawer.
+// A member row: the FACE (single-line component) opens their profile; the
+// tools follow the role rules from review —
+//   admin rows: MAKE OWNER + DELETE · member rows: MAKE ADMIN + REMOVE
+//   owner rows: inert (transfers happen deliberately, not as a button grid)
+function memberRoleRow(g, m, canManage) {
+  const li = el('li', 'member-row gd-member');
+  li.append(faceBtn(g, m.ul));
+  const tools = el('span', 'member-tools');
+  if (canManage && !m.me) {
+    if (m.role === 'Admin' && g.role === 'owner') tools.append(tool('crown', 'Make owner', () => {
+      m.role = 'Owner';
+      toast('Ownership moved — the last owner may never leave (P4/P5 enforce)');
+      openMembersDrawer(g);
+    }));
+    if (m.role === 'Member') tools.append(tool('friendVerify', 'Make admin', () => {
+      m.role = 'Admin';
+      toast('Admins can rename rooms and give passes (P4/P5 enforce)');
+      openMembersDrawer(g);
+    }));
+    if (m.role === 'Admin') tools.append(tool('userGone', 'Delete', () => {
+      removeMember(g, m, 'Removed');
+    }));
+    if (m.role === 'Member') tools.append(tool('userGone', 'Remove', () => {
+      removeMember(g, m, 'Removed');
+    }));
+  }
+  li.append(tools);
+  return li;
+}
+
+// Custom-pass rows carry ONLY the remove-pass tool (review): a pass is an
+// additive grant — taking it back never touches the person's role.
+function passHolderRow(g, m, ps, canManage) {
+  const li = el('li', 'member-row gd-member');
+  li.append(faceBtn(g, m.ul));
+  const tools = el('span', 'member-tools');
+  if (canManage) {
+    tools.append(tool('friendRemove', `Remove the ${ps.name} pass`, () => {
+      m.extra = (m.extra ?? []).filter((x) => x !== ps.name);
+      toast('Pass revoked — their keys for the covered rooms rotate (P4/P5)');
+      openMembersDrawer(g);
+    }));
+  }
+  li.append(tools);
+  return li;
+}
+
+function tool(iconKey, title, fn) {
+  const b = el('button', 'member-tool');
+  b.type = 'button';
+  b.title = title;
+  b.append(iconEl(iconKey));
+  b.addEventListener('click', fn);
+  return b;
+}
+
+function removeMember(g, m, verb) {
+  if (g.role === 'admin' && m.role === 'Owner') {
+    toast('Admins cannot remove OWNERS — an owner decides that');
+    return;
+  }
+  const arr = ensureMembers(g);
+  const i = arr.indexOf(arr.find((x) => x.ul === m.ul));
+  if (i >= 0) arr.splice(i, 1);
+  toast(`${verb} from the group — their keys rotate out (P4/P5)`);
+  openMembersDrawer(g);
+}
+
+// The face: tapping a member (group or room list) opens their profile
+function faceBtn(g, who) {
+  const b = el('button', 'gd-face');
+  b.type = 'button';
+  b.title = `View ${who}'s profile`;
+  b.append(mountLine(document.createElement('span'), memberOpts(who)));
+  b.addEventListener('click', () => openMockProfile(g, who));
+  return b;
+}
+
+// P2 mock profile: the real sheet needs real accounts (P5); this shows the
+// shape — identity, their role and passes HERE, and the room access they get
+function openMockProfile(g, who) {
+  const m = membersFor(g).find((x) => x.ul === who);
+  const body = [
+    sheetField('User', (() => {
+      const wrap = el('div', 'pf-face');
+      wrap.append(mountLine(document.createElement('span'), memberOpts(who)));
+      return wrap;
+    })()),
+    sheetField('In this group', el('p', 'gd-about', m
+      ? `${m.role}${(m.extra ?? []).length ? ` · passes: ${m.extra.join(', ')}` : ''}`
+      : 'Not a member of this group.')),
+    m ? sheetField('Room access', (() => {
+      const ul = el('ul', 'member-list pf-rooms');
+      for (const r of g.rooms) {
+        const li = el('li', 'member-row');
+        li.append(el('span', 'room-name', `#${r.name}`));
+        const grant = m ? memberGrant(g, m, r.name) : null;
+        li.append(el('span', grant === 'rw' ? 'member-pass' : 'member-ro', grant === 'rw' ? 'write' : grant === 'ro' ? 'read only' : 'no access'));
+        ul.append(li);
+      }
+      return ul;
+    })()) : null,
+    note('Mock profile (P2) — real profile sheets open for real accounts with the API (P5).'),
+  ].filter(Boolean);
+  openSheet(who, body);
+}
+
+// ---------- GROUP SETTINGS DRAWER ----------
+// PERMISSIONS (who can find the group), the ABOUT text (editable here), and
+// the PASS TYPES: built-ins listed (Member's room access is editable like
+// any pass), custom passes with editors, and NEW PASS.
 function openSettingsDrawer(g) {
   const canManage = g.role === 'owner' || g.role === 'admin';
   const body = [];
-  body.push(sheetField('About', el('p', 'gd-about', g.about ?? 'No description yet.')));
+  const about = el('textarea');
+  about.rows = 3;
+  about.value = g.about ?? '';
+  about.disabled = !canManage;
+  about.placeholder = 'What is this group about?';
+  about.addEventListener('change', () => {
+    g.about = about.value.trim();
+    toast('Description updates with the API (P4/P5) — mock updated');
+  });
+  body.push(sheetField('About — edit here', about));
   const visWrap = el('div', 'sheet-vis');
   for (const [v, label] of [
     ['private', 'Private — visible only to members'],
@@ -391,6 +584,14 @@ function openSettingsDrawer(g) {
   body.push(sheetField('Permissions — who can find this group', visWrap));
   const pSec = el('div', 'gd-sec');
   pSec.append(el('h3', 'sheet-field-label', 'Pass types'));
+  if (canManage) {
+    const mk = el('button', 'btn btn-small gd-add');
+    mk.type = 'button';
+    mk.textContent = 'New pass';
+    mk.title = 'Create a pass type with its own room access';
+    mk.addEventListener('click', () => openPassEditor(g, { name: '', rooms: ['general'], ro: [] }, true));
+    pSec.append(mk);
+  }
   body.push(pSec);
   const plist = el('ul', 'member-list gd-passes');
   for (const ps of passesFor(g)) plist.append(passRow(g, ps, canManage));
@@ -399,60 +600,11 @@ function openSettingsDrawer(g) {
   openSheet(`${g.name} — settings`, body);
 }
 
-function memberToolRow(g, m, canManage) {
-  const li = el('li', 'member-row gd-member');
-  li.append(mountLine(document.createElement('span'), memberOpts(m.ul)));
-  if (m.me) li.append(el('span', 'member-pass', 'you'));
-  if (canManage && !m.me) {
-    const tools = el('span', 'member-tools');
-    const key = el('button', 'member-tool');
-    key.type = 'button';
-    key.title = 'Give this person a different pass';
-    key.append(iconEl('key'));
-    key.addEventListener('click', () => openPassPicker(g, m));
-    tools.append(key);
-    if (g.role === 'owner') {
-      const rm = el('button', 'member-tool member-tool-danger');
-      rm.type = 'button';
-      rm.title = 'Remove from group';
-      rm.append(iconEl('userGone'));
-      rm.addEventListener('click', () => {
-        if (m.pass === 'Owner' && membersFor(g).filter((x) => x.pass === 'Owner').length <= 1) {
-          toast('The LAST owner may only TRANSFER ownership — a group is never ownerless');
-          return;
-        }
-        toast('Removing members rotates the room keys (P4/P5) — mock only removes here');
-      });
-      tools.append(rm);
-    }
-    li.append(tools);
-  }
-  return li;
-}
-
-function openPassPicker(g, m) {
-  const list = el('ul', 'member-list');
-  for (const ps of passesFor(g)) {
-    const li = el('li', 'member-row');
-    const b = el('button', 'discover-btn');
-    b.type = 'button';
-    b.append(el('span', 'pass-name', ps.name), el('span', 'discover-meta', passAccess(g, ps)));
-    b.addEventListener('click', () => {
-      m.pass = ps.name;
-      toast('Pass changes rotate room keys (P4/P5) — mock updated');
-      openMembersDrawer(g);
-    });
-    li.append(b);
-    list.append(li);
-  }
-  openSheet(`Pass for ${m.ul}`, [list, note('The new pass takes effect immediately; the room keys rotate (req 7). Pass CARDS are delivered in chats (P4/P5).')]);
-}
-
 function passAccess(g, ps) {
   if (ps.builtin && (ps.name === 'Owner' || ps.name === 'Admin')) return 'every room · management';
-  const rooms = (ps.rooms ?? g.rooms.map((r) => r.name));
+  const rooms = ps.rooms ?? [];
   const ro = ps.ro?.length ? ` · read-only: ${ps.ro.join(', ')}` : '';
-  return `rooms: ${rooms.join(', ') || 'general'}${ro}`;
+  return `rooms: ${rooms.join(', ') || 'none'}${ro}`;
 }
 
 function passRow(g, ps, canManage) {
@@ -464,114 +616,126 @@ function passRow(g, ps, canManage) {
     li.append(tag);
   }
   li.append(el('span', 'pass-rooms', passAccess(g, ps)));
-  if (canManage) {
-    const edit = el('button', 'member-tool');
-    edit.type = 'button';
-    edit.title = ps.builtin ? 'Built-in passes always exist; their room access is shown here' : 'Edit this pass';
-    edit.append(iconEl('settings'));
-    edit.addEventListener('click', () => openPassEditor(g, ps));
+  if (canManage && (!ps.builtin || ps.editable)) {
+    const edit = tool('settings', ps.builtin ? 'Edit the Member pass room access' : 'Edit this pass', () => openPassEditor(g, ps));
     li.append(edit);
   }
   return li;
 }
 
-function openPassEditor(g, ps) {
+function openPassEditor(g, ps, isNew = false) {
   const name = el('input');
   name.type = 'text';
   name.value = ps.name;
   name.maxLength = 32;
   name.disabled = !!ps.builtin;
   const rows = el('div', 'pass-rooms-grid');
-  const wanted = new Set(ps.rooms ?? g.rooms.map((r) => r.name));
+  const wanted = new Set(ps.rooms ?? []);
   const wantedRo = new Set(ps.ro ?? []);
   for (const r of g.rooms) {
     const row = el('label', 'pass-room-row');
     const a = el('input');
     a.type = 'checkbox';
     a.checked = wanted.has(r.name);
-    a.disabled = !!ps.builtin;
     const o = el('input');
     o.type = 'checkbox';
     o.checked = wantedRo.has(r.name);
-    o.disabled = !!ps.builtin;
     o.title = 'Read-only: holders can read, never post';
     row.append(a, el('span', 'pass-room-name', `#${r.name}`), el('span', 'pass-ro-label', 'read only'), o);
     rows.append(row);
   }
   const save = el('button', 'btn btn-accent sheet-go');
   save.type = 'button';
-  save.textContent = ps.builtin ? 'Built-in passes are fixed — this is the view' : 'Save pass';
-  save.disabled = !!ps.builtin;
-  if (!ps.builtin) {
-    save.addEventListener('click', () => {
+  save.textContent = isNew ? 'Create pass' : 'Save pass';
+  save.addEventListener('click', () => {
+    const rooms = g.rooms.filter((r, i) => [...rows.children][i].querySelector('input').checked).map((r) => r.name);
+    const ro = g.rooms.filter((r, i) => [...rows.children][i].querySelectorAll('input')[1].checked).map((r) => r.name);
+    if (ps.builtin && ps.name === 'Member') {
+      g.memberAccess = { rooms, ro }; // the built-in Member pass is editable like any other (P2 review)
+    } else if (isNew) {
+      const pname = name.value.trim();
+      if (!pname) { toast('A pass needs a name'); return; }
+      (g.passes ??= []).push({ name: pname, rooms, ro });
+    } else {
       ps.name = name.value.trim() || ps.name;
-      // rows were built in g.rooms ORDER, so positional reads are exact
-      ps.rooms = g.rooms.filter((r, i) => [...rows.children][i].querySelector('input').checked).map((r) => r.name);
-      ps.ro = g.rooms.filter((r, i) => [...rows.children][i].querySelectorAll('input')[1].checked).map((r) => r.name);
-      toast('Saving a pass rotates its rooms\u2019 keys (P4/P5) — mock updated');
-      openSettingsDrawer(g);
-    });
-  }
-  openSheet(`${ps.builtin ? 'Pass' : 'Edit pass'}: ${ps.name}`, [
+      ps.rooms = rooms;
+      ps.ro = ro;
+    }
+    toast('Saving a pass rotates its rooms\u2019 keys (P4/P5) — mock updated');
+    openSettingsDrawer(g);
+  });
+  openSheet(`${isNew ? 'New pass' : ps.builtin ? 'Member pass access' : 'Edit pass'}${ps.name ? `: ${ps.name}` : ''}`, [
     sheetField('Name', name),
     sheetField('Rooms', rows),
     save,
-    note('A room without a checkbox is INVISIBLE to holders (req 10); \u201cread only\u201d blocks posting (reqs 5/11). Access is the UNION of a holder\u2019s passes (req 21).'),
+    note('A room without a checkbox is INVISIBLE to holders (req 10); \u201cread only\u201d blocks posting (reqs 5/11). Access is the UNION of a holder\u2019s role and passes (req 21).'),
   ]);
 }
 
-function openAddPersonSheet(g, defaultPass = 'Member') {
+function openAddPersonSheet(g, defaultRole = 'Member', defaultPass = null) {
   const user = el('input');
   user.type = 'text';
   user.placeholder = 'username';
   user.maxLength = 64;
   const go = el('button', 'btn btn-accent sheet-go');
   go.type = 'button';
-  go.textContent = 'Give a pass';
-  go.addEventListener('click', () => toast('Adding a person sends them a pass CARD in chat and rotates the keys (P4/P5)'));
+  go.textContent = defaultPass ? `Give the ${defaultPass} pass` : 'Add member';
+  go.addEventListener('click', () => {
+    const ul = user.value.trim().toLowerCase();
+    if (!ul) { toast('Type a username first'); return; }
+    if (defaultPass) {
+      const m = ensureMembers(g).find((x) => x.ul === ul);
+      if (m) {
+        (m.extra ??= []).includes(defaultPass) || m.extra.push(defaultPass);
+        toast('Pass cards are delivered in chat with the API (P4/P5) — mock updated');
+        openMembersDrawer(g);
+        return;
+      }
+    }
+    toast('Adding a person sends them a pass CARD in chat and rotates the keys (P4/P5)');
+  });
   const wrap = el('div', 'sheet-vis');
   for (const ps of passesFor(g)) {
     const r = el('input');
     r.type = 'radio';
     r.name = 'pass-pick';
-    r.checked = ps.name === defaultPass; // the section's pass arrives PRESELECTED
+    r.checked = defaultPass ? ps.name === defaultPass : ps.name === (defaultRole ?? 'Member');
     const row = el('label', 'vis-row');
     row.append(r, el('span', null, `${ps.name} — ${passAccess(g, ps)}`));
     wrap.append(row);
   }
-  openSheet(`Add member — ${defaultPass} pass`, [
+  openSheet(defaultPass ? `Add member — ${defaultPass} pass` : `Add member — ${defaultRole}`, [
     sheetField('Username', user),
-    sheetField('Pass', wrap),
+    sheetField(defaultPass ? 'Pass' : 'Role', wrap),
     go,
-    note('The recipient sees ONLY what the pass grants — withheld rooms are never named (req 12).'),
+    note('The recipient sees ONLY what the grant gives — withheld rooms are never named (req 12).'),
   ]);
 }
 
 // ---------- ROOM MEMBERS (room header) ----------
-// ONLY the people whose passes reach THIS room are listed (req 10); those
-// whose pass marks the room read-only carry the marker.
+// ONLY people whose role or passes REACH this room (req 10); read-only
+// holders carry the marker. Tapping a face opens their profile.
 function openRoomMembers(g, r) {
   const ul = el('ul', 'member-list');
   let n = 0;
   for (const m of membersFor(g)) {
-    const ps = passesFor(g).find((x) => x.name === m.pass);
-    const grant = ps ? passGrants(ps, r.name) : null;
+    const grant = memberGrant(g, m, r.name);
     if (!grant) continue;
     n += 1;
     const li = el('li', 'member-row gd-member');
-    li.append(mountLine(document.createElement('span'), memberOpts(m.ul)));
+    li.append(faceBtn(g, m.ul));
     if (grant === 'ro') {
       const ro = el('span', 'member-ro', 'read only');
-      ro.title = 'Their pass reads this room but cannot post';
+      ro.title = 'Their role and passes read this room but cannot post';
       li.append(ro);
     }
     ul.append(li);
   }
-  if (!n) ul.append(el('li', 'member-row gd-empty', 'No one else\u2019s pass reaches this room yet.'));
+  if (!n) ul.append(el('li', 'member-row gd-empty', 'No one else\u2019s role or pass reaches this room yet.'));
   openSheet(`${g.name} — room members`, [
     el('p', 'gd-roomline', `#${r.name}`),
     ul,
-    note('Only people whose passes reach this room are listed (req 10). Passes are managed in the group settings.'),
+    note('Only people whose role or passes reach this room are listed (req 10). Passes are managed in settings.'),
   ]);
 }
 

@@ -83,6 +83,13 @@ surfaces group rooms reuse)
 
 ## 2. Design notes (settled as of P1)
 
+* **Role vs pass (P2 review):** a member ALWAYS holds exactly one role —
+  Owner / Admin / Member — which governs MANAGEMENT. Custom passes are
+  additive ROOM grants on top; the built-in Member pass defaults to
+  #general only and its room list is editable like any pass. A holder's
+  access to a room is the UNION of role and passes; passes can only add
+  (req 21). The members drawer shows roles; its PASSES tab shows the
+  grants; settings owns both definitions.
 * **Room = the chat unit.** All existing DM machinery (composer, drafts,
   mentions/links, media lifecycle, tabs, notices) attaches to a room;
   group-level UI is just navigation + administration.
@@ -116,7 +123,7 @@ surfaces group rooms reuse)
 | Phase | Scope | State |
 |---|---|---|
 | **P1** | Sidebar icon tabs + sliding panes + group/room list with roles, stars, hide/show, read-only locks + group ROOM chat UI (sender chips w/ trust + badges, composer, conversation tabs). Fake data (10 groups, mixed roles). FE only, no API. | ✅ **complete — awaiting review** (branch `groups-p1`) |
-| **P2** | Group management, split by review: the MEMBERS drawer lists PASSES as sections with their holders under each key set, every section headed by its own ADD MEMBER button (the pass arrives preselected), topped by the group details (description + visibility); SETTINGS (the gear) owns PASSES & PERMISSIONS (visibility radios, pass-type list, room-access editor); the ROOM header's members sheet lists ONLY the people whose passes reach that room, READ-ONLY holders marked (req 10). Create defaults to PRIVATE. FE only, mock-local changes, API steps toast. | 🔄 in review |
+| **P2** | Group management, split by review: the MEMBERS drawer has TWO TABS — MEMBERS (the three ROLES Owner/Admin/Member as sections; every member is always one of them; admin rows get MAKE OWNER + DELETE, member rows MAKE ADMIN + REMOVE, owner rows inert) and PASSES (custom passes as sections with their holders and a REMOVE-PASS tool — passes are additive grants, taking one back never touches the role). Every section heads its own ADD MEMBER button with the role/pass preselected. SETTINGS (gear) owns ABOUT (editable), PERMISSIONS (visibility) and PASS TYPES — including NEW PASS creation and a room-access/read-only EDITOR that also governs the built-in Member pass (default: #general only). Tapping any member face (group or room list) opens their profile (mock until P5). Room-members sheets list ONLY those whose role ∪ passes reach the room, READ-ONLY marked (reqs 10/21). Create defaults to PRIVATE. FE only, mock-local changes, API steps toast. | 🔄 in review |
 | **P3** | Admin panel UI example: Groups page (paginated list + members), user-panel groups section, pass create/distribute flow — mock data. | ⬜ |
 | **P4** | Backend: collections (groups, rooms, passes, memberships, group key material), wire protocol (rooms fan-out, key rotation, ack-aware media lifecycle), pass cards as sys messages, BLOCKED-MEMBER DELIVERY (delivered, client renders red italic), admin APIs, unit + integration tests. | ⬜ |
 | **P5** | Client: replace the mock with real data — group list from the server, room chats through the SDK, key rotation, forwarding to rooms, member-aware media pruning. | ⬜ |
