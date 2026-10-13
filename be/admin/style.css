@@ -661,3 +661,11 @@ table.mini td { padding: .3rem .5rem .3rem 0; border-bottom: 1px solid rgba(127,
 /* staff-frozen room (P3): a cold badge, the name kept — the freeze is the
    state, the room stays a room */
 .frozen-badge { background: rgba(127, 190, 255, .16); color: #9fd0ff; }
+
+/* a frozen GROUP (not a room): the banner inside the expanded row */
+.grp-frozen-note {
+  margin: 0 0 .6rem; padding: .45rem .7rem; font-size: .82rem;
+  background: rgba(127, 190, 255, .10); border: 1px solid rgba(127, 190, 255, .35);
+  border-radius: 8px; color: #bfe0ff;
+}
+.grp-row.frozen-group > td { background: rgba(127, 190, 255, .05); }

@@ -114,10 +114,12 @@ surfaces group rooms reuse)
   the E2EE channel from the giver): `{pass:'adult', rooms:[names the
   recipient GETS]}` — never the withheld room names (req 12).
 * **STAFF SCOPE (P3 review):** platform staff NEVER join a group, create a
-  pass, or hand one out — those are the group's own owner/admin powers inside
-  the app. Staff SEE groups (list, members, pass types), RENAME them (req 3)
-  and FREEZE rooms: a frozen room keeps its name, history and visibility, but
-  the server accepts no new messages in it and blocks joins and leaves until
+  pass, hand one out, or add/remove members — the entire human side of a
+  group belongs to its own owners and admins inside the app. Staff SEE groups
+  (list, members, pass types), RENAME them (req 3)
+  and FREEZE WHOLE GROUPS — never a single room (P3 review): a frozen group
+  keeps every room's name, members, history and visibility, but the server
+  accepts no new messages in ANY room and blocks joins and leaves until
   unfrozen (enforcement in P4). Staff hold no decryption path at all.
 * **EVERY ROOM IS E2EE — including from staff.** A room's messages are
   encrypted to the entitled audience only: the sender encrypts one copy per
@@ -146,8 +148,8 @@ surfaces group rooms reuse)
 |---|---|---|
 | **P1** | Sidebar icon tabs + sliding panes + group/room list with roles, stars, hide/show, read-only locks + group ROOM chat UI (sender chips w/ trust + badges, composer, conversation tabs). Fake data (10 groups, mixed roles). FE only, no API. | ✅ merged (`acf4a59`) |
 | **P2** | Group management, split by review: the MEMBERS drawer has TWO TABS — MEMBERS (the three ROLES Owner/Admin/Member as sections; every member is always one of them; admin rows get MAKE OWNER + DELETE, member rows MAKE ADMIN + REMOVE, owner rows inert) and PASSES (custom passes as sections with their holders and a REMOVE-PASS tool — passes are additive grants, taking one back never touches the role). Only the MEMBER section (and the pass sections, which also admit with the pass attached) offer ADD MEMBER: **everyone joins as a Member** — Admin/Owner are reached by promoting someone already in, never at the door. SETTINGS (gear) owns ABOUT (editable), PERMISSIONS (visibility) and PASS TYPES — including NEW PASS creation and a room-access/read-only EDITOR that also governs the built-in Member pass (default: #general only). Tapping any member face (group or room list) opens their profile (mock until P5). EVERY elevation and removal asks first (the app's confirm modal — removal spells out that ALL passes go with the member), and an owner with a fellow owner gets a RELINQUISH OWNERSHIP button (confirmed; drops them to Member) — the sole owner instead sees a lock explaining transfer-only. Room-members sheets list ONLY those whose role ∪ passes reach the room, READ-ONLY marked (reqs 10/21). Create defaults to PRIVATE. FE only, mock-local changes, API steps toast. | ✅ merged (`acf4a59`) |
-| **P3** | Admin panel UI example: Groups page (paginated, searchable, expandable rows: ROOMS with staff FREEZE/UNFREEZE ❄, members with role badges + passes, pass types with built-in tags), user-panel GROUPS tab (jumps to the group), staff rename. NO staff pass desk, no staff joins (P3 review): passes belong to the group's own admins; staff see, rename, freeze — and never read (rooms are E2EE). Mock data only — P6 wires it. | 🔄 in review |
-| **P4** | Backend: collections (groups, rooms, passes, memberships, per-room E2EE key material), wire protocol (per-device room fan-out, key rotation, ack-aware media lifecycle), pass cards as sys messages, BLOCKED-MEMBER DELIVERY (delivered, client renders red italic), staff ROOM FREEZE enforcement (no sends / joins / leaves while frozen), admin APIs, unit + integration tests. | ⬜ |
+| **P3** | Admin panel UI example: Groups page (paginated, searchable, expandable rows: whole-group FREEZE/UNFREEZE ❄ (never per-room), members with role badges + passes, pass types with built-in tags), user-panel GROUPS tab (jumps to the group), staff rename. NO staff pass desk, no staff joins (P3 review): passes belong to the group's own admins; staff see, rename, freeze — and never read (rooms are E2EE). Mock data only — P6 wires it. | 🔄 in review |
+| **P4** | Backend: collections (groups, rooms, passes, memberships, per-room E2EE key material), wire protocol (per-device room fan-out, key rotation, ack-aware media lifecycle), pass cards as sys messages, BLOCKED-MEMBER DELIVERY (delivered, client renders red italic), staff GROUP FREEZE enforcement (no sends / joins / leaves in any room while frozen), admin APIs, unit + integration tests. | ⬜ |
 | **P5** | Client: replace the mock with real data — group list from the server, room chats through the SDK, key rotation, forwarding to rooms, member-aware media pruning. | ⬜ |
 | **P6** | Admin app wired to the real APIs. | ⬜ |
 

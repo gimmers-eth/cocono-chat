@@ -1408,7 +1408,7 @@ const MOCK_GROUPS = [
       { ul: 'friendly-4', role: 'Member', passes: ['Student'] },
     ] },
   { id: 'g-5', name: 'Chess Club', vis: 'searchable', created: '2026-02-11',
-    rooms: ['general', 'tournament'], frozen: ['tournament'],
+    rooms: ['general', 'tournament'], frozen: true,
     passes: [{ name: 'Player', rooms: ['general', 'tournament'], ro: [] }],
     members: [
       { ul: 'normal-7', role: 'Owner', passes: ['Player'] },
@@ -1461,13 +1461,14 @@ function renderGroups() {
     const expanded = openGroupId === g.id;
     return `<tr class="grp-row${expanded ? ' open' : ''}" data-grp="${esc(g.id)}">
       <td><button class="linkish grp-toggle" data-grp="${esc(g.id)}" aria-expanded="${expanded}">${expanded ? '▾' : '▸'}</button>
-        <strong>${esc(g.name)}</strong> <span class="dim mono">${esc(g.id)}</span></td>
+        <strong>${esc(g.name)}</strong>${g.frozen ? ' <span class="badge frozen-badge">❄ frozen</span>' : ''} <span class="dim mono">${esc(g.id)}</span></td>
       <td><button class="linkish" data-view-user="${esc(owner)}">@${esc(owner)}</button></td>
       <td>${g.members.length}</td>
-      <td class="dim">${g.rooms.map((r) => `#${esc(r)}${g.frozen?.includes(r) ? ' ❄' : ''}`).join(' ')}</td>
+      <td class="dim">${g.rooms.map((r) => `#${esc(r)}`).join(' ')}</td>
       <td>${esc(VIS_ADMIN[g.vis] ?? g.vis)}</td>
       <td class="dim">${esc(g.created)}</td>
-      <td><button class="tiny" data-grp-manage="${esc(g.id)}">rename (staff)</button></td>
+      <td><button class="tiny" data-grp-manage="${esc(g.id)}">rename (staff)</button>
+        <button class="tiny" data-grp-freeze="${esc(g.id)}">${g.frozen ? 'unfreeze' : 'freeze'}</button></td>
     </tr>
     ${expanded ? `<tr class="grp-detail"><td colspan="7">${groupDetail(g)}</td></tr>` : ''}`;
   }).join('');
@@ -1480,31 +1481,19 @@ function groupDetail(g) {
   return `
     <div class="grp-cols">
       <div>
-        <h4>Rooms</h4>
+        ${g.frozen ? `<p class="grp-frozen-note">❄ This entire group is frozen — every room (${g.rooms.map((r) => '#' + esc(r)).join(', ')})
+          keeps its name and history but accepts no new messages, joins or leaves.</p>` : ''}
+        <h4>Members — role + passes</h4>
         <table class="mini">
-          <thead><tr><th>Room</th><th>State</th><th></th></tr></thead>
-          <tbody>${g.rooms.map((r) => {
-    const frozen = (g.frozen ?? []).includes(r);
-    return `<tr>
-              <td>#${esc(r)}</td>
-              <td>${frozen ? '<span class="badge frozen-badge">❄ frozen</span>' : '<span class="dim">active</span>'}</td>
-              <td><button class="tiny" data-grp-freeze="${esc(g.id)}:${esc(r)}">${frozen ? 'unfreeze' : 'freeze'}</button></td>
-            </tr>`;
-  }).join('')}</tbody>
-        </table>
-        <p class="dim small-note">FREEZE keeps the room and its history visible but stops new messages,
-          joins and leaves — the staff brake for a room that turned (P3 mock; the server enforces it in P4).</p>
-        <h4 style="margin-top:.9rem">Members — role + passes</h4>
-        <table class="mini">
-          <thead><tr><th>User</th><th>Role</th><th>Passes</th><th></th></tr></thead>
+          <thead><tr><th>User</th><th>Role</th><th>Passes</th></tr></thead>
           <tbody>${g.members.map((m) => `<tr>
             <td><button class="linkish" data-view-user="${esc(m.ul)}">@${esc(m.ul)}</button></td>
             <td>${roleBadge(m.role)}</td>
             <td class="dim">${m.passes.length ? m.passes.map((x) => esc(x)).join(', ') : '—'}</td>
-            <td>${m.role === 'Owner' ? '<span class="dim small-note">protected</span>'
-              : `<button class="tiny" data-grp-remove="${esc(g.id)}:${esc(m.ul)}">remove</button>`}</td>
           </tr>`).join('')}</tbody>
         </table>
+        <p class="dim small-note">Membership is the group's own business — owners and admins add and
+          remove people in the app. Staff see the roster; they never edit it.</p>
       </div>
       <div>
         <h4>Pass types</h4>
@@ -1554,26 +1543,16 @@ document.addEventListener('click', (e) => {
   }
   const fz = e.target.closest?.('[data-grp-freeze]');
   if (fz) {
-    const [gid, room] = fz.dataset.grpFreeze.split(':');
-    const g = MOCK_GROUPS.find((x) => x.id === gid);
-    const frozen = (g.frozen ??= []);
-    const on = frozen.includes(room);
+    const g = MOCK_GROUPS.find((x) => x.id === fz.dataset.grpFreeze);
+    const on = !!g.frozen;
+    // WHOLE GROUPS freeze, never single rooms (P3 review): the staff brake
+    // is the group's name + history staying visible while ALL rooms go quiet
     const ok = window.confirm?.(on
-      ? `Unfreeze #${room} in ${g.name}?\n\nPosting, joins and leaves resume.`
-      : `Freeze #${room} in ${g.name}?\n\nThe room and its history stay VISIBLE, but no new messages can be sent and no one can join or leave. Owners keep seeing everything.`);
+      ? `Unfreeze ${g.name}?\n\nPosting, joins and leaves resume in every room.`
+      : `Freeze ${g.name}?\n\nThe group and every room keep their names, members and history — visible to those entitled — but NO new messages can be sent anywhere and no one can join or leave. Owners keep seeing everything.`);
     if (!ok) return;
-    if (on) g.frozen = frozen.filter((x) => x !== room);
-    else frozen.push(room);
-    setStatus(`#${room} ${on ? 'unfrozen' : 'frozen'} in ${g.name} (mock — the freeze is enforced server-side in P4)`, 'ok');
-    renderGroups();
-    return;
-  }
-  const rem = e.target.closest?.('[data-grp-remove]');
-  if (rem) {
-    const [gid, ul] = rem.dataset.grpRemove.split(':');
-    const g = MOCK_GROUPS.find((x) => x.id === gid);
-    g.members = g.members.filter((m) => m.ul !== ul);
-    setStatus(`@${ul} removed from ${g.name} with ALL their passes (mock — keys rotate in P6)`, 'ok');
+    g.frozen = !on;
+    setStatus(`${g.name} ${on ? 'unfrozen' : 'frozen'} (mock — the freeze is enforced server-side in P4)`, 'ok');
     renderGroups();
     return;
   }
