@@ -10,8 +10,8 @@
     "test": "LOG_LEVEL=silent node --env-file-if-exists=.env.test --test --test-concurrency=1 'test/*.test.js'"
   },
   "dependencies": {
-    "@fastify/static": "^10.1.3",
-    "@fastify/websocket": "^11.3.0",
+    "@fastify/static": "^10.1.6",
+    "@fastify/websocket": "^11.3.4",
     "fastify": "^5.0.0",
     "mongodb": "^7.7.0",
     "redis": "^6.3.0",
